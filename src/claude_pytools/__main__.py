@@ -1,0 +1,62 @@
+import argparse
+import json
+import os
+import pathlib
+import sys
+
+
+def _install(settings_path: pathlib.Path, command: str) -> None:
+    settings = {}
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            print(f"WARNING: Could not parse {settings_path}, creating fresh config.", file=sys.stderr)
+
+    settings.setdefault("mcpServers", {})["pytools"] = {
+        "type": "stdio",
+        "command": command,
+        "args": ["-m", "claude_pytools"],
+    }
+
+    allow = settings.setdefault("permissions", {}).setdefault("allow", [])
+    if "mcp__pytools__*" not in allow:
+        allow.append("mcp__pytools__*")
+
+    tmp = settings_path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(settings, indent=2) + "\n")
+    os.replace(tmp, settings_path)
+
+    print(f"Installed. Added 'pytools' MCP server to {settings_path}")
+    print("Restart Claude Code to load the pytools MCP server.")
+    print()
+    print("Available tools: pyfindrefs, pycallers, pyfindunused, pymove, pymovesymbol, pyrename, pysignature")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="claude-pytools: AST-based Python refactoring tools for Claude Code",
+    )
+    parser.add_argument(
+        "--install",
+        action="store_true",
+        help="Add pytools MCP server to ~/.claude/settings.json and exit",
+    )
+    parser.add_argument(
+        "--settings",
+        default=str(pathlib.Path.home() / ".claude" / "settings.json"),
+        help="Path to Claude Code settings.json (default: ~/.claude/settings.json)",
+    )
+
+    args = parser.parse_args()
+
+    if args.install:
+        _install(pathlib.Path(args.settings), sys.executable)
+        return
+
+    from .server import mcp
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()

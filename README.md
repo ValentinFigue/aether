@@ -3,6 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/bonsai)](https://pypi.org/project/bonsai/)
 [![Python 3.10+](https://img.shields.io/pypi/pyversions/bonsai)](https://pypi.org/project/bonsai/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/ValentinFigue/bonsai/actions/workflows/ci.yml/badge.svg)](https://github.com/ValentinFigue/bonsai/actions/workflows/ci.yml)
 
 AST-based Python refactoring tools for Claude Code. Find symbol references, detect dead code, rename identifiers, move files and symbols, and update function signatures — driven by static analysis, with no language server or type-checking daemon required.
 

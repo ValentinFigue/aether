@@ -3,6 +3,7 @@
 import argparse
 import ast
 import json
+import logging
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -17,6 +18,8 @@ from ._common import (
     python_roots,
     resolve_relative_import,
 )
+
+logger = logging.getLogger(__name__)
 
 _REF_PRIORITY = {
     "definition": 0,
@@ -268,7 +271,7 @@ def find_refs(target: str, project_root: Path) -> list[Ref]:
         Exits with code 1 if *target* is malformed.
     """
     if ":" not in target:
-        print(f"Error: expected module:symbol or module:Class.method, got '{target}'", file=sys.stderr)
+        logger.error("expected module:symbol or module:Class.method, got %r", target)
         sys.exit(1)
 
     module_name, _, sym = target.rpartition(":")
@@ -332,6 +335,7 @@ def print_refs(refs: list[Ref]) -> None:
 
 def main() -> None:
     """CLI entry point: parse arguments and invoke :func:`find_refs`."""
+    logging.basicConfig(format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(description="Find all references to a Python symbol.")
     parser.add_argument("target", help="module:Symbol or module:Class.method")
     parser.add_argument("--project-root", help="Project root directory")

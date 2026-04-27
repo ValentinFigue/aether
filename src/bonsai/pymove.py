@@ -6,12 +6,15 @@ across the project so nothing breaks.
 
 import argparse
 import ast
+import logging
 import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from ._common import collect_python_files, find_project_root, path_to_module, resolve_relative_import
+
+logger = logging.getLogger(__name__)
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
@@ -379,7 +382,7 @@ def plan_move(
         try:
             rel = new_module_path.resolve().relative_to(root)
         except ValueError:
-            print(f"ERROR: Destination {dst} is outside project root {root}", file=sys.stderr)
+            logger.error("destination %s is outside project root %s", dst, root)
             return []
         parts = list(rel.parts)
         if parts[-1].endswith(".py"):
@@ -390,11 +393,11 @@ def plan_move(
         new_package = None
 
     if not old_module:
-        print(f"ERROR: Could not determine module path for {src}", file=sys.stderr)
+        logger.error("could not determine module path for %s", src)
         return []
 
     if not new_module:
-        print(f"ERROR: Could not determine module path for {dst}", file=sys.stderr)
+        logger.error("could not determine module path for %s", dst)
         return []
 
     py_files = collect_python_files(root)
@@ -476,13 +479,13 @@ def execute_move(
 
     old_module = path_to_module(src, root)
     if not old_module:
-        print("ERROR: Cannot determine module path for source.", file=sys.stderr)
+        logger.error("cannot determine module path for source")
         return False
 
     try:
         rel = actual_dst.relative_to(root)
     except ValueError:
-        print("ERROR: Destination is outside project root.", file=sys.stderr)
+        logger.error("destination is outside project root")
         return False
     parts = list(rel.parts)
     if parts[-1].endswith(".py"):
@@ -557,11 +560,12 @@ def main() -> None:
     parser.add_argument("--project-root", "-r", help="Project root (auto-detected if omitted)")
     parser.add_argument("--dry-run", "-n", action="store_true", help="Show what would change without modifying files")
 
+    logging.basicConfig(format="%(levelname)s: %(message)s")
     args = parser.parse_args()
 
     src = Path(args.source)
     if not src.exists():
-        print(f"ERROR: Source {src} does not exist.", file=sys.stderr)
+        logger.error("source %s does not exist", src)
         sys.exit(1)
 
     success = execute_move(

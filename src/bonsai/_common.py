@@ -1,9 +1,13 @@
 """Shared utilities, data structures, and helpers for bonsai refactoring tools."""
 
 import ast
+import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 try:
     import tomllib
@@ -231,10 +235,8 @@ def parse_symbol_ref(ref: str) -> tuple[str, str, str | None]:
     Raises:
         SystemExit: If *ref* does not contain a ``:``.
     """
-    import sys
-
     if ":" not in ref:
-        print(f"ERROR: Symbol reference must be 'module:symbol' (got '{ref}')", file=sys.stderr)
+        logger.error("symbol reference must be 'module:symbol' (got %r)", ref)
         sys.exit(1)
     module, symbol_path = ref.split(":", 1)
     parts = symbol_path.split(".", 1)

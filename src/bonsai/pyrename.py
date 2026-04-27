@@ -7,6 +7,7 @@ to share the name — only the symbol at the specified module path.
 
 import argparse
 import ast
+import logging
 import re
 import sys
 from dataclasses import dataclass
@@ -24,6 +25,8 @@ from ._common import (
     parse_symbol_ref,
     resolve_relative_import,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -380,7 +383,7 @@ def do_rename(target_ref: str, new_name: str, root: Path, dry_run: bool) -> bool
 
     def_path = find_module_path(module_name, root)
     if def_path is None or not def_path.exists():
-        print(f"ERROR: Cannot find module '{module_name}' under {root}", file=sys.stderr)
+        logger.error("cannot find module %r under %s", module_name, root)
         return False
 
     all_changes: list[FileChanges] = []
@@ -464,6 +467,7 @@ def do_rename(target_ref: str, new_name: str, root: Path, dry_run: bool) -> bool
 
 def main() -> None:
     """CLI entry point: parse arguments and invoke :func:`do_rename`."""
+    logging.basicConfig(format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(
         description="Scope-aware Python symbol renamer.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

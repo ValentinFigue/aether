@@ -7,6 +7,7 @@ defaults. All call sites across the project are rewritten automatically.
 import argparse
 import ast
 import io
+import logging
 import sys
 import tokenize
 from dataclasses import dataclass
@@ -24,6 +25,8 @@ from ._common import (
     parse_symbol_ref,
     resolve_relative_import,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -523,17 +526,17 @@ def do_signature(
 
     def_path = find_module_path(module_name, root)
     if def_path is None or not def_path.exists():
-        print(f"ERROR: Cannot find module '{module_name}'", file=sys.stderr)
+        logger.error("cannot find module %r", module_name)
         return False
 
     def_tree = parse_file(def_path)
     if def_tree is None:
-        print(f"ERROR: Cannot parse {def_path}", file=sys.stderr)
+        logger.error("cannot parse %s", def_path)
         return False
 
     func_node = find_func_in_tree(def_tree, actual_func, symbol_name if method_name else None)
     if func_node is None:
-        print(f"ERROR: Cannot find '{actual_func}' in {def_path}", file=sys.stderr)
+        logger.error("cannot find %r in %s", actual_func, def_path)
         return False
 
     old_params = extract_params(func_node)
@@ -552,12 +555,12 @@ def do_signature(
     def_line = def_lines[start_l]
     paren_col = def_line.find("(", func_node.col_offset)
     if paren_col == -1:
-        print("ERROR: Cannot find opening paren in function def", file=sys.stderr)
+        logger.error("cannot find opening paren in function definition")
         return False
 
     paren_result = find_matching_paren(def_lines, start_l, paren_col)
     if paren_result is None:
-        print("ERROR: Cannot find closing paren in function def", file=sys.stderr)
+        logger.error("cannot find closing paren in function definition")
         return False
     close_l, close_c = paren_result
 
@@ -636,6 +639,7 @@ def do_signature(
 
 def main() -> None:
     """CLI entry point: parse arguments and invoke :func:`do_signature`."""
+    logging.basicConfig(format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(
         description="Change a Python function signature and update all call sites.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

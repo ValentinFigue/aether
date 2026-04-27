@@ -2,9 +2,12 @@
 
 import argparse
 import json
+import logging
 import os
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _install(settings_path: Path, command: str) -> None:
@@ -22,7 +25,7 @@ def _install(settings_path: Path, command: str) -> None:
         try:
             settings = json.loads(settings_path.read_text())
         except json.JSONDecodeError:
-            print(f"WARNING: Could not parse {settings_path}, creating fresh config.", file=sys.stderr)
+            logger.warning("could not parse %s, creating fresh config.", settings_path)
 
     settings.setdefault("mcpServers", {})["bonsai"] = {
         "type": "stdio",
@@ -46,6 +49,7 @@ def _install(settings_path: Path, command: str) -> None:
 
 def main() -> None:
     """Parse CLI arguments and either install the MCP server or start it."""
+    logging.basicConfig(format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(
         description="bonsai: AST-based Python refactoring tools for Claude Code",
     )

@@ -7,6 +7,7 @@ references across the project to point to the new location.
 
 import argparse
 import ast
+import logging
 import sys
 from pathlib import Path
 
@@ -21,6 +22,8 @@ from ._common import (
     parse_file,
     resolve_relative_import,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def module_to_new_path(module: str, root: Path) -> Path:
@@ -44,11 +47,11 @@ def parse_symbol_ref(ref: str) -> tuple[str, str]:
         A ``(module_name, symbol_name)`` tuple.
     """
     if ":" not in ref:
-        print(f"ERROR: Symbol reference must be 'module:symbol' (got '{ref}')", file=sys.stderr)
+        logger.error("symbol reference must be 'module:symbol' (got %r)", ref)
         sys.exit(1)
     module, symbol = ref.split(":", 1)
     if "." in symbol:
-        print("ERROR: Cannot move individual methods. Move the whole class instead.", file=sys.stderr)
+        logger.error("cannot move individual methods — move the whole class instead")
         sys.exit(1)
     return module, symbol
 
@@ -129,7 +132,7 @@ def do_move_symbol(
 
     src_path = find_module_path(module_name, root)
     if src_path is None or not src_path.exists():
-        print(f"ERROR: Cannot find source module '{module_name}'", file=sys.stderr)
+        logger.error("cannot find source module %r", module_name)
         return False
 
     dst_path = find_module_path(dest_module, root)
@@ -140,12 +143,12 @@ def do_move_symbol(
     # dst_path is always non-None here: module_to_path returning None triggered
     # create_dst, which assigns module_to_new_path (always returns a Path).
     if dst_path is None:
-        print(f"ERROR: Cannot determine destination path for '{dest_module}'", file=sys.stderr)
+        logger.error("cannot determine destination path for %r", dest_module)
         return False
 
     extraction = extract_symbol(src_path, symbol_name)
     if extraction is None:
-        print(f"ERROR: Cannot find '{symbol_name}' in {src_path}", file=sys.stderr)
+        logger.error("cannot find %r in %s", symbol_name, src_path)
         return False
 
     symbol_source, sym_start, sym_end = extraction
@@ -308,6 +311,7 @@ def do_move_symbol(
 
 def main() -> None:
     """CLI entry point: parse arguments and invoke :func:`do_move_symbol`."""
+    logging.basicConfig(format="%(levelname)s: %(message)s")
     parser = argparse.ArgumentParser(
         description="Move a Python function or class to a different module.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

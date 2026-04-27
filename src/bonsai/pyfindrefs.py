@@ -336,10 +336,14 @@ def print_refs(refs: list[Ref]) -> None:
 def main() -> None:
     """CLI entry point: parse arguments and invoke :func:`find_refs`."""
     logging.basicConfig(format="%(levelname)s: %(message)s")
-    parser = argparse.ArgumentParser(description="Find all references to a Python symbol.")
-    parser.add_argument("target", help="module:Symbol or module:Class.method")
-    parser.add_argument("--project-root", help="Project root directory")
-    parser.add_argument("--json", action="store_true", help="Output as JSON array")
+    parser = argparse.ArgumentParser(
+        description="Find all references to a Python symbol.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument("target", metavar="MODULE:SYMBOL", help="module:Symbol or module:Class.method")
+    parser.add_argument("--project-root", "-r", help="Project root (auto-detected if omitted)")
+    parser.add_argument("--json", action="store_true", help="Output results as JSON")
     args = parser.parse_args()
 
     root = Path(args.project_root) if args.project_root else find_project_root(Path.cwd())
@@ -350,6 +354,7 @@ def main() -> None:
         print(json.dumps([asdict(r) for r in refs], indent=2))
     else:
         print_refs(refs)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ Three detectors:
 import argparse
 import ast
 import json
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -425,10 +426,15 @@ def print_results(results: list[UnusedResult], header: str) -> None:
 
 def main() -> None:
     """CLI entry point: parse arguments and invoke the selected detectors."""
-    parser = argparse.ArgumentParser(description="Find unused Python symbols.")
+    parser = argparse.ArgumentParser(
+        description="Find unused Python symbols.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
     parser.add_argument(
         "path",
         nargs="?",
+        metavar="PATH",
         help="Limit to a specific file or directory",
     )
     parser.add_argument(
@@ -446,8 +452,8 @@ def main() -> None:
         action="store_true",
         help="Find unused imports within files",
     )
-    parser.add_argument("--project-root", help="Project root directory")
-    parser.add_argument("--json", action="store_true", help="JSON output")
+    parser.add_argument("--project-root", "-r", help="Project root (auto-detected if omitted)")
+    parser.add_argument("--json", action="store_true", help="Output results as JSON")
     args = parser.parse_args()
 
     any_flag = args.dead_code or args.params or args.imports
@@ -474,7 +480,7 @@ def main() -> None:
 
     if args.json:
         print(json.dumps([asdict(r) for r in results], indent=2))
-        return
+        sys.exit(0)
 
     dead = [r for r in results if r.kind == "dead_code"]
     params = [r for r in results if r.kind == "unused_param"]
@@ -489,6 +495,7 @@ def main() -> None:
 
     total = len(results)
     print(f"\n{total} issue{'s' if total != 1 else ''} found.")
+    sys.exit(0)
 
 
 if __name__ == "__main__":

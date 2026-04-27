@@ -317,8 +317,8 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("target", help="module:Symbol (e.g. src.utils:format_date)")
-    parser.add_argument("dest_module", help="Destination module (e.g. src.utils.dates)")
+    parser.add_argument("target", metavar="MODULE:SYMBOL", help="module:Symbol (e.g. src.utils:format_date)")
+    parser.add_argument("dest_module", metavar="MODULE", help="Destination module (e.g. src.utils.dates)")
     parser.add_argument("--project-root", "-r", help="Project root (auto-detected if omitted)")
     parser.add_argument("--dry-run", "-n", action="store_true", help="Preview changes without modifying files")
 

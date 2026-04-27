@@ -43,7 +43,14 @@ Repository = "https://github.com/valentinfigue/bonsai"
 Issues = "https://github.com/valentinfigue/bonsai/issues"
 
 [project.scripts]
-bonsai = "bonsai.__main__:main"
+bonsai       = "bonsai.__main__:main"
+pyfindrefs   = "bonsai.pyfindrefs:main"
+pycallers    = "bonsai.pycallers:main"
+pyfindunused = "bonsai.pyfindunused:main"
+pymove       = "bonsai.pymove:main"
+pymovesymbol = "bonsai.pymovesymbol:main"
+pyrename     = "bonsai.pyrename:main"
+pysignature  = "bonsai.pysignature:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bonsai"]

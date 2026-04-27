@@ -645,7 +645,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("target", help="module:function or module:Class.method")
+    parser.add_argument("target", metavar="MODULE:FUNC", help="module:function or module:Class.method")
     parser.add_argument(
         "--add",
         metavar="NAME",
@@ -680,7 +680,7 @@ def main() -> None:
         help="Change a parameter default: NAME VALUE [TYPE]",
     )
     parser.add_argument("--project-root", "-r", help="Project root (auto-detected if omitted)")
-    parser.add_argument("--dry-run", "-n", action="store_true")
+    parser.add_argument("--dry-run", "-n", action="store_true", help="Preview changes without modifying files")
 
     args = parser.parse_args()
 

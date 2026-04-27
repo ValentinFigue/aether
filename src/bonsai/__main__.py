@@ -1,6 +1,7 @@
 """CLI entry point for bonsai: installs the MCP server or runs it directly."""
 
 import argparse
+import importlib.metadata
 import json
 import logging
 import os
@@ -54,11 +55,17 @@ def main() -> None:
         description="bonsai: AST-based Python refactoring tools for Claude Code",
     )
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {importlib.metadata.version('bonsai')}",
+    )
+    install_group = parser.add_argument_group("installation")
+    install_group.add_argument(
         "--install",
         action="store_true",
         help="Add bonsai MCP server to ~/.claude/settings.json and exit",
     )
-    parser.add_argument(
+    install_group.add_argument(
         "--settings",
         default=str(Path.home() / ".claude" / "settings.json"),
         help="Path to Claude Code settings.json (default: ~/.claude/settings.json)",

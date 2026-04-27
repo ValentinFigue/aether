@@ -555,8 +555,8 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("source", help="Python file or package to move")
-    parser.add_argument("destination", help="New location (file path or directory)")
+    parser.add_argument("source", metavar="SOURCE", help="Python file or package to move")
+    parser.add_argument("destination", metavar="DEST", help="New location (file path or directory)")
     parser.add_argument("--project-root", "-r", help="Project root (auto-detected if omitted)")
     parser.add_argument("--dry-run", "-n", action="store_true", help="Show what would change without modifying files")
 

@@ -473,8 +473,8 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("target", help="module:Symbol or module:Class.method")
-    parser.add_argument("new_name", help="New name for the symbol")
+    parser.add_argument("target", metavar="MODULE:SYMBOL", help="module:Symbol or module:Class.method")
+    parser.add_argument("new_name", metavar="NEW_NAME", help="New name for the symbol")
     parser.add_argument("--project-root", "-r", help="Project root (auto-detected if omitted)")
     parser.add_argument("--dry-run", "-n", action="store_true", help="Preview changes without modifying files")
 

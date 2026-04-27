@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "bonsai": {
+      "command": "uvx",
+      "args": ["bonsai"]
+    }
+  }
+}

@@ -309,9 +309,7 @@ def python_roots(root: Path) -> list[Path]:
             if not (child / "__init__.py").exists():
                 try:
                     has_package = any(
-                        (grandchild / "__init__.py").exists()
-                        for grandchild in child.iterdir()
-                        if grandchild.is_dir()
+                        (grandchild / "__init__.py").exists() for grandchild in child.iterdir() if grandchild.is_dir()
                     )
                 except OSError:
                     has_package = False

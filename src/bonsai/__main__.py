@@ -11,38 +11,53 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def _install(settings_path: Path, command: str) -> None:
-    """Register bonsai as an MCP server in *settings_path*.
+def _install(command: str, settings_path: Path) -> None:
+    """Register bonsai as an MCP server in Claude Code.
 
-    Creates the file if it doesn't exist. Writes atomically via a temporary
-    file so a crash mid-write cannot corrupt the settings.
+    Writes the MCP server entry to ``~/.claude.json`` (user-scoped) and the
+    permission allowlist entry to ``settings_path`` (``~/.claude/settings.json``).
+    Both files are written atomically via a temporary file.
 
     Args:
-        settings_path: Path to the Claude Code ``settings.json`` file.
         command: Python executable path to use as the MCP server command.
+        settings_path: Path to ``~/.claude/settings.json`` for the permission entry.
     """
-    settings = {}
+    claude_json_path = Path.home() / ".claude.json"
+
+    # Write mcpServers entry to ~/.claude.json
+    claude_json: dict = {}
+    if claude_json_path.exists():
+        try:
+            claude_json = json.loads(claude_json_path.read_text())
+        except json.JSONDecodeError:
+            logger.warning("could not parse %s, preserving existing content.", claude_json_path)
+
+    claude_json.setdefault("mcpServers", {})["bonsai"] = {
+        "type": "stdio",
+        "command": command,
+        "args": ["-m", "bonsai"],
+    }
+
+    tmp = claude_json_path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(claude_json, indent=2) + "\n")
+    os.replace(tmp, claude_json_path)
+
+    # Write mcp__bonsai__* permission to ~/.claude/settings.json
+    settings: dict = {}
     if settings_path.exists():
         try:
             settings = json.loads(settings_path.read_text())
         except json.JSONDecodeError:
             logger.warning("could not parse %s, creating fresh config.", settings_path)
 
-    settings.setdefault("mcpServers", {})["bonsai"] = {
-        "type": "stdio",
-        "command": command,
-        "args": ["-m", "bonsai"],
-    }
-
     allow = settings.setdefault("permissions", {}).setdefault("allow", [])
     if "mcp__bonsai__*" not in allow:
         allow.append("mcp__bonsai__*")
+        tmp = settings_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(settings, indent=2) + "\n")
+        os.replace(tmp, settings_path)
 
-    tmp = settings_path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(settings, indent=2) + "\n")
-    os.replace(tmp, settings_path)
-
-    print(f"Installed. Added 'bonsai' MCP server to {settings_path}")
+    print(f"Installed. Added 'bonsai' MCP server to {claude_json_path}")
     print("Restart Claude Code to load the bonsai MCP server.")
     print()
     print("Available tools: pyfindrefs, pycallers, pyfindunused, pymove, pymovesymbol, pyrename, pysignature")
@@ -63,18 +78,18 @@ def main() -> None:
     install_group.add_argument(
         "--install",
         action="store_true",
-        help="Add bonsai MCP server to ~/.claude/settings.json and exit",
+        help="Add bonsai MCP server to ~/.claude.json and exit",
     )
     install_group.add_argument(
         "--settings",
         default=str(Path.home() / ".claude" / "settings.json"),
-        help="Path to Claude Code settings.json (default: ~/.claude/settings.json)",
+        help="Path to Claude Code settings.json for permissions (default: ~/.claude/settings.json)",
     )
 
     args = parser.parse_args()
 
     if args.install:
-        _install(Path(args.settings), sys.executable)
+        _install(sys.executable, Path(args.settings))
         return
 
     # Deferred import: avoids loading the full MCP server stack when --install is used.

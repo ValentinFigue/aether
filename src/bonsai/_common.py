@@ -5,6 +5,14 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib  # type: ignore[no-remodule]
+    except ImportError:
+        tomllib = None  # type: ignore[assignment]
+
 
 @dataclass
 class PyToolsConfig:
@@ -35,13 +43,8 @@ def load_config(root: Path) -> PyToolsConfig:
     pyproject = root / "pyproject.toml"
     if not pyproject.exists():
         return PyToolsConfig()
-    try:
-        import tomllib
-    except ImportError:
-        try:
-            import tomli as tomllib  # type: ignore[no-remodule]
-        except ImportError:
-            return PyToolsConfig()
+    if tomllib is None:
+        return PyToolsConfig()
     try:
         with pyproject.open("rb") as f:
             data = tomllib.load(f)

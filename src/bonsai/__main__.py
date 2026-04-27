@@ -66,6 +66,7 @@ def main() -> None:
         _install(Path(args.settings), sys.executable)
         return
 
+    # Deferred import: avoids loading the full MCP server stack when --install is used.
     from .server import mcp
 
     mcp.run()

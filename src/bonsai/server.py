@@ -64,6 +64,11 @@ def pyfindrefs(target: str, project_root: str | None = None) -> str:
     Accepts 'module:Symbol', 'module:Class.method', OR a file-path variant
     'path/to/file.py:Symbol' (absolute or relative to the project root).
 
+    Note: Refs with ref_type "attribute" may include false positives — AST analysis cannot
+    determine the receiver's type. Refs with ref_type "definition", "import", and "base_class"
+    are reliable. Review "attribute" and "call" results manually in codebases with many
+    same-named methods.
+
     Args:
         target: E.g. 'src.models:User', 'src.models:User.save', or 'src/models.py:User'
         project_root: Absolute path to project root (auto-detected from cwd if omitted)
@@ -84,6 +89,11 @@ def pycallers(target: str, project_root: str | None = None) -> str:
 
     Accepts 'module:function', 'module:Class.method', or 'path/to/file.py:function'.
 
+    Note: pycallers uses AST analysis without type inference. It returns ALL `.method_name()`
+    call sites in the project, regardless of which class the receiver belongs to. For example,
+    `pycallers("src.models:User.save")` will match any `obj.save()` call, not only those where
+    `obj` is a `User`. Review results manually to confirm class membership.
+
     Args:
         target: E.g. 'src.api.views:create_user' or 'src/api/views.py:create_user'
         project_root: Absolute path to project root (auto-detected from cwd if omitted)
@@ -103,6 +113,12 @@ def pyfindunused(
     file_path: str | None = None,
 ) -> str:
     """Find unused Python symbols: dead top-level functions/classes, unused parameters, unused imports.
+
+    Note: Dead code detection skips private symbols (leading `_`), framework-decorated functions
+    (@route, @fixture, @task, etc.), symbols listed in `__all__`, and known entry-point names
+    (main, handler, lambda_handler, etc.). It also skips migrations/, tests/, and alembic/
+    directories entirely. Use `dead_code=False` with `imports=True` or `params=True` for
+    file-scoped checks that do not have these exclusions.
 
     Args:
         project_root: Absolute path to project root (auto-detected from cwd if omitted)
@@ -197,11 +213,11 @@ def pyrename(
 @mcp.tool()
 def pysignature(
     target: str,
-    add: list[str] | None = None,
+    add: list[dict[str, str] | str] | None = None,
     remove: list[str] | None = None,
-    rename: list[str] | None = None,
+    rename: list[dict[str, str] | str] | None = None,
     reorder: list[str] | None = None,
-    set_default: list[str] | None = None,
+    set_default: list[dict[str, str] | str] | None = None,
     project_root: str | None = None,
     dry_run: bool = False,
 ) -> str:
@@ -209,25 +225,45 @@ def pysignature(
 
     Args:
         target: Function in 'module:function' or 'module:Class.method' format
-        add: Parameters to add, each as 'NAME', 'NAME TYPE', or 'NAME TYPE DEFAULT'. E.g. ['timeout int 30']
+        add: Parameters to add. Preferred dict form: [{"name": "timeout", "type": "int", "default": "30"}].
+             "type" and "default" are optional. Legacy string form also accepted: "timeout int 30".
         remove: Parameter names to remove. E.g. ['legacy_flag']
-        rename: Parameters to rename, each as 'OLD NEW'. E.g. ['user_id uid']
+        rename: Parameters to rename. Preferred dict form: [{"from": "old_name", "to": "new_name"}].
+                Legacy string form also accepted: "old_name new_name".
         reorder: New parameter order as a list of names. E.g. ['name', 'email', 'role']
-        set_default: Change defaults, each as 'NAME VALUE' or 'NAME VALUE TYPE'. E.g. ['timeout 60 int']
+        set_default: Change defaults. Preferred dict form: [{"name": "retries", "value": "5", "type": "int"}].
+                     "type" is optional. Legacy string form also accepted: "retries 5 int".
         project_root: Absolute path to project root (auto-detected if omitted)
         dry_run: Preview changes without modifying any files
     """
     argv = ["pysignature", target]
     for item in add or []:
-        argv += ["--add"] + item.split()
+        if isinstance(item, dict):
+            parts = [item["name"]]
+            if "type" in item:
+                parts.append(item["type"])
+            if "default" in item:
+                parts.append(str(item["default"]))
+        else:
+            parts = item.split()
+        argv += ["--add"] + parts
     for name in remove or []:
         argv += ["--remove", name]
     for pair in rename or []:
-        argv += ["--rename"] + pair.split()
+        if isinstance(pair, dict):
+            argv += ["--rename", pair["from"], pair["to"]]
+        else:
+            argv += ["--rename"] + pair.split()
     if reorder:
         argv += ["--reorder"] + reorder
     for item in set_default or []:
-        argv += ["--set-default"] + item.split()
+        if isinstance(item, dict):
+            parts = [item["name"], str(item["value"])]
+            if "type" in item:
+                parts.append(item["type"])
+        else:
+            parts = item.split()
+        argv += ["--set-default"] + parts
     if project_root:
         argv += ["--project-root", project_root]
     if dry_run:

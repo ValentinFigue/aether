@@ -63,6 +63,49 @@ def _install(command: str, settings_path: Path) -> None:
     print("Available tools: pyfindrefs, pycallers, pyfindunused, pygrep, pymove, pymovesymbol, pyrename, pysignature")
 
 
+def _install_hooks(settings_path: Path) -> None:
+    """Merge bonsai hook templates into ~/.claude/settings.json.
+
+    Reads the bundled hooks template and adds any missing entries to the
+    ``hooks`` array in *settings_path*, then writes the file atomically.
+    Already-installed matchers are skipped so the operation is idempotent.
+
+    Args:
+        settings_path: Path to ``~/.claude/settings.json``.
+    """
+    template_path = Path(__file__).parent / "_hooks_template.json"
+    if not template_path.exists():
+        logger.error("hooks template not found at %s", template_path)
+        return
+
+    hook_entries = json.loads(template_path.read_text()).get("hooks", [])
+
+    settings: dict = {}
+    if settings_path.exists():
+        try:
+            settings = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            logger.warning("could not parse %s, creating fresh config.", settings_path)
+
+    existing = settings.setdefault("hooks", [])
+    existing_matchers = {h.get("matcher") for h in existing}
+    added = sum(
+        1
+        for entry in hook_entries
+        if entry.get("matcher") not in existing_matchers
+        and not existing.append(entry)  # append returns None, so always True
+    )
+
+    if added:
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = settings_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(settings, indent=2) + "\n")
+        os.replace(tmp, settings_path)
+        print(f"Added {added} hook(s) to {settings_path}")
+    else:
+        print("Bonsai hooks already installed.")
+
+
 def _verify(settings_path: Path) -> None:
     """Check whether bonsai is correctly registered in Claude Code and report status."""
     claude_json_path = Path.home() / ".claude.json"
@@ -128,6 +171,11 @@ def main() -> None:
         help="Check whether bonsai is correctly registered in Claude Code",
     )
     install_group.add_argument(
+        "--install-hooks",
+        action="store_true",
+        help="Add bonsai pre/post tool-use hooks to ~/.claude/settings.json and exit",
+    )
+    install_group.add_argument(
         "--settings",
         default=str(Path.home() / ".claude" / "settings.json"),
         help="Path to Claude Code settings.json for permissions (default: ~/.claude/settings.json)",
@@ -141,6 +189,10 @@ def main() -> None:
 
     if args.verify:
         _verify(Path(args.settings))
+        return
+
+    if args.install_hooks:
+        _install_hooks(Path(args.settings))
         return
 
     # Deferred import: avoids loading the full MCP server stack when --install is used.

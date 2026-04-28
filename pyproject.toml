@@ -55,6 +55,7 @@ pysignature  = "bonsai.pysignature:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bonsai"]
+artifacts = ["src/bonsai/_hooks_template.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

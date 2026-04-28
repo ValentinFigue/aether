@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP
 from .pycallers import main as _pycallers_main
 from .pyfindrefs import main as _pyfindrefs_main
 from .pyfindunused import main as _pyfindunused_main
+from .pygrep import main as _pygrep_main
 from .pymove import main as _pymove_main
 from .pymovesymbol import main as _pymovesymbol_main
 from .pyrename import main as _pyrename_main
@@ -54,10 +55,17 @@ def _run(main_fn: Callable[[], None], argv: list[str]) -> str:
 
 @mcp.tool()
 def pyfindrefs(target: str, project_root: str | None = None) -> str:
-    """Find all references to a Python symbol across the project: definitions, imports, calls, decorators, base classes.
+    """Find all usages of a Python class, function, method, or variable across the project.
+
+    Use this instead of grep whenever you need to know where a symbol is imported, called,
+    subclassed, decorated, or assigned. Returns results grouped by reference type:
+    definitions, imports, calls, decorators, base classes, and plain name usages.
+
+    Accepts 'module:Symbol', 'module:Class.method', OR a file-path variant
+    'path/to/file.py:Symbol' (absolute or relative to the project root).
 
     Args:
-        target: Symbol in 'module:Symbol' or 'module:Class.method' format. E.g. 'src.models:User'
+        target: E.g. 'src.models:User', 'src.models:User.save', or 'src/models.py:User'
         project_root: Absolute path to project root (auto-detected from cwd if omitted)
     """
     argv = ["pyfindrefs", target]
@@ -68,10 +76,16 @@ def pyfindrefs(target: str, project_root: str | None = None) -> str:
 
 @mcp.tool()
 def pycallers(target: str, project_root: str | None = None) -> str:
-    """Find every call site of a Python function or method across the project. Returns only call-type references, not imports or definitions. For all reference types use pyfindrefs.
+    """Find every call site of a Python function or method across the project.
+
+    Use this when you want only the places where a function is *called* — not its
+    definition or import lines. For all reference types (imports, base classes, decorators
+    etc.) use pyfindrefs instead.
+
+    Accepts 'module:function', 'module:Class.method', or 'path/to/file.py:function'.
 
     Args:
-        target: Symbol in 'module:function' or 'module:Class.method' format. E.g. 'src.api.views:create_user'
+        target: E.g. 'src.api.views:create_user' or 'src/api/views.py:create_user'
         project_root: Absolute path to project root (auto-detected from cwd if omitted)
     """
     argv = ["pycallers", target]
@@ -219,3 +233,27 @@ def pysignature(
     if dry_run:
         argv.append("--dry-run")
     return _run(_pysignature_main, argv)
+
+
+@mcp.tool()
+def pygrep(pattern: str, project_root: str | None = None, case_sensitive: bool = True) -> str:
+    """Search for a text pattern across all Python files in the project.
+
+    Use this for finding string literals, comments, or arbitrary text patterns.
+    For finding usages of a specific class or function by name, prefer pyfindrefs
+    (AST-based, more precise — won't match comments or unrelated identifiers).
+
+    The pattern is a Python regular expression. Results include file path, line
+    number, and the matching line.
+
+    Args:
+        pattern: Regular expression to search for. E.g. 'class Word' or 'TODO'
+        project_root: Absolute path to project root (auto-detected from cwd if omitted)
+        case_sensitive: Set to False for case-insensitive matching
+    """
+    argv = ["pygrep", pattern]
+    if not case_sensitive:
+        argv.append("--ignore-case")
+    if project_root:
+        argv += ["--project-root", project_root]
+    return _run(_pygrep_main, argv)

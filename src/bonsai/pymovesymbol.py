@@ -19,6 +19,7 @@ from ._common import (
     find_module_path,
     find_project_root,
     get_lines,
+    normalize_target,
     parse_file,
     resolve_relative_import,
 )
@@ -123,6 +124,7 @@ def do_move_symbol(
     Returns:
         ``True`` on success, ``False`` if a fatal error occurred.
     """
+    target_ref = normalize_target(target_ref, root)
     module_name, symbol_name = parse_symbol_ref(target_ref)
 
     print(f"{'[DRY RUN] ' if dry_run else ''}Moving symbol:")

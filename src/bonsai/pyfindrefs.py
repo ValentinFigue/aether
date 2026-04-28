@@ -14,6 +14,7 @@ from ._common import (
     find_project_root,
     get_lines,
     module_aliases_for_file,
+    normalize_target,
     parse_file,
     python_roots,
     resolve_relative_import,
@@ -270,6 +271,8 @@ def find_refs(target: str, project_root: Path) -> list[Ref]:
         List of :class:`Ref` objects sorted by file path and line number.
         Exits with code 1 if *target* is malformed.
     """
+    target = normalize_target(target, project_root)
+
     if ":" not in target:
         logger.error("expected module:symbol or module:Class.method, got %r", target)
         sys.exit(1)

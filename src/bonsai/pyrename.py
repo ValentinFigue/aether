@@ -21,6 +21,7 @@ from ._common import (
     find_module_path,
     find_project_root,
     get_lines,
+    normalize_target,
     parse_file,
     parse_symbol_ref,
     resolve_relative_import,
@@ -371,6 +372,7 @@ def do_rename(target_ref: str, new_name: str, root: Path, dry_run: bool) -> bool
     Returns:
         ``True`` on success, ``False`` if the source module cannot be found.
     """
+    target_ref = normalize_target(target_ref, root)
     module_name, symbol_name, method_name = parse_symbol_ref(target_ref)
 
     print(f"{'[DRY RUN] ' if dry_run else ''}Renaming:")

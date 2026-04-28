@@ -223,6 +223,43 @@ def resolve_relative_import(importing_file: Path, root: Path, level: int, module
     return ".".join(base_parts)
 
 
+def normalize_target(target: str, root: Path) -> str:
+    """Normalize a symbol target to ``module:Symbol`` format.
+
+    Accepts either the canonical ``module:Symbol`` format or a file-path variant
+    ``path/to/file.py:Symbol`` (absolute or relative to *root*).  File paths are
+    detected by the presence of ``/`` or a ``.py`` suffix before the ``:``.
+
+    Args:
+        target: Symbol reference, e.g. ``"src/utils/helpers.py:format_date"`` or
+            ``"src.utils.helpers:format_date"``.
+        root: Project root used to make absolute paths relative.
+
+    Returns:
+        Canonical ``"dotted.module:Symbol"`` string.  Returns *target* unchanged
+        if the module part does not look like a file path or cannot be resolved.
+    """
+    if ":" not in target:
+        return target
+    module_part, _, symbol_part = target.partition(":")
+    # Detect file-path style: contains "/" or ends with ".py"
+    if "/" not in module_part and not module_part.endswith(".py"):
+        return target
+    fp = Path(module_part)
+    if not fp.is_absolute():
+        fp = root / fp
+    module_name = path_to_module(fp, root)
+    if module_name is None:
+        # Try against each python root
+        for r in python_roots(root):
+            module_name = path_to_module(fp, r)
+            if module_name is not None:
+                break
+    if module_name is None:
+        return target
+    return f"{module_name}:{symbol_part}"
+
+
 def parse_symbol_ref(ref: str) -> tuple[str, str, str | None]:
     """Parse a ``module:Symbol`` or ``module:Class.method`` reference string.
 

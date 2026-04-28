@@ -9,17 +9,26 @@ AST-based Python refactoring tools for Claude Code. Find symbol references, dete
 
 ## Install
 
+**Option A — pip (recommended):**
+
 ```bash
-pip install bonsai && python -m bonsai --install
+pip install bonsai
+python -m bonsai --install
 ```
 
-Restart Claude Code. All 7 tools are immediately available.
-
-**Zero-install alternative** (requires `uv`, after PyPI publish):
+**Option B — zero-install with `uv`** (no global install needed):
 
 ```bash
 uvx bonsai --install
 ```
+
+Then **restart Claude Code**. Verify it worked:
+
+```bash
+python -m bonsai --verify
+```
+
+All 8 tools are immediately available with no slash commands or extra permissions needed.
 
 ## How it works
 
@@ -31,9 +40,10 @@ The tools use Python's `ast` module to parse source files directly — the only 
 
 | Tool | What it does |
 |------|-------------|
-| `pyfindrefs` | Find all references to a symbol: definitions, imports, calls, decorators, base classes |
+| `pyfindrefs` | Find all usages of a class, function, or variable: definitions, imports, calls, decorators, base classes |
 | `pycallers` | Find every call site of a function or method (call-type only; for all reference types use `pyfindrefs`) |
 | `pyfindunused` | Detect dead top-level functions/classes, unused parameters, and unused imports |
+| `pygrep` | Search for a text pattern (regex) across all Python files |
 | `pymove` | Move or rename a Python file/package and rewrite all imports |
 | `pymovesymbol` | Move a single function or class to a different module |
 | `pyrename` | Scope-aware rename across the entire project |
@@ -45,9 +55,11 @@ Say these things to Claude Code — no special syntax required:
 
 **Find references**
 > "Where is `User` used across the project?"
-> "Find all imports of `create_user`."
+> "Find all usages of the `Word` class defined in `src/geometry/text_box.py`."
 
-Claude calls: `pyfindrefs("src.models:User")`
+Claude calls: `pyfindrefs("src.models:User")` or `pyfindrefs("src/geometry/text_box.py:Word")`
+
+Both formats work — you can pass a dotted module name or a file path.
 
 **Find callers only**
 > "Who calls `send_email`?"
@@ -83,7 +95,38 @@ Claude calls: `pyrename("src.models:User", "Account", dry_run=True)`
 
 Claude calls: `pysignature("src.api:create_user", add=["timeout int 30"], dry_run=True)`
 
+**Search for text patterns**
+> "Find all TODO comments in the project."
+> "Where does the string 'deprecated' appear?"
+
+Claude calls: `pygrep("TODO")` or `pygrep("deprecated", case_sensitive=False)`
+
 All mutating tools (`pymove`, `pymovesymbol`, `pyrename`, `pysignature`) support `dry_run=True`. Claude uses dry-run by default and asks for confirmation before applying changes.
+
+## Troubleshooting
+
+**Tools don't appear in Claude Code after install**
+
+Run `python -m bonsai --verify` to check the configuration, then restart Claude Code. If that doesn't help, re-run `python -m bonsai --install` and restart again.
+
+**`python -m bonsai` not found after `pip install`**
+
+Your `pip`'s script directory may not be on `PATH`. Try:
+```bash
+python3 -m bonsai --install   # or use the full python path
+```
+Or use the `uvx` option which doesn't require PATH setup.
+
+**Wrong Python / virtual environment**
+
+Make sure you run `python -m bonsai --install` with the same Python that Claude Code will invoke. If in doubt, use the full path: `/usr/bin/python3 -m bonsai --install`.
+
+**`pyfindrefs` returns "No references found" for a valid symbol**
+
+Pass the `project_root` explicitly if your project is not at the current working directory:
+```
+pyfindrefs("src.models:User", project_root="/abs/path/to/project")
+```
 
 ## Limitations
 

@@ -60,7 +60,49 @@ def _install(command: str, settings_path: Path) -> None:
     print(f"Installed. Added 'bonsai' MCP server to {claude_json_path}")
     print("Restart Claude Code to load the bonsai MCP server.")
     print()
-    print("Available tools: pyfindrefs, pycallers, pyfindunused, pymove, pymovesymbol, pyrename, pysignature")
+    print("Available tools: pyfindrefs, pycallers, pyfindunused, pygrep, pymove, pymovesymbol, pyrename, pysignature")
+
+
+def _verify(settings_path: Path) -> None:
+    """Check whether bonsai is correctly registered in Claude Code and report status."""
+    claude_json_path = Path.home() / ".claude.json"
+    ok = True
+
+    # Check ~/.claude.json for MCP server entry
+    if not claude_json_path.exists():
+        print(f"✗ {claude_json_path} not found — run: python -m bonsai --install")
+        ok = False
+    else:
+        try:
+            data = json.loads(claude_json_path.read_text())
+        except json.JSONDecodeError:
+            data = {}
+        if "bonsai" in data.get("mcpServers", {}):
+            print(f"✓ MCP server registered in {claude_json_path}")
+        else:
+            print(f"✗ 'bonsai' not in {claude_json_path} — run: python -m bonsai --install")
+            ok = False
+
+    # Check ~/.claude/settings.json for permission allowlist
+    if not settings_path.exists():
+        print(f"✗ {settings_path} not found — run: python -m bonsai --install")
+        ok = False
+    else:
+        try:
+            settings = json.loads(settings_path.read_text())
+        except json.JSONDecodeError:
+            settings = {}
+        allow = settings.get("permissions", {}).get("allow", [])
+        if "mcp__bonsai__*" in allow:
+            print(f"✓ Permissions granted in {settings_path}")
+        else:
+            print(f"✗ 'mcp__bonsai__*' not in {settings_path} — run: python -m bonsai --install")
+            ok = False
+
+    if ok:
+        print("\nAll good! Restart Claude Code if you haven't already.")
+    else:
+        print("\nRe-run 'python -m bonsai --install', then restart Claude Code.")
 
 
 def main() -> None:
@@ -81,6 +123,11 @@ def main() -> None:
         help="Add bonsai MCP server to ~/.claude.json and exit",
     )
     install_group.add_argument(
+        "--verify",
+        action="store_true",
+        help="Check whether bonsai is correctly registered in Claude Code",
+    )
+    install_group.add_argument(
         "--settings",
         default=str(Path.home() / ".claude" / "settings.json"),
         help="Path to Claude Code settings.json for permissions (default: ~/.claude/settings.json)",
@@ -90,6 +137,10 @@ def main() -> None:
 
     if args.install:
         _install(sys.executable, Path(args.settings))
+        return
+
+    if args.verify:
+        _verify(Path(args.settings))
         return
 
     # Deferred import: avoids loading the full MCP server stack when --install is used.

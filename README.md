@@ -9,29 +9,15 @@ AST-based Python refactoring tools for Claude Code. Find symbol references, dete
 
 ## Install
 
-**Option A — Claude Code plugin (recommended):**
+**With uv (recommended — no global install needed):**
 
 ```bash
-claude plugin install valentinfigue/bonsai
-```
-
-Then run the setup skill to register the MCP server in your user-global config:
-
-```
-/bonsai:setup
-```
-
-This runs `claude mcp add bonsai --scope user -- uvx bonsai`, which writes to
-`~/.claude.json` — outside the plugin directory, so it survives plugin updates.
-**Restart Claude Code** after setup.
-
-**Option B — manual install (without plugin manager):**
-
-```bash
-# With uv (recommended — no global install needed):
 claude mcp add bonsai --scope user -- uvx bonsai
+```
 
-# With pip:
+**With pip:**
+
+```bash
 pip install bonsai
 claude mcp add bonsai --scope user -- python -m bonsai
 ```
@@ -42,7 +28,9 @@ claude mcp add bonsai --scope user -- python -m bonsai
 python -m bonsai --verify
 ```
 
-All 8 tools are immediately available with no slash commands or extra permissions needed.
+Both commands write to `~/.claude.json` (user-global config), so the registration
+survives updates. All 8 tools are immediately available with no slash commands or
+extra permissions needed.
 
 ## How it works
 
@@ -121,7 +109,7 @@ All mutating tools (`pymove`, `pymovesymbol`, `pyrename`, `pysignature`) support
 
 **Tools don't appear in Claude Code after install**
 
-Run `python -m bonsai --verify` to check the configuration, then restart Claude Code. If that doesn't help, re-run `/bonsai:setup` (or `claude mcp add bonsai --scope user -- uvx bonsai`) and restart again.
+Run `python -m bonsai --verify` to check the configuration, then restart Claude Code. If that doesn't help, re-run `claude mcp add bonsai --scope user -- uvx bonsai` and restart again.
 
 **`python -m bonsai` not found after `pip install`**
 

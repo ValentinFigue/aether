@@ -9,20 +9,34 @@ AST-based Python refactoring tools for Claude Code. Find symbol references, dete
 
 ## Install
 
-**Option A — pip (recommended):**
+**Option A — Claude Code plugin (recommended):**
 
 ```bash
+claude plugin install valentinfigue/bonsai
+```
+
+Then run the setup skill to register the MCP server in your user-global config:
+
+```
+/bonsai:setup
+```
+
+This runs `claude mcp add bonsai --scope user -- uvx bonsai`, which writes to
+`~/.claude.json` — outside the plugin directory, so it survives plugin updates.
+**Restart Claude Code** after setup.
+
+**Option B — manual install (without plugin manager):**
+
+```bash
+# With uv (recommended — no global install needed):
+claude mcp add bonsai --scope user -- uvx bonsai
+
+# With pip:
 pip install bonsai
-python -m bonsai --install
+claude mcp add bonsai --scope user -- python -m bonsai
 ```
 
-**Option B — zero-install with `uv`** (no global install needed):
-
-```bash
-uvx bonsai --install
-```
-
-Then **restart Claude Code**. Verify it worked:
+**Restart Claude Code** after either option. Verify it worked:
 
 ```bash
 python -m bonsai --verify
@@ -93,7 +107,7 @@ Claude calls: `pyrename("src.models:User", "Account", dry_run=True)`
 > "Add a `timeout: int = 30` parameter to `create_user`."
 > "Remove the `legacy_flag` parameter from `process_payment` and update all call sites."
 
-Claude calls: `pysignature("src.api:create_user", add=["timeout int 30"], dry_run=True)`
+Claude calls: `pysignature("src.api:create_user", add=[{"name": "timeout", "type": "int", "default": "30"}], dry_run=True)`
 
 **Search for text patterns**
 > "Find all TODO comments in the project."
@@ -107,7 +121,7 @@ All mutating tools (`pymove`, `pymovesymbol`, `pyrename`, `pysignature`) support
 
 **Tools don't appear in Claude Code after install**
 
-Run `python -m bonsai --verify` to check the configuration, then restart Claude Code. If that doesn't help, re-run `python -m bonsai --install` and restart again.
+Run `python -m bonsai --verify` to check the configuration, then restart Claude Code. If that doesn't help, re-run `/bonsai:setup` (or `claude mcp add bonsai --scope user -- uvx bonsai`) and restart again.
 
 **`python -m bonsai` not found after `pip install`**
 
@@ -119,7 +133,7 @@ Or use the `uvx` option which doesn't require PATH setup.
 
 **Wrong Python / virtual environment**
 
-Make sure you run `python -m bonsai --install` with the same Python that Claude Code will invoke. If in doubt, use the full path: `/usr/bin/python3 -m bonsai --install`.
+If using `claude mcp add ... -- python -m bonsai`, make sure it's the Python Claude Code will invoke. The `uvx bonsai` form is usually safer since uv manages the environment automatically.
 
 **`pyfindrefs` returns "No references found" for a valid symbol**
 
@@ -176,8 +190,13 @@ pip install -e .
 Run the MCP server directly:
 
 ```bash
-python -m bonsai           # start the stdio MCP server
-python -m bonsai --install # write config to ~/.claude/settings.json
+python -m bonsai  # start the stdio MCP server (used by Claude Code via stdio)
+```
+
+Register in dev (writes to `~/.claude.json`):
+
+```bash
+claude mcp add bonsai --scope user -- python -m bonsai
 ```
 
 Publish a new version to PyPI:

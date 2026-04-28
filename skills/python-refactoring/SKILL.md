@@ -1,3 +1,20 @@
+---
+name: python-refactoring
+description: >
+  AST-based Python refactoring for Claude Code via bonsai. Use for: renaming
+  classes/functions/methods/variables, moving files and symbols between modules,
+  finding all reference sites for a symbol, detecting dead code and unused imports,
+  changing function signatures and updating all call sites. Prefers AST analysis
+  over grep/sed for accurate Python identifier operations — no false matches from
+  comments or string literals.
+when_to_use: >
+  Triggered by: rename a class/function/method/variable/constant; move a file or
+  extract a class to another module; find all usages/callers of a symbol; detect
+  dead code or unused imports; add/remove/rename a parameter and update call sites;
+  find where a symbol is imported or subclassed.
+allowed-tools: mcp__bonsai__pyrename, mcp__bonsai__pymove, mcp__bonsai__pymovesymbol, mcp__bonsai__pyfindrefs, mcp__bonsai__pycallers, mcp__bonsai__pyfindunused, mcp__bonsai__pysignature, mcp__bonsai__pygrep
+---
+
 # Python Refactoring with Bonsai
 
 ## When to Use Bonsai Instead of grep/sed

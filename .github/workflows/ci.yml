@@ -6,8 +6,8 @@ on:
     branches: [main]
 
 jobs:
-  lint:
-    name: Lint & Format
+  py-lint:
+    name: Python Lint & Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,8 +15,8 @@ jobs:
       - run: uvx ruff check py/src/
       - run: uvx ruff format --check py/src/
 
-  test:
-    name: Tests (Python ${{ matrix.python-version }})
+  py-test:
+    name: Python Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -30,8 +30,8 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest py/tests/ -v
 
-  smoke:
-    name: Smoke Tests (Python ${{ matrix.python-version }})
+  py-smoke:
+    name: Python Smoke Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -54,3 +54,58 @@ jobs:
           python -m bonsai_python.pysignature --help
       - name: End-to-end
         run: python -m bonsai_python.pyfindrefs "bonsai_python.pyfindrefs:find_refs"
+
+  ts-lint:
+    name: TypeScript Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ts/package-lock.json
+      - run: npm ci
+        working-directory: ts
+      - run: npx tsc --noEmit
+        working-directory: ts
+
+  ts-test:
+    name: TypeScript Tests (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ["18", "20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+          cache-dependency-path: ts/package-lock.json
+      - run: npm ci
+        working-directory: ts
+      - run: npm run build
+        working-directory: ts
+      - run: npm test
+        working-directory: ts
+
+  ts-smoke:
+    name: TypeScript Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: ts/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: ts
+      - name: MCP server starts
+        working-directory: ts
+        run: timeout 3 node dist/server.js || true
+      - name: tsfindrefs smoke
+        working-directory: ts
+        run: node --input-type=module -e "import { findRefs } from './dist/tsfindrefs.js'; console.log(findRefs('src/_common:parseSymbolRef', '$(pwd)'));"

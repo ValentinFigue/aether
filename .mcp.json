@@ -3,6 +3,10 @@
     "bonsai-python": {
       "command": "uvx",
       "args": ["bonsai-python"]
+    },
+    "bonsai-ts": {
+      "command": "npx",
+      "args": ["--yes", "bonsai-ts@latest"]
     }
   }
 }

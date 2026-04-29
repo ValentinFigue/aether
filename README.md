@@ -3,15 +3,40 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/ValentinFigue/bonsai/actions/workflows/ci.yml/badge.svg)](https://github.com/ValentinFigue/bonsai/actions/workflows/ci.yml)
 
-AST-based Python refactoring tools for Claude Code.
+Static-analysis refactoring tools for Claude Code — Python (AST) and TypeScript (compiler API).
 
-> **Status: early alpha.** The tools work but the project is new — expect rough edges. Feedback and bug reports are welcome. Find symbol references, detect dead code, rename identifiers, move files and symbols, and update function signatures — driven by static analysis, with no language server or type-checking daemon required.
+> **Status: early alpha.** The tools work but the project is new — expect rough edges. Feedback and bug reports welcome.
+
+## What's inside
+
+Two MCP servers, one repo:
+
+| Server | Language | Key advantage |
+|---|---|---|
+| `bonsai-python` | Python 3.10+ | AST-based, no type inference needed, zero extra deps |
+| `bonsai-ts` | TypeScript / JavaScript | TypeScript compiler API — fully type-aware, no false positives from same-named methods |
+
+## Repository layout
+
+```
+bonsai/
+├── py/                        # Python MCP server
+│   ├── src/bonsai_python/     # source modules
+│   └── tests/                 # pytest suite + fixtures
+├── ts/                        # TypeScript MCP server
+│   ├── src/                   # TypeScript source modules
+│   └── tests/                 # vitest suite + fixtures
+├── skills/                    # Claude Code skill definitions
+├── .claude-plugin/            # plugin manifest, hooks, marketplace config
+├── .mcp.json                  # registers both MCP servers for local dev
+└── pyproject.toml             # Python packaging (hatchling)
+```
+
+---
 
 ## Install
 
 ### Option A — Claude Code plugin system (recommended)
-
-Run these slash commands inside Claude Code:
 
 ```
 /plugin marketplace add ValentinFigue/bonsai
@@ -19,17 +44,13 @@ Run these slash commands inside Claude Code:
 /bonsai:setup
 ```
 
-- The first line adds this repo as a plugin marketplace (one-time, saved globally).
-- The second installs the plugin (skills auto-load on next restart).
-- `/bonsai:setup` registers the MCP server in `~/.claude.json` — this is the step
-  that makes the 8 tools available. It survives plugin updates because it writes
-  outside the plugin directory.
+- Line 1 adds this repo as a plugin marketplace (one-time).
+- Line 2 installs the plugin (skills auto-load on restart).
+- `/bonsai:setup` registers the MCP servers in `~/.claude.json`.
 
 **Restart Claude Code** after running `/bonsai:setup`.
 
 ### Option B — Direct URL install
-
-No marketplace setup needed:
 
 ```
 /plugin install https://github.com/ValentinFigue/bonsai
@@ -39,10 +60,9 @@ Then run `/bonsai:setup` and restart.
 
 ### Option C — Manual (no plugin system)
 
-Registers only the MCP server, without skills or plugin management:
-
+**Python server:**
 ```bash
-# With uv (recommended — no global install needed):
+# With uv (recommended):
 claude mcp add bonsai-python --scope user -- uvx bonsai-python
 
 # With pip:
@@ -50,28 +70,27 @@ pip install bonsai-python
 claude mcp add bonsai-python --scope user -- python -m bonsai_python
 ```
 
-**Restart Claude Code** after running. Verify it worked:
+**TypeScript server:**
+```bash
+claude mcp add bonsai-ts --scope user -- npx --yes bonsai-ts
+```
 
+Verify Python setup:
 ```bash
 python -m bonsai_python --verify
 ```
 
-> Option C skips the plugin skills layer. Claude will still use the MCP tools when
-> you explicitly ask, but won't auto-invoke them for refactoring tasks the way the
-> skills layer enables.
+> Option C skips the plugin skills layer. Claude will still invoke the tools when asked,
+> but won't auto-select them for refactoring tasks the way the skills layer enables.
 
-## How it works
+---
 
-`bonsai-python` runs as an MCP server that Claude Code connects to over stdio. When you describe a refactoring in natural language, Claude picks the right tool, calls it with the correct arguments, and shows you the result. No slash commands, no Bash permissions needed for the tools.
-
-The tools use Python's `ast` module to parse source files directly — the only runtime dependency is `mcp[cli]`. They work on any Python 3.10+ project regardless of framework.
-
-## Tools
+## Python tools (`bonsai-python`)
 
 | Tool | What it does |
-|------|-------------|
+|---|---|
 | `pyfindrefs` | Find all usages of a class, function, or variable: definitions, imports, calls, decorators, base classes |
-| `pycallers` | Find every call site of a function or method (call-type only; for all reference types use `pyfindrefs`) |
+| `pycallers` | Find every call site of a function or method (call-type only) |
 | `pyfindunused` | Detect dead top-level functions/classes, unused parameters, and unused imports |
 | `pygrep` | Search for a text pattern (regex) across all Python files |
 | `pymove` | Move or rename a Python file/package and rewrite all imports |
@@ -79,166 +98,219 @@ The tools use Python's `ast` module to parse source files directly — the only 
 | `pyrename` | Scope-aware rename across the entire project |
 | `pysignature` | Change a function's signature and update all call sites |
 
-## Usage examples
+### Symbol notation
 
-Say these things to Claude Code — no special syntax required:
+All Python tools use one of two forms for `target`:
+
+```
+module.submodule:SymbolName           # dotted module path
+module.submodule:ClassName.method     # method on a class
+path/to/file.py:SymbolName            # file path (also accepted)
+```
+
+Examples: `src.models:User`  `src.models:User.save`  `src/api/views.py:create_user`
+
+### Python usage examples
 
 **Find references**
 > "Where is `User` used across the project?"
-> "Find all usages of the `Word` class defined in `src/geometry/text_box.py`."
 
-Claude calls: `pyfindrefs("src.models:User")` or `pyfindrefs("src/geometry/text_box.py:Word")`
+Claude calls: `pyfindrefs("src.models:User")`
 
-Both formats work — you can pass a dotted module name or a file path.
-
-**Find callers only**
-> "Who calls `send_email`?"
+**Find callers**
 > "What calls `PaymentService.charge`?"
 
-Claude calls: `pycallers("src.services.email:send_email")`
+Claude calls: `pycallers("src.services:PaymentService.charge")`
 
 **Find dead code**
-> "Find unused functions in this project."
-> "What imports are never used in `utils.py`?"
+> "Find unused functions."  "What imports are never used in `utils.py`?"
 
 Claude calls: `pyfindunused(dead_code=True, imports=True)`
 
 **Move a file**
 > "Move `src/utils/helpers.py` to `src/core/helpers.py` and fix all imports."
 
-Claude calls: `pymove("src/utils/helpers.py", "src/core/helpers.py", dry_run=True)`, shows the diff, then applies on confirmation.
-
-**Move a symbol**
-> "Move the `format_date` function from `src.utils` to `src.utils.dates`."
-
-Claude calls: `pymovesymbol("src.utils:format_date", "src.utils.dates")`
+Claude calls: `pymove("src/utils/helpers.py", "src/core/helpers.py", dry_run=True)`, shows the diff, applies on confirmation.
 
 **Rename**
 > "Rename `User` to `Account` everywhere."
-> "Rename the `save` method on `User` to `persist`."
 
 Claude calls: `pyrename("src.models:User", "Account", dry_run=True)`
 
 **Change a signature**
 > "Add a `timeout: int = 30` parameter to `create_user`."
-> "Remove the `legacy_flag` parameter from `process_payment` and update all call sites."
 
 Claude calls: `pysignature("src.api:create_user", add=[{"name": "timeout", "type": "int", "default": "30"}], dry_run=True)`
 
-**Search for text patterns**
-> "Find all TODO comments in the project."
-> "Where does the string 'deprecated' appear?"
+All mutating tools support `dry_run=True`. Claude uses dry-run by default and asks for confirmation.
 
-Claude calls: `pygrep("TODO")` or `pygrep("deprecated", case_sensitive=False)`
+### Python limitations
 
-All mutating tools (`pymove`, `pymovesymbol`, `pyrename`, `pysignature`) support `dry_run=True`. Claude uses dry-run by default and asks for confirmation before applying changes.
+- **No type inference.** Method attribution is best-effort: `pycallers("src.models:User.save")` finds all `.save()` calls, including those on other classes. Use the TypeScript server for type-accurate method resolution.
+- **No runtime analysis.** Dynamic patterns like `getattr(obj, method)()` are invisible to AST analysis.
+- **Public symbols only** for dead-code detection. `pyfindunused` skips private symbols, framework-decorated functions, and test files.
+- **Single project tree.** All tools operate on a project rooted at `pyproject.toml` / `.git`. Pass `project_root` explicitly for monorepos.
+
+---
+
+## TypeScript tools (`bonsai-ts`)
+
+| Tool | Python equivalent | Key capability |
+|---|---|---|
+| `tsfindrefs` | `pyfindrefs` | Type-aware reference finder — no false positives from same-named methods |
+| `tsrename` | `pyrename` | Language Service rename — rewrites all imports, calls, type annotations in one pass |
+| `tsmove` | `pymove` | Move file/directory and rewrite all import paths project-wide |
+| `tsmovesymbol` | `pymovesymbol` | Move a single function/class; adds backward-compat re-export |
+| `tssignature` | `pysignature` | Change function signature and update all call sites |
+
+### Symbol notation
+
+TypeScript tools use path-style notation (maps directly to file paths):
+
+```
+path/to/module:Symbol           # top-level symbol (no extension)
+path/to/module:Class.method     # method on a class
+```
+
+Examples: `src/models/user:User`  `src/models/user:User.save`  `src/services:createUser`
+
+File extensions are stripped if provided: `src/models/user.ts:User` also works.
+
+### TypeScript usage examples
+
+**Find references (type-aware)**
+> "Where is `User.save` called?"
+
+Claude calls: `tsfindrefs("src/models/user:User.save")`
+
+Unlike `pyfindrefs`, this correctly distinguishes `User.save` from `Document.save` — it only returns call sites where the receiver is actually a `User`.
+
+**Rename**
+> "Rename the `save` method on `User` to `persist` everywhere."
+
+Claude calls: `tsrename("src/models/user:User.save", "persist", dry_run=true)`
+
+**Move a file**
+> "Move `src/utils.ts` to `src/helpers/utils.ts` and fix all imports."
+
+Claude calls: `tsmove("src/utils.ts", "src/helpers/utils.ts", dry_run=true)`
+
+**Move a symbol**
+> "Move the `formatDate` helper from `src/utils` to `src/lib/dates`."
+
+Claude calls: `tsmovesymbol("src/utils:formatDate", "src/lib/dates", dry_run=true)`
+
+A backward-compatible re-export is added to the original file — existing imports continue to work.
+
+**Change a signature**
+> "Add an optional `timeout: number = 30` to `createUser`."
+
+Claude calls: `tssignature("src/services:createUser", add=[{"name": "timeout", "type": "number", "default": "30"}], dry_run=true)`
+
+### TypeScript limitations
+
+- **Requires `tsconfig.json`** at the project root for full type resolution. Without it, the tools fall back to a glob-based project (reference finding works but loses type accuracy).
+- **Dynamic `require()` strings** are not rewritten by `tsmove`.
+- **`.d.ts`-less packages**: symbols from third-party packages without type declarations may be missed by reference finding.
+- **TypeScript has no keyword arguments**: `tssignature` reorder rewrites positional arguments at call sites (not named arguments). Combined remove + reorder operations apply reorder on post-removal argument positions.
+
+---
+
+## Dry-run workflow (both servers)
+
+All mutating tools accept `dry_run=true`. Always follow this pattern:
+
+1. Call with `dry_run=true` — review the preview diff.
+2. Confirm the blast radius (number of files, changed lines).
+3. Call again with `dry_run=false` (or `false` by default) to apply.
+
+Claude uses dry-run by default for all mutating operations.
+
+---
 
 ## Troubleshooting
 
-**Tools don't appear in Claude Code after install**
+**Tools don't appear after install**
 
-Run `python -m bonsai_python --verify` to check the configuration, then restart Claude Code. If that doesn't help, re-run `claude mcp add bonsai-python --scope user -- uvx bonsai-python` and restart again.
+Run `python -m bonsai_python --verify`, then restart Claude Code. If that doesn't help:
+```bash
+claude mcp add bonsai-python --scope user -- uvx bonsai-python
+claude mcp add bonsai-ts --scope user -- npx --yes bonsai-ts
+```
+Then restart.
 
 **`uvx` not found**
-
-Install uv first, then retry `/bonsai:setup`:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+Then retry `/bonsai:setup`.
 
-Or use the pip form: `claude mcp add bonsai-python --scope user -- python -m bonsai_python`.
+**`pyfindrefs` / `tsfindrefs` returns "No references found" for a valid symbol**
 
-**Wrong Python / virtual environment**
-
-If using `claude mcp add ... -- python -m bonsai_python`, make sure it's the Python Claude Code will invoke. The `uvx bonsai-python` form is usually safer since uv manages the environment automatically.
-
-**`pyfindrefs` returns "No references found" for a valid symbol**
-
-Pass the `project_root` explicitly if your project is not at the current working directory:
+Pass `project_root` explicitly if your project is not at the current working directory:
 ```
 pyfindrefs("src.models:User", project_root="/abs/path/to/project")
+tsfindrefs("src/models/user:User", project_root="/abs/path/to/project")
 ```
 
-## Limitations
+**`tsfindrefs` gives wrong results / misses references**
 
-- **No type inference.** Method attribution is best-effort: `pycallers("src.models:User.save")` finds all `.save()` calls, not just those on `User` instances. It may include false positives from other classes with a `save` method.
-- **No runtime analysis.** Dynamic patterns like `getattr(obj, method_name)()` are invisible to AST analysis.
-- **Public symbols only for dead-code detection.** `pyfindunused --dead-code` skips private symbols (names starting with `_`), framework-decorated functions, and test files — but may still produce false positives if symbols are referenced dynamically.
-- **Single project tree.** All tools operate on a project rooted at `pyproject.toml` / `.git`. For monorepos, pass `project_root` explicitly.
+Confirm your project has a `tsconfig.json` at the root. Without it, bonsai-ts falls back to a non-type-aware mode and may miss or misclassify references.
 
-## Configuration
+---
 
-Add a `[tool.bonsai]` section to your project's `pyproject.toml` to customise dead-code detection.
+## Configuration (Python)
 
-Each setting has two variants:
-
-- **`extra_*`** — merged with the built-in defaults (additive)
-- **base key** — replaces the built-in defaults entirely
+Add a `[tool.bonsai]` section to `pyproject.toml` to customise dead-code detection:
 
 ```toml
 [tool.bonsai]
-# Extend the built-in decorator list (get, post, route, task, fixture, classmethod, …)
-dead_code_extra_decorators = ["api_view", "login_required", "permission_classes"]
+# Extend the built-in decorator exempt list (get, post, route, task, fixture, …)
+dead_code_extra_decorators = ["api_view", "login_required"]
 
-# Replace the built-in decorator list entirely
-# dead_code_decorators = ["route", "task"]
-
-# Extend the built-in entry-point list (main, handler, lambda_handler, setUp, upgrade, …)
+# Extend the built-in entry-point list (main, handler, lambda_handler, …)
 dead_code_extra_entry_points = ["run", "execute", "on_ready"]
 
-# Replace the built-in entry-point list entirely
-# dead_code_entry_points = ["main", "handler"]
-
-# Extend the built-in skip-dirs list (migrations, tests, test, alembic)
+# Extend the built-in skip-dirs list (migrations, tests, alembic)
 dead_code_extra_skip_dirs = ["fixtures", "scripts"]
-
-# Replace the built-in skip-dirs list entirely (e.g. to scan test files)
-# dead_code_skip_dirs = ["migrations", "alembic"]
 ```
+
+Each setting has an `extra_*` variant (merged with defaults) and a base variant (replaces defaults entirely).
+
+---
 
 ## Development
 
 ```bash
 git clone https://github.com/valentinfigue/bonsai
 cd bonsai
-pip install -e .
+
+# Python
+pip install -e ".[dev]"
+pytest py/tests/ -v
+
+# TypeScript
+cd ts && npm install && npm run build && npm test
 ```
 
-Run the MCP server directly:
+**Run the MCP servers locally:**
 
 ```bash
-python -m bonsai_python  # start the stdio MCP server (used by Claude Code via stdio)
+python -m bonsai_python          # Python MCP server (stdio)
+node ts/dist/server.js           # TypeScript MCP server (stdio)
 ```
 
-Register in dev (writes to `~/.claude.json`):
+**Register local dev versions:**
 
 ```bash
 claude mcp add bonsai-python --scope user -- python -m bonsai_python
+claude mcp add bonsai-ts --scope user -- node /path/to/bonsai/ts/dist/server.js
 ```
 
-## Roadmap
+Or point Claude Code at `.mcp.json` in the repo root (already configured for both servers — use `npx --yes` for the published versions or update to `node ts/dist/server.js` for local builds).
 
-### TypeScript / JavaScript support
-
-The current toolset is Python-only. A TypeScript/JS equivalent is planned, addressing the most common mixed-codebase gap:
-
-| Planned tool | Equivalent | Description |
-|---|---|---|
-| `tsfindrefs` | `pyfindrefs` | Find all usages of a symbol across `.ts`/`.tsx`/`.js`/`.jsx` files |
-| `tsrename` | `pyrename` | Scope-aware rename using the TypeScript compiler API |
-| `tsmove` | `pymove` | Move/rename a file or module and rewrite all imports |
-| `tsmovesymbol` | `pymovesymbol` | Move a single function or class to a different module |
-| `tssignature` | `pysignature` | Change a function signature and update all call sites |
-
-**Implementation approach:**
-- Parse using the [TypeScript compiler API](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API) (via `ts-morph` for a higher-level wrapper) — gives full type-aware AST with symbol resolution, eliminating the false-positive problem that affects the Python tools.
-- Ship as a second MCP server (`bonsai-ts`) that Claude Code connects to alongside `bonsai`, or fold into the same server with a `language` parameter.
-- Node.js runtime required (no Python dependency for the TS tools).
-
-The type-aware AST is the key advantage over the Python implementation: `ts-morph` can resolve that `.save()` on a `User` is distinct from `.save()` on a `Document`, which the Python AST cannot.
-
-Contributions welcome — see [Issues](https://github.com/ValentinFigue/bonsai/issues) for the tracking issue.
+---
 
 ## License
 

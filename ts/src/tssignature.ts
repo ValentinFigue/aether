@@ -142,13 +142,13 @@ export async function doSignature(
   // ── Update call sites ──────────────────────────────────────────────────────
 
   for (const callExpr of callExprs) {
-    // Remove
-    for (const name of options.remove ?? []) {
-      const idx = originalParams.indexOf(name);
-      const currentArgs = callExpr.getArguments();
-      if (idx !== -1 && idx < currentArgs.length) {
-        callExpr.removeArgument(idx);
-      }
+    // Remove — process in descending index order so earlier removals don't shift later indices
+    const removeIndices = (options.remove ?? [])
+      .map((name) => originalParams.indexOf(name))
+      .filter((idx) => idx !== -1)
+      .sort((a, b) => b - a);
+    for (const idx of removeIndices) {
+      if (idx < callExpr.getArguments().length) callExpr.removeArgument(idx);
     }
 
     // Add (no default → insert placeholder)

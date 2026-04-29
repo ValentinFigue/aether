@@ -36,29 +36,7 @@ bonsai/
 
 ## Install
 
-### Option A — Claude Code plugin system (recommended)
-
-```
-/plugin marketplace add ValentinFigue/bonsai
-/plugin install bonsai
-/bonsai:setup
-```
-
-- Line 1 adds this repo as a plugin marketplace (one-time).
-- Line 2 installs the plugin (skills auto-load on restart).
-- `/bonsai:setup` registers the MCP servers in `~/.claude.json`.
-
-**Restart Claude Code** after running `/bonsai:setup`.
-
-### Option B — Direct URL install
-
-```
-/plugin install https://github.com/ValentinFigue/bonsai
-```
-
-Then run `/bonsai:setup` and restart.
-
-### Option C — Manual (no plugin system)
+### Option A — Manual install (recommended for now)
 
 **Python server:**
 ```bash
@@ -80,8 +58,35 @@ Verify Python setup:
 python -m bonsai_python --verify
 ```
 
-> Option C skips the plugin skills layer. Claude will still invoke the tools when asked,
+> This option skips the plugin skills layer. Claude will still invoke the tools when asked,
 > but won't auto-select them for refactoring tasks the way the skills layer enables.
+
+### Option B — Claude Code plugin system (coming soon)
+
+> **Not yet available.** The plugin marketplace install will be enabled once bonsai is listed
+> in the official Claude Code marketplace. When that happens, the install will be:
+
+```
+/plugin marketplace add ValentinFigue/bonsai
+/plugin install bonsai
+/bonsai:setup
+```
+
+- Line 1 adds this repo as a plugin marketplace (one-time).
+- Line 2 installs the plugin (skills auto-load on restart).
+- `/bonsai:setup` registers the MCP servers in `~/.claude.json`.
+
+Then restart Claude Code.
+
+### Option C — Direct URL install (coming soon)
+
+> **Not yet available.** Once bonsai is listed in the marketplace, you will also be able to install via direct URL:
+
+```
+/plugin install https://github.com/ValentinFigue/bonsai
+```
+
+Then run `/bonsai:setup` and restart.
 
 ---
 

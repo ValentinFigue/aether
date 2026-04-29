@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bonsai"
-version = "0.1.0"
+version = "0.0.1"
 description = "AST-based Python refactoring tools as a Claude Code MCP plugin"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -17,7 +17,7 @@ keywords = [
     "python", "rename", "dead-code", "imports"
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",

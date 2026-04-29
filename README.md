@@ -1,11 +1,11 @@
 # bonsai
 
-[![PyPI version](https://img.shields.io/pypi/v/bonsai)](https://pypi.org/project/bonsai/)
-[![Python 3.10+](https://img.shields.io/pypi/pyversions/bonsai)](https://pypi.org/project/bonsai/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/ValentinFigue/bonsai/actions/workflows/ci.yml/badge.svg)](https://github.com/ValentinFigue/bonsai/actions/workflows/ci.yml)
 
-AST-based Python refactoring tools for Claude Code. Find symbol references, detect dead code, rename identifiers, move files and symbols, and update function signatures — driven by static analysis, with no language server or type-checking daemon required.
+AST-based Python refactoring tools for Claude Code.
+
+> **Status: early alpha.** The tools work but the project is new — expect rough edges. Feedback and bug reports are welcome. Find symbol references, detect dead code, rename identifiers, move files and symbols, and update function signatures — driven by static analysis, with no language server or type-checking daemon required.
 
 ## Install
 
@@ -217,13 +217,28 @@ Register in dev (writes to `~/.claude.json`):
 claude mcp add bonsai --scope user -- python -m bonsai
 ```
 
-Publish a new version to PyPI:
+## Roadmap
 
-```bash
-pip install hatch
-hatch build
-hatch publish
-```
+### TypeScript / JavaScript support
+
+The current toolset is Python-only. A TypeScript/JS equivalent is planned, addressing the most common mixed-codebase gap:
+
+| Planned tool | Equivalent | Description |
+|---|---|---|
+| `tsfindrefs` | `pyfindrefs` | Find all usages of a symbol across `.ts`/`.tsx`/`.js`/`.jsx` files |
+| `tsrename` | `pyrename` | Scope-aware rename using the TypeScript compiler API |
+| `tsmove` | `pymove` | Move/rename a file or module and rewrite all imports |
+| `tsmovesymbol` | `pymovesymbol` | Move a single function or class to a different module |
+| `tssignature` | `pysignature` | Change a function signature and update all call sites |
+
+**Implementation approach:**
+- Parse using the [TypeScript compiler API](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API) (via `ts-morph` for a higher-level wrapper) — gives full type-aware AST with symbol resolution, eliminating the false-positive problem that affects the Python tools.
+- Ship as a second MCP server (`bonsai-ts`) that Claude Code connects to alongside `bonsai`, or fold into the same server with a `language` parameter.
+- Node.js runtime required (no Python dependency for the TS tools).
+
+The type-aware AST is the key advantage over the Python implementation: `ts-morph` can resolve that `.save()` on a `User` is distinct from `.save()` on a `Document`, which the Python AST cannot.
+
+Contributions welcome — see [Issues](https://github.com/ValentinFigue/bonsai/issues) for the tracking issue.
 
 ## License
 

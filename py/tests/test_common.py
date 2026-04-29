@@ -1,8 +1,8 @@
-"""Unit tests for bonsai_refactor._common utilities."""
+"""Unit tests for bonsai_python._common utilities."""
 
 from pathlib import Path
 
-from bonsai_refactor._common import (
+from bonsai_python._common import (
     FileChanges,
     FileEdit,
     apply_changes,

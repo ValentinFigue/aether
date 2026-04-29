@@ -12,8 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uvx ruff check src/
-      - run: uvx ruff format --check src/
+      - run: uvx ruff check py/src/
+      - run: uvx ruff format --check py/src/
 
   test:
     name: Tests (Python ${{ matrix.python-version }})
@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: pytest tests/ -v
+      - run: pytest py/tests/ -v
 
   smoke:
     name: Smoke Tests (Python ${{ matrix.python-version }})
@@ -45,12 +45,12 @@ jobs:
       - run: pip install -e .
       - name: Help checks
         run: |
-          python -m bonsai_refactor --help
-          python -m bonsai_refactor.pyfindrefs --help
-          python -m bonsai_refactor.pyfindunused --help
-          python -m bonsai_refactor.pymove --help
-          python -m bonsai_refactor.pymovesymbol --help
-          python -m bonsai_refactor.pyrename --help
-          python -m bonsai_refactor.pysignature --help
+          python -m bonsai_python --help
+          python -m bonsai_python.pyfindrefs --help
+          python -m bonsai_python.pyfindunused --help
+          python -m bonsai_python.pymove --help
+          python -m bonsai_python.pymovesymbol --help
+          python -m bonsai_python.pyrename --help
+          python -m bonsai_python.pysignature --help
       - name: End-to-end
-        run: python -m bonsai_refactor.pyfindrefs "bonsai_refactor.pyfindrefs:find_refs"
+        run: python -m bonsai_python.pyfindrefs "bonsai_python.pyfindrefs:find_refs"

@@ -43,17 +43,17 @@ Registers only the MCP server, without skills or plugin management:
 
 ```bash
 # With uv (recommended — no global install needed):
-claude mcp add bonsai-refactor --scope user -- uvx bonsai-refactor
+claude mcp add bonsai-python --scope user -- uvx bonsai-python
 
 # With pip:
-pip install bonsai-refactor
-claude mcp add bonsai-refactor --scope user -- python -m bonsai_refactor
+pip install bonsai-python
+claude mcp add bonsai-python --scope user -- python -m bonsai_python
 ```
 
 **Restart Claude Code** after running. Verify it worked:
 
 ```bash
-python -m bonsai_refactor --verify
+python -m bonsai_python --verify
 ```
 
 > Option C skips the plugin skills layer. Claude will still use the MCP tools when
@@ -62,7 +62,7 @@ python -m bonsai_refactor --verify
 
 ## How it works
 
-`bonsai-refactor` runs as an MCP server that Claude Code connects to over stdio. When you describe a refactoring in natural language, Claude picks the right tool, calls it with the correct arguments, and shows you the result. No slash commands, no Bash permissions needed for the tools.
+`bonsai-python` runs as an MCP server that Claude Code connects to over stdio. When you describe a refactoring in natural language, Claude picks the right tool, calls it with the correct arguments, and shows you the result. No slash commands, no Bash permissions needed for the tools.
 
 The tools use Python's `ast` module to parse source files directly — the only runtime dependency is `mcp[cli]`. They work on any Python 3.10+ project regardless of framework.
 
@@ -137,7 +137,7 @@ All mutating tools (`pymove`, `pymovesymbol`, `pyrename`, `pysignature`) support
 
 **Tools don't appear in Claude Code after install**
 
-Run `python -m bonsai_refactor --verify` to check the configuration, then restart Claude Code. If that doesn't help, re-run `claude mcp add bonsai-refactor --scope user -- uvx bonsai-refactor` and restart again.
+Run `python -m bonsai_python --verify` to check the configuration, then restart Claude Code. If that doesn't help, re-run `claude mcp add bonsai-python --scope user -- uvx bonsai-python` and restart again.
 
 **`uvx` not found**
 
@@ -147,11 +147,11 @@ Install uv first, then retry `/bonsai:setup`:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Or use the pip form: `claude mcp add bonsai-refactor --scope user -- python -m bonsai_refactor`.
+Or use the pip form: `claude mcp add bonsai-python --scope user -- python -m bonsai_python`.
 
 **Wrong Python / virtual environment**
 
-If using `claude mcp add ... -- python -m bonsai_refactor`, make sure it's the Python Claude Code will invoke. The `uvx bonsai-refactor` form is usually safer since uv manages the environment automatically.
+If using `claude mcp add ... -- python -m bonsai_python`, make sure it's the Python Claude Code will invoke. The `uvx bonsai-python` form is usually safer since uv manages the environment automatically.
 
 **`pyfindrefs` returns "No references found" for a valid symbol**
 
@@ -208,13 +208,13 @@ pip install -e .
 Run the MCP server directly:
 
 ```bash
-python -m bonsai_refactor  # start the stdio MCP server (used by Claude Code via stdio)
+python -m bonsai_python  # start the stdio MCP server (used by Claude Code via stdio)
 ```
 
 Register in dev (writes to `~/.claude.json`):
 
 ```bash
-claude mcp add bonsai-refactor --scope user -- python -m bonsai_refactor
+claude mcp add bonsai-python --scope user -- python -m bonsai_python
 ```
 
 ## Roadmap

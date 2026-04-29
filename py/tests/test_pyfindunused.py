@@ -1,7 +1,7 @@
-"""Tests for bonsai_refactor.pyfindunused detectors."""
+"""Tests for bonsai_python.pyfindunused detectors."""
 
-from bonsai_refactor._common import collect_python_files
-from bonsai_refactor.pyfindunused import find_dead_code, find_unused_imports, find_unused_params
+from bonsai_python._common import collect_python_files
+from bonsai_python.pyfindunused import find_dead_code, find_unused_imports, find_unused_params
 
 # ── find_dead_code ─────────────────────────────────────────────────────────────
 

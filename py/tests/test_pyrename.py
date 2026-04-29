@@ -1,6 +1,6 @@
-"""Tests for bonsai_refactor.pyrename.do_rename."""
+"""Tests for bonsai_python.pyrename.do_rename."""
 
-from bonsai_refactor.pyrename import do_rename
+from bonsai_python.pyrename import do_rename
 
 
 class TestDoRename:

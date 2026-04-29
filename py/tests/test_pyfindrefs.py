@@ -1,6 +1,6 @@
-"""Tests for bonsai_refactor.pyfindrefs.find_refs."""
+"""Tests for bonsai_python.pyfindrefs.find_refs."""
 
-from bonsai_refactor.pyfindrefs import find_refs
+from bonsai_python.pyfindrefs import find_refs
 
 
 class TestFindRefs:

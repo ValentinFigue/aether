@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "bonsai": {
+    "bonsai-refactor": {
       "command": "uvx",
-      "args": ["bonsai"]
+      "args": ["bonsai-refactor"]
     }
   }
 }

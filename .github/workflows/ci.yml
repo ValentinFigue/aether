@@ -45,12 +45,12 @@ jobs:
       - run: pip install -e .
       - name: Help checks
         run: |
-          python -m bonsai --help
-          python -m bonsai.pyfindrefs --help
-          python -m bonsai.pyfindunused --help
-          python -m bonsai.pymove --help
-          python -m bonsai.pymovesymbol --help
-          python -m bonsai.pyrename --help
-          python -m bonsai.pysignature --help
+          python -m bonsai_refactor --help
+          python -m bonsai_refactor.pyfindrefs --help
+          python -m bonsai_refactor.pyfindunused --help
+          python -m bonsai_refactor.pymove --help
+          python -m bonsai_refactor.pymovesymbol --help
+          python -m bonsai_refactor.pyrename --help
+          python -m bonsai_refactor.pysignature --help
       - name: End-to-end
-        run: python -m bonsai.pyfindrefs "bonsai.pyfindrefs:find_refs"
+        run: python -m bonsai_refactor.pyfindrefs "bonsai_refactor.pyfindrefs:find_refs"

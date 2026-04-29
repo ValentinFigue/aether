@@ -1,16 +1,16 @@
 {
   "$schema": "https://www.schemastore.org/claude-code-marketplace.json",
-  "name": "bonsai",
+  "name": "bonsai-refactor",
   "description": "AST-based Python refactoring tools for Claude Code",
   "owner": {
     "name": "ValentinFigue"
   },
   "plugins": [
     {
-      "name": "bonsai",
+      "name": "bonsai-refactor",
       "source": "ValentinFigue/bonsai",
       "description": "Find references, detect dead code, rename symbols, move files/symbols, and change function signatures — driven by AST analysis, no language server required.",
-      "version": "0.1.0",
+      "version": "0.0.1",
       "author": {
         "name": "Valentin Figué"
       },

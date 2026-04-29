@@ -32,17 +32,17 @@ def _install(command: str, settings_path: Path) -> None:
         except json.JSONDecodeError:
             logger.warning("could not parse %s, preserving existing content.", claude_json_path)
 
-    claude_json.setdefault("mcpServers", {})["bonsai"] = {
+    claude_json.setdefault("mcpServers", {})["bonsai-refactor"] = {
         "type": "stdio",
         "command": command,
-        "args": ["-m", "bonsai"],
+        "args": ["-m", "bonsai_refactor"],
     }
 
     tmp = claude_json_path.with_suffix(".tmp")
     tmp.write_text(json.dumps(claude_json, indent=2) + "\n")
     os.replace(tmp, claude_json_path)
 
-    # Write mcp__bonsai__* permission to ~/.claude/settings.json
+    # Write mcp__bonsai_refactor__* permission to ~/.claude/settings.json
     settings: dict = {}
     if settings_path.exists():
         try:
@@ -51,14 +51,14 @@ def _install(command: str, settings_path: Path) -> None:
             logger.warning("could not parse %s, creating fresh config.", settings_path)
 
     allow = settings.setdefault("permissions", {}).setdefault("allow", [])
-    if "mcp__bonsai__*" not in allow:
-        allow.append("mcp__bonsai__*")
+    if "mcp__bonsai_refactor__*" not in allow:
+        allow.append("mcp__bonsai_refactor__*")
         tmp = settings_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(settings, indent=2) + "\n")
         os.replace(tmp, settings_path)
 
-    print(f"Installed. Added 'bonsai' MCP server to {claude_json_path}")
-    print("Restart Claude Code to load the bonsai MCP server.")
+    print(f"Installed. Added 'bonsai-refactor' MCP server to {claude_json_path}")
+    print("Restart Claude Code to load the bonsai-refactor MCP server.")
     print()
     print("Available tools: pyfindrefs, pycallers, pyfindunused, pygrep, pymove, pymovesymbol, pyrename, pysignature")
 
@@ -113,22 +113,22 @@ def _verify(settings_path: Path) -> None:
 
     # Check ~/.claude.json for MCP server entry
     if not claude_json_path.exists():
-        print(f"✗ {claude_json_path} not found — run: python -m bonsai --install")
+        print(f"✗ {claude_json_path} not found — run: python -m bonsai_refactor --install")
         ok = False
     else:
         try:
             data = json.loads(claude_json_path.read_text())
         except json.JSONDecodeError:
             data = {}
-        if "bonsai" in data.get("mcpServers", {}):
+        if "bonsai-refactor" in data.get("mcpServers", {}):
             print(f"✓ MCP server registered in {claude_json_path}")
         else:
-            print(f"✗ 'bonsai' not in {claude_json_path} — run: python -m bonsai --install")
+            print(f"✗ 'bonsai-refactor' not in {claude_json_path} — run: python -m bonsai_refactor --install")
             ok = False
 
     # Check ~/.claude/settings.json for permission allowlist
     if not settings_path.exists():
-        print(f"✗ {settings_path} not found — run: python -m bonsai --install")
+        print(f"✗ {settings_path} not found — run: python -m bonsai_refactor --install")
         ok = False
     else:
         try:
@@ -136,16 +136,16 @@ def _verify(settings_path: Path) -> None:
         except json.JSONDecodeError:
             settings = {}
         allow = settings.get("permissions", {}).get("allow", [])
-        if "mcp__bonsai__*" in allow:
+        if "mcp__bonsai_refactor__*" in allow:
             print(f"✓ Permissions granted in {settings_path}")
         else:
-            print(f"✗ 'mcp__bonsai__*' not in {settings_path} — run: python -m bonsai --install")
+            print(f"✗ 'mcp__bonsai_refactor__*' not in {settings_path} — run: python -m bonsai_refactor --install")
             ok = False
 
     if ok:
         print("\nAll good! Restart Claude Code if you haven't already.")
     else:
-        print("\nRe-run 'python -m bonsai --install', then restart Claude Code.")
+        print("\nRe-run 'python -m bonsai_refactor --install', then restart Claude Code.")
 
 
 def main() -> None:
@@ -157,7 +157,7 @@ def main() -> None:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"%(prog)s {importlib.metadata.version('bonsai')}",
+        version=f"%(prog)s {importlib.metadata.version('bonsai-refactor')}",
     )
     install_group = parser.add_argument_group("installation")
     install_group.add_argument(

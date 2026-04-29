@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from bonsai.server import pycallers, pyfindrefs, pyfindunused, pygrep, pysignature
+from bonsai_refactor.server import pycallers, pyfindrefs, pyfindunused, pygrep, pysignature
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "sample_project"
 

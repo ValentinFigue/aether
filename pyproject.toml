@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "bonsai"
+name = "bonsai-refactor"
 version = "0.0.1"
 description = "AST-based Python refactoring tools as a Claude Code MCP plugin"
 readme = "README.md"
@@ -43,19 +43,19 @@ Repository = "https://github.com/valentinfigue/bonsai"
 Issues = "https://github.com/valentinfigue/bonsai/issues"
 
 [project.scripts]
-bonsai       = "bonsai.__main__:main"
-pyfindrefs   = "bonsai.pyfindrefs:main"
-pycallers    = "bonsai.pycallers:main"
-pyfindunused = "bonsai.pyfindunused:main"
-pygrep       = "bonsai.pygrep:main"
-pymove       = "bonsai.pymove:main"
-pymovesymbol = "bonsai.pymovesymbol:main"
-pyrename     = "bonsai.pyrename:main"
-pysignature  = "bonsai.pysignature:main"
+bonsai-refactor = "bonsai_refactor.__main__:main"
+pyfindrefs      = "bonsai_refactor.pyfindrefs:main"
+pycallers       = "bonsai_refactor.pycallers:main"
+pyfindunused    = "bonsai_refactor.pyfindunused:main"
+pygrep          = "bonsai_refactor.pygrep:main"
+pymove          = "bonsai_refactor.pymove:main"
+pymovesymbol    = "bonsai_refactor.pymovesymbol:main"
+pyrename        = "bonsai_refactor.pyrename:main"
+pysignature     = "bonsai_refactor.pysignature:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/bonsai"]
-artifacts = ["src/bonsai/_hooks_template.json"]
+packages = ["src/bonsai_refactor"]
+artifacts = ["src/bonsai_refactor/_hooks_template.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

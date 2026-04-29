@@ -9,28 +9,56 @@ AST-based Python refactoring tools for Claude Code. Find symbol references, dete
 
 ## Install
 
-**With uv (recommended — no global install needed):**
+### Option A — Claude Code plugin system (recommended)
 
-```bash
-claude mcp add bonsai --scope user -- uvx bonsai
+Run these slash commands inside Claude Code:
+
+```
+/plugin marketplace add ValentinFigue/bonsai
+/plugin install bonsai
+/bonsai:setup
 ```
 
-**With pip:**
+- The first line adds this repo as a plugin marketplace (one-time, saved globally).
+- The second installs the plugin (skills auto-load on next restart).
+- `/bonsai:setup` registers the MCP server in `~/.claude.json` — this is the step
+  that makes the 8 tools available. It survives plugin updates because it writes
+  outside the plugin directory.
+
+**Restart Claude Code** after running `/bonsai:setup`.
+
+### Option B — Direct URL install
+
+No marketplace setup needed:
+
+```
+/plugin install https://github.com/ValentinFigue/bonsai
+```
+
+Then run `/bonsai:setup` and restart.
+
+### Option C — Manual (no plugin system)
+
+Registers only the MCP server, without skills or plugin management:
 
 ```bash
+# With uv (recommended — no global install needed):
+claude mcp add bonsai --scope user -- uvx bonsai
+
+# With pip:
 pip install bonsai
 claude mcp add bonsai --scope user -- python -m bonsai
 ```
 
-**Restart Claude Code** after either option. Verify it worked:
+**Restart Claude Code** after running. Verify it worked:
 
 ```bash
 python -m bonsai --verify
 ```
 
-Both commands write to `~/.claude.json` (user-global config), so the registration
-survives updates. All 8 tools are immediately available with no slash commands or
-extra permissions needed.
+> Option C skips the plugin skills layer. Claude will still use the MCP tools when
+> you explicitly ask, but won't auto-invoke them for refactoring tasks the way the
+> skills layer enables.
 
 ## How it works
 
@@ -111,13 +139,15 @@ All mutating tools (`pymove`, `pymovesymbol`, `pyrename`, `pysignature`) support
 
 Run `python -m bonsai --verify` to check the configuration, then restart Claude Code. If that doesn't help, re-run `claude mcp add bonsai --scope user -- uvx bonsai` and restart again.
 
-**`python -m bonsai` not found after `pip install`**
+**`uvx` not found**
 
-Your `pip`'s script directory may not be on `PATH`. Try:
+Install uv first, then retry `/bonsai:setup`:
+
 ```bash
-python3 -m bonsai --install   # or use the full python path
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
-Or use the `uvx` option which doesn't require PATH setup.
+
+Or use the pip form: `claude mcp add bonsai --scope user -- python -m bonsai`.
 
 **Wrong Python / virtual environment**
 

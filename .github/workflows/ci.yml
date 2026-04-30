@@ -9,11 +9,14 @@ jobs:
   py-lint:
     name: Python Lint & Format
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: py
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uvx ruff check py/src/
-      - run: uvx ruff format --check py/src/
+      - run: uvx ruff check src/
+      - run: uvx ruff format --check src/
 
   py-test:
     name: Python Tests (Python ${{ matrix.python-version }})
@@ -27,11 +30,11 @@ jobs:
         working-directory: py
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e ".[dev]"
-      - run: pytest tests/ -v
+      - run: uv sync
+      - run: uv run pytest tests/ -v
 
   py-smoke:
     name: Python Smoke Tests (Python ${{ matrix.python-version }})
@@ -45,21 +48,21 @@ jobs:
         working-directory: py
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: pip install -e .
+      - run: uv sync --no-dev
       - name: Help checks
         run: |
-          python -m bonsai_python --help
-          python -m bonsai_python.pyfindrefs --help
-          python -m bonsai_python.pyfindunused --help
-          python -m bonsai_python.pymove --help
-          python -m bonsai_python.pymovesymbol --help
-          python -m bonsai_python.pyrename --help
-          python -m bonsai_python.pysignature --help
+          uv run python -m bonsai_python --help
+          uv run python -m bonsai_python.pyfindrefs --help
+          uv run python -m bonsai_python.pyfindunused --help
+          uv run python -m bonsai_python.pymove --help
+          uv run python -m bonsai_python.pymovesymbol --help
+          uv run python -m bonsai_python.pyrename --help
+          uv run python -m bonsai_python.pysignature --help
       - name: End-to-end
-        run: python -m bonsai_python.pyfindrefs "bonsai_python.pyfindrefs:find_refs"
+        run: uv run python -m bonsai_python.pyfindrefs "bonsai_python.pyfindrefs:find_refs"
 
   ts-lint:
     name: TypeScript Lint & Type Check

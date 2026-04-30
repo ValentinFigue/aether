@@ -3,11 +3,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "bonsai-python"
+name = "bonsai-py"
 version = "0.0.1"
 description = "AST-based Python refactoring tools as a Claude Code MCP plugin"
-readme = "README.md"
-license = { file = "LICENSE" }
+readme = "../README.md"
+license = { file = "../LICENSE" }
 requires-python = ">=3.10"
 authors = [
     { name = "Valentin Figué", email = "valentin.figue@orange.fr" }
@@ -34,7 +34,7 @@ dependencies = [
     "tomli>=1.1.0; python_version < '3.11'",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = ["pytest>=8.0", "pre-commit>=4.0"]
 
 [project.urls]
@@ -43,22 +43,22 @@ Repository = "https://github.com/valentinfigue/bonsai"
 Issues = "https://github.com/valentinfigue/bonsai/issues"
 
 [project.scripts]
-bonsai-python = "bonsai_python.__main__:main"
-pyfindrefs    = "bonsai_python.pyfindrefs:main"
-pycallers     = "bonsai_python.pycallers:main"
-pyfindunused  = "bonsai_python.pyfindunused:main"
-pygrep        = "bonsai_python.pygrep:main"
-pymove        = "bonsai_python.pymove:main"
-pymovesymbol  = "bonsai_python.pymovesymbol:main"
-pyrename      = "bonsai_python.pyrename:main"
-pysignature   = "bonsai_python.pysignature:main"
+bonsai-py    = "bonsai_python.__main__:main"
+pyfindrefs   = "bonsai_python.pyfindrefs:main"
+pycallers    = "bonsai_python.pycallers:main"
+pyfindunused = "bonsai_python.pyfindunused:main"
+pygrep       = "bonsai_python.pygrep:main"
+pymove       = "bonsai_python.pymove:main"
+pymovesymbol = "bonsai_python.pymovesymbol:main"
+pyrename     = "bonsai_python.pyrename:main"
+pysignature  = "bonsai_python.pysignature:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["py/src/bonsai_python"]
-artifacts = ["py/src/bonsai_python/_hooks_template.json"]
+packages = ["src/bonsai_python"]
+artifacts = ["src/bonsai_python/_hooks_template.json"]
 
 [tool.pytest.ini_options]
-testpaths = ["py/tests"]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120

@@ -1,12 +1,11 @@
 {
   "mcpServers": {
-    "bonsai-python": {
-      "command": "uvx",
-      "args": ["bonsai-python"]
+    "bonsai-py": {
+      "command": "py/.venv/bin/bonsai-py"
     },
     "bonsai-ts": {
-      "command": "npx",
-      "args": ["--yes", "bonsai-ts@latest"]
+      "command": "node",
+      "args": ["ts/dist/server.js"]
     }
   }
 }

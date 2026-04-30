@@ -13,7 +13,7 @@ Two MCP servers, one repo:
 
 | Server | Language | Key advantage |
 |---|---|---|
-| `bonsai-python` | Python 3.10+ | AST-based, no type inference needed, zero extra deps |
+| `bonsai-py` | Python 3.10+ | AST-based, no type inference needed, zero extra deps |
 | `bonsai-ts` | TypeScript / JavaScript | TypeScript compiler API — fully type-aware, no false positives from same-named methods |
 
 ## Repository layout
@@ -22,15 +22,67 @@ Two MCP servers, one repo:
 bonsai/
 ├── py/                        # Python MCP server
 │   ├── src/bonsai_python/     # source modules
-│   └── tests/                 # pytest suite + fixtures
+│   ├── tests/                 # pytest suite + fixtures
+│   └── pyproject.toml         # Python packaging (hatchling)
 ├── ts/                        # TypeScript MCP server
 │   ├── src/                   # TypeScript source modules
 │   └── tests/                 # vitest suite + fixtures
+├── scripts/                   # dev helper scripts
 ├── skills/                    # Claude Code skill definitions
 ├── .claude-plugin/            # plugin manifest, hooks, marketplace config
-├── .mcp.json                  # registers both MCP servers for local dev
-└── pyproject.toml             # Python packaging (hatchling)
+└── .mcp.json                  # registers both MCP servers for local dev
 ```
+
+---
+
+## Developing locally
+
+### 1. Clone and build
+
+```bash
+git clone https://github.com/ValentinFigue/bonsai
+cd bonsai
+bash scripts/setup.sh
+```
+
+`setup.sh` installs Python deps via uv (into `py/.venv`) and builds the TypeScript server.
+
+### 2. Connect Claude Code to your local build
+
+The `.mcp.json` at the repo root registers both servers from your local build.
+Open the `bonsai/` directory in Claude Code — both servers connect automatically.
+
+Verify in Claude Code Settings → MCP: both `bonsai-py` and `bonsai-ts` should show **✓ Connected**.
+
+If a server fails to connect, test it manually:
+
+```bash
+py/.venv/bin/bonsai-py  # Python server
+node ts/dist/server.js   # TypeScript server
+```
+
+Then restart Claude Code.
+
+### 3. Run the tests
+
+```bash
+bash scripts/test.sh
+```
+
+Or per-language:
+
+```bash
+# Python only
+cd py && uv run pytest tests/ -v
+
+# TypeScript only
+cd ts && npm test
+```
+
+### 4. Iterating
+
+- **Python:** edit `py/src/bonsai_python/`, re-run pytest. No server restart needed.
+- **TypeScript:** edit `ts/src/`, run `cd ts && npm run build`. Restart Claude Code to pick up the new build.
 
 ---
 
@@ -41,11 +93,11 @@ bonsai/
 **Python server:**
 ```bash
 # With uv (recommended):
-claude mcp add bonsai-python --scope user -- uvx bonsai-python
+claude mcp add bonsai-py --scope user -- uvx bonsai-py
 
 # With pip:
-pip install bonsai-python
-claude mcp add bonsai-python --scope user -- python -m bonsai_python
+pip install bonsai-py
+claude mcp add bonsai-py --scope user -- python -m bonsai_python
 ```
 
 **TypeScript server:**
@@ -71,13 +123,67 @@ python -m bonsai_python --verify
 
 - Line 1 registers this repo as a plugin marketplace (one-time).
 - Line 2 installs the `bonsai` plugin from that marketplace — the `@ValentinFigue/bonsai` suffix tells Claude Code which marketplace to resolve the plugin against.
-- `/bonsai:setup` registers both MCP servers (`bonsai-python` and `bonsai-ts`) in `~/.claude.json`.
+- `/bonsai:setup` registers both MCP servers (`bonsai-py` and `bonsai-ts`) in `~/.claude.json`.
 
 Then restart Claude Code.
 
 ---
 
-## Python tools (`bonsai-python`)
+## Publishing
+
+> What needs to happen before end-users can install bonsai without cloning the repo.
+
+### Current blockers
+
+| Blocker | Status |
+|---|---|
+| `bonsai-py` not yet published to PyPI | ❌ |
+| `bonsai-ts` not yet published to npm | ❌ |
+
+### Step 1 — Publish the Python package to PyPI
+
+```bash
+cd py
+uv build
+uv publish   # set PYPI_TOKEN env var or pass --token
+```
+
+Verify: `uvx bonsai-py --help`
+
+### Step 2 — Publish the TypeScript package to npm
+
+```bash
+cd ts
+npm run build
+npm publish --access public   # requires npm login
+```
+
+Verify: `npx --yes bonsai-ts --help`
+
+### Step 3 — Switch `.mcp.json` to published packages
+
+Once both packages are live, update `.mcp.json` to the published form:
+
+```json
+{
+  "mcpServers": {
+    "bonsai-py": {
+      "command": "uvx",
+      "args": ["bonsai-py"]
+    },
+    "bonsai-ts": {
+      "command": "npx",
+      "args": ["--yes", "bonsai-ts@latest"]
+    }
+  }
+}
+```
+
+At that point the plugin install flow in `## Install → Option B` works end-to-end.
+
+---
+
+## Python tools (`bonsai-py`)
 
 | Tool | What it does |
 |---|---|
@@ -226,7 +332,7 @@ Claude uses dry-run by default for all mutating operations.
 
 Run `python -m bonsai_python --verify`, then restart Claude Code. If that doesn't help:
 ```bash
-claude mcp add bonsai-python --scope user -- uvx bonsai-python
+claude mcp add bonsai-py --scope user -- uvx bonsai-py
 claude mcp add bonsai-ts --scope user -- npx --yes bonsai-ts
 ```
 Then restart.
@@ -269,38 +375,6 @@ dead_code_extra_skip_dirs = ["fixtures", "scripts"]
 ```
 
 Each setting has an `extra_*` variant (merged with defaults) and a base variant (replaces defaults entirely).
-
----
-
-## Development
-
-```bash
-git clone https://github.com/valentinfigue/bonsai
-cd bonsai
-
-# Python
-pip install -e ".[dev]"
-pytest py/tests/ -v
-
-# TypeScript
-cd ts && npm install && npm run build && npm test
-```
-
-**Run the MCP servers locally:**
-
-```bash
-python -m bonsai_python          # Python MCP server (stdio)
-node ts/dist/server.js           # TypeScript MCP server (stdio)
-```
-
-**Register local dev versions:**
-
-```bash
-claude mcp add bonsai-python --scope user -- python -m bonsai_python
-claude mcp add bonsai-ts --scope user -- node /path/to/bonsai/ts/dist/server.js
-```
-
-Or point Claude Code at `.mcp.json` in the repo root (already configured for both servers — use `npx --yes` for the published versions or update to `node ts/dist/server.js` for local builds).
 
 ---
 

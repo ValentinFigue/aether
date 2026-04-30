@@ -12,7 +12,7 @@ when_to_use: >
   extract a class to another module; find all usages/callers of a symbol; detect
   dead code or unused imports; add/remove/rename a parameter and update call sites;
   find where a symbol is imported or subclassed.
-allowed-tools: mcp__bonsai_python__pyrename, mcp__bonsai_python__pymove, mcp__bonsai_python__pymovesymbol, mcp__bonsai_python__pyfindrefs, mcp__bonsai_python__pycallers, mcp__bonsai_python__pyfindunused, mcp__bonsai_python__pysignature, mcp__bonsai_python__pygrep
+allowed-tools: mcp__bonsai_py__pyrename, mcp__bonsai_py__pymove, mcp__bonsai_py__pymovesymbol, mcp__bonsai_py__pyfindrefs, mcp__bonsai_py__pycallers, mcp__bonsai_py__pyfindunused, mcp__bonsai_py__pysignature, mcp__bonsai_py__pygrep
 ---
 
 # Python Refactoring with Bonsai

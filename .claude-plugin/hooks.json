@@ -3,7 +3,7 @@
   "hooks": [
     {
       "type": "PreToolUse",
-      "matcher": "mcp__bonsai_python__(pyrename|pymove|pymovesymbol|pysignature)",
+      "matcher": "mcp__bonsai_py__(pyrename|pymove|pymovesymbol|pysignature)",
       "hooks": [
         {
           "type": "prompt",
@@ -13,7 +13,7 @@
     },
     {
       "type": "PostToolUse",
-      "matcher": "mcp__bonsai_python__(pyrename|pymove|pymovesymbol|pysignature)",
+      "matcher": "mcp__bonsai_py__(pyrename|pymove|pymovesymbol|pysignature)",
       "hooks": [
         {
           "type": "prompt",

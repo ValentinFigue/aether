@@ -84,6 +84,22 @@ cd ts && npm test
 - **Python:** edit `py/src/bonsai_python/`, re-run pytest. No server restart needed.
 - **TypeScript:** edit `ts/src/`, run `cd ts && npm run build`. Restart Claude Code to pick up the new build.
 
+### 5. Use the tools in other projects
+
+The `.mcp.json` only activates when you open the `bonsai/` directory. To use your local build in any project, register it globally once:
+
+```bash
+claude mcp add bonsai-py --scope user -- uv run --directory /Users/valentinfigue/Code/bonsai/py bonsai-py
+claude mcp add bonsai-ts --scope user -- node /Users/valentinfigue/Code/bonsai/ts/dist/server.js
+```
+
+When you publish and want to switch to the released packages:
+
+```bash
+claude mcp add bonsai-py --scope user -- uvx bonsai-py
+claude mcp add bonsai-ts --scope user -- npx --yes bonsai-ts
+```
+
 ---
 
 ## Install

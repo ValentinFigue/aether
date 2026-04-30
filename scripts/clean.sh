@@ -1,29 +1,36 @@
 #!/usr/bin/env bash
 set -e
 
-echo "==> Removing bonsai enforcement hook from ~/.claude.json"
+echo "==> Removing bonsai skills from ~/.claude/skills/"
+for skill_dir in skills/*/; do
+  skill_name=$(basename "$skill_dir")
+  rm -rf "$HOME/.claude/skills/$skill_name"
+  echo "  Removed: $skill_name"
+done
+
+echo "==> Removing enforcement hook from ~/.claude/settings.json"
 python3 - <<PYEOF
 import json, os
 
-config_path = os.path.expanduser("~/.claude.json")
+settings_path = os.path.expanduser("~/.claude/settings.json")
 try:
-    with open(config_path) as f:
-        config = json.load(f)
+    with open(settings_path) as f:
+        settings = json.load(f)
 except FileNotFoundError:
-    print("  ~/.claude.json not found, nothing to remove.")
+    print("  ~/.claude/settings.json not found, nothing to remove.")
     exit(0)
 
-pre = config.get("hooks", {}).get("PreToolUse", [])
+pre = settings.get("hooks", {}).get("PreToolUse", [])
 before = len(pre)
-config["hooks"]["PreToolUse"] = [
+settings["hooks"]["PreToolUse"] = [
     h for h in pre
     if not (h.get("matcher") == "Bash" and
             any("enforce-bonsai" in hook.get("command", "") for hook in h.get("hooks", [])))
 ]
-removed = before - len(config["hooks"]["PreToolUse"])
+removed = before - len(settings["hooks"]["PreToolUse"])
 
-with open(config_path, "w") as f:
-    json.dump(config, f, indent=2)
+with open(settings_path, "w") as f:
+    json.dump(settings, f, indent=2)
     f.write("\n")
 
 print(f"  Removed {removed} hook entry(ies).")

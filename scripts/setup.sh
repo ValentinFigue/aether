@@ -12,19 +12,27 @@ npm install
 npm run build
 cd ..
 
-echo "==> Registering enforcement hook in ~/.claude.json (user scope)"
+echo "==> Installing skills to ~/.claude/skills/"
+mkdir -p "$HOME/.claude/skills"
+for skill_dir in skills/*/; do
+  skill_name=$(basename "$skill_dir")
+  rsync -r "$skill_dir" "$HOME/.claude/skills/$skill_name/"
+  echo "  $skill_name"
+done
+
+echo "==> Registering enforcement hook in ~/.claude/settings.json (user scope)"
 HOOK_CMD="$(pwd)/.claude-plugin/hooks/enforce-bonsai.sh"
 python3 - <<PYEOF
 import json, os
 
-config_path = os.path.expanduser("~/.claude.json")
+settings_path = os.path.expanduser("~/.claude/settings.json")
 try:
-    with open(config_path) as f:
-        config = json.load(f)
+    with open(settings_path) as f:
+        settings = json.load(f)
 except FileNotFoundError:
-    config = {}
+    settings = {}
 
-hooks = config.setdefault("hooks", {})
+hooks = settings.setdefault("hooks", {})
 pre = hooks.setdefault("PreToolUse", [])
 
 # Remove any existing bonsai Bash enforcement hook, then re-add with current path.
@@ -38,15 +46,14 @@ pre.append({
     "hooks": [{"type": "command", "command": "$HOOK_CMD"}]
 })
 
-with open(config_path, "w") as f:
-    json.dump(config, f, indent=2)
+with open(settings_path, "w") as f:
+    json.dump(settings, f, indent=2)
     f.write("\n")
 
 print("  Hook registered:", "$HOOK_CMD")
 PYEOF
 
 echo ""
-echo "Done. Open this directory in Claude Code — both MCP servers should connect automatically."
-echo "Restart Claude Code to pick up the new hook."
+echo "Done. Restart Claude Code to pick up new skills and hooks."
 echo "Run scripts/test.sh to verify everything works."
-echo "Run scripts/clean.sh to remove local build artifacts and unregister the hook."
+echo "Run scripts/clean.sh to remove local build artifacts and unregister."

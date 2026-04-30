@@ -45,7 +45,7 @@ cd bonsai
 bash scripts/setup.sh
 ```
 
-`setup.sh` installs Python deps via uv (into `py/.venv`) and builds the TypeScript server.
+`setup.sh` installs Python deps via uv (into `py/.venv`), builds the TypeScript server, and writes `.claude/settings.json` with the enforcement hooks active. `sed` and `awk` on `.py`/`.ts`/`.tsx` files will be blocked in this directory and redirected to the appropriate bonsai tool. This file contains your absolute path and is gitignored.
 
 ### 2. Connect Claude Code to your local build
 
@@ -84,7 +84,22 @@ cd ts && npm test
 - **Python:** edit `py/src/bonsai_python/`, re-run pytest. No server restart needed.
 - **TypeScript:** edit `ts/src/`, run `cd ts && npm run build`. Restart Claude Code to pick up the new build.
 
-### 5. Use the tools in other projects
+### 5. Clean up local dev
+
+To remove all local dev artifacts (virtual env, TS build output, and the local hook config):
+
+```bash
+bash scripts/clean.sh
+```
+
+To also remove globally-registered MCP servers pointing to your local build:
+
+```bash
+claude mcp remove bonsai-py --scope user
+claude mcp remove bonsai-ts --scope user
+```
+
+### 6. Use the tools in other projects
 
 The `.mcp.json` only activates when you open the `bonsai/` directory. To use your local build in any project, register it globally once:
 

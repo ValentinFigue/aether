@@ -2,6 +2,16 @@
   "hooks": [
     {
       "type": "PreToolUse",
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "${CLAUDE_PLUGIN_ROOT}/hooks/enforce-bonsai.sh"
+        }
+      ]
+    },
+    {
+      "type": "PreToolUse",
       "matcher": "mcp__bonsai_py__(pyrename|pymove|pymovesymbol|pysignature)",
       "hooks": [
         {

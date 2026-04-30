@@ -57,8 +57,8 @@ Verify in Claude Code Settings → MCP: both `bonsai-py` and `bonsai-ts` should 
 If a server fails to connect, test it manually:
 
 ```bash
-py/.venv/bin/bonsai-py  # Python server
-node ts/dist/server.js   # TypeScript server
+uv run --directory py bonsai-py  # Python server
+node ts/dist/server.js            # TypeScript server
 ```
 
 Then restart Claude Code.

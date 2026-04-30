@@ -1,7 +1,8 @@
 {
   "mcpServers": {
     "bonsai-py": {
-      "command": "py/.venv/bin/bonsai-py"
+      "command": "uv",
+      "args": ["run", "--directory", "py", "bonsai-py"]
     },
     "bonsai-ts": {
       "command": "node",

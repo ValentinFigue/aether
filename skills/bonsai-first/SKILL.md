@@ -2,20 +2,21 @@
 name: bonsai:enforce
 description: >
   Redirects structural code operations on Python and TypeScript files to the correct
-  bonsai AST tool. Use before reaching for sed, grep, or awk on .py/.ts/.tsx files.
+  bonsai AST tool. Use before reaching for sed, grep, awk, or find on .py/.ts/.tsx files.
   Covers renaming, moving, finding references, signature changes, and dead-code detection
   across both languages.
 when_to_use: >
   Triggered when about to rename a symbol, move a file or symbol, find all usages,
-  change a function signature, detect dead code, or do any text replacement on
-  .py, .ts, or .tsx files. sed/awk on these files is blocked by the PreToolUse hook —
-  this skill fires first so the right tool is chosen before the block is hit.
+  change a function signature, detect dead code, or search for a pattern in
+  .py, .ts, or .tsx files. sed/awk/grep/find on these files is blocked by the
+  PreToolUse hook — this skill fires first so the right tool is chosen before the
+  block is hit.
 allowed-tools: mcp__bonsai_py__pyrename, mcp__bonsai_py__pymove, mcp__bonsai_py__pymovesymbol, mcp__bonsai_py__pyfindrefs, mcp__bonsai_py__pycallers, mcp__bonsai_py__pyfindunused, mcp__bonsai_py__pysignature, mcp__bonsai_py__pygrep, mcp__bonsai_ts__tsrename, mcp__bonsai_ts__tsmove, mcp__bonsai_ts__tsmovesymbol, mcp__bonsai_ts__tsfindrefs, mcp__bonsai_ts__tssignature
 ---
 
 # Bonsai-first: use AST tools, not text tools
 
-`sed` and `awk` on `.py`/`.ts`/`.tsx` files are blocked. Use the bonsai tool that matches the intent:
+`sed`, `awk`, `grep`, and `find` on `.py`/`.ts`/`.tsx` files are blocked. Use the bonsai tool that matches the intent:
 
 | Intent | Python | TypeScript |
 |---|---|---|
@@ -26,15 +27,14 @@ allowed-tools: mcp__bonsai_py__pyrename, mcp__bonsai_py__pymove, mcp__bonsai_py_
 | Find only call sites | `pycallers` | `tsfindrefs` (filter by kind) |
 | Change a function signature | `pysignature` | `tssignature` |
 | Detect dead code / unused imports | `pyfindunused` | — |
-| Text search (non-structural) | `pygrep` | Bash `grep` |
+| Text search (non-structural) | `pygrep` | `pygrep` |
 
-## Why not sed/grep for code operations?
+## Why not sed/grep/find for code operations?
 
-- **False matches**: `sed 's/save/persist/g'` renames local variables, string literals, and comments that happen to contain `save`.
-- **Missed sites**: imports, re-exports, decorator references, and type annotations are invisible to text substitution.
-- **Import paths not updated**: moving a file with `mv` + `sed` leaves stale import paths. `pymove`/`tsmove` rewrites them all.
-
-`grep` for plain text search (string literals, TODO markers, log patterns) is fine and not blocked.
+- **False matches**: `grep 'save'` hits local variables, string literals, comments, and unrelated methods with the same name.
+- **Missed sites**: imports, re-exports, decorator references, and type annotations are invisible to text search.
+- **Import paths not updated**: moving a file with `mv` + `grep`/`sed` leaves stale import paths. `pymove`/`tsmove` rewrites them all.
+- **No type awareness**: `grep 'User.save'` can't distinguish `User.save` from `Document.save`. `tsfindrefs` can.
 
 ## Dry-run first
 

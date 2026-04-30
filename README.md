@@ -45,7 +45,7 @@ cd bonsai
 bash scripts/setup.sh
 ```
 
-`setup.sh` installs Python deps via uv (into `py/.venv`), builds the TypeScript server, and writes `.claude/settings.json` with the enforcement hooks active. `sed` and `awk` on `.py`/`.ts`/`.tsx` files will be blocked in this directory and redirected to the appropriate bonsai tool. This file contains your absolute path and is gitignored.
+`setup.sh` installs Python deps via uv (into `py/.venv`), builds the TypeScript server, and registers the enforcement hook at user scope in `~/.claude.json`. `sed`, `awk`, `grep`, and `find` on `.py`/`.ts`/`.tsx` files will be blocked everywhere and redirected to the appropriate bonsai tool. Restart Claude Code to pick up the hook.
 
 ### 2. Connect Claude Code to your local build
 

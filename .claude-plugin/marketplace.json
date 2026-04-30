@@ -11,7 +11,7 @@
       "source": {
         "source": "url",
         "url": "https://github.com/ValentinFigue/bonsai.git"
-      }
+      },
       "description": "Find references, detect dead code, rename symbols, move files/symbols, and change function signatures across Python (AST-driven) and TypeScript (compiler API, type-aware) — no language server required.",
       "version": "0.0.1",
       "author": {

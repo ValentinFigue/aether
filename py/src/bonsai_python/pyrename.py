@@ -21,9 +21,11 @@ from ._common import (
     find_module_path,
     find_project_root,
     get_lines,
+    module_aliases_for_file,
     normalize_target,
     parse_file,
     parse_symbol_ref,
+    python_roots,
     resolve_relative_import,
 )
 
@@ -52,7 +54,7 @@ def find_imports_of_symbol(
     tree: ast.Module,
     filepath: Path,
     root: Path,
-    target_module: str,
+    target_modules: frozenset[str],
     target_symbol: str,
 ) -> list[TrackedImport]:
     """Find all import nodes in *tree* that bring *target_symbol* into scope.
@@ -65,7 +67,9 @@ def find_imports_of_symbol(
         tree: Parsed AST of the file to inspect.
         filepath: Path of the file (used for relative import resolution).
         root: Project root.
-        target_module: Dotted module name where the symbol is defined.
+        target_modules: All known dotted module names for the definition file
+            (e.g. both ``"mypkg.utils"`` and ``"src.mypkg.utils"`` for
+            src-layout projects).
         target_symbol: Name of the symbol being renamed.
 
     Returns:
@@ -76,7 +80,10 @@ def find_imports_of_symbol(
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == target_module or alias.name.startswith(target_module + "."):
+                if any(
+                    alias.name == tm or alias.name.startswith(tm + ".")
+                    for tm in target_modules
+                ):
                     results.append(
                         TrackedImport(
                             node=node,
@@ -89,35 +96,42 @@ def find_imports_of_symbol(
                     )
         elif isinstance(node, ast.ImportFrom):
             resolved = (
-                resolve_relative_import(filepath, root, node.level, node.module) if node.level > 0 else node.module
+                resolve_relative_import(filepath, root, node.level, node.module)
+                if node.level > 0
+                else node.module
             )
-            if resolved == target_module:
+            if resolved in target_modules:
                 for alias in node.names:
                     if alias.name in (target_symbol, "*"):
                         results.append(
                             TrackedImport(
                                 node=node,
-                                local_name=alias.asname or alias.name if alias.name != "*" else target_symbol,
+                                local_name=(
+                                    alias.asname or alias.name
+                                    if alias.name != "*"
+                                    else target_symbol
+                                ),
                                 is_module_import=False,
                                 lineno=node.lineno,
                                 end_lineno=node.end_lineno or node.lineno,
                             )
                         )
             # from parent import module_leaf (then module_leaf.symbol)
-            parent = target_module.rsplit(".", 1)
-            if len(parent) == 2 and resolved == parent[0]:
-                for alias in node.names:
-                    if alias.name == parent[1]:
-                        results.append(
-                            TrackedImport(
-                                node=node,
-                                local_name=target_symbol,
-                                is_module_import=True,
-                                module_alias=alias.asname or alias.name,
-                                lineno=node.lineno,
-                                end_lineno=node.end_lineno or node.lineno,
+            for tm in target_modules:
+                _parts = tm.rsplit(".", 1)
+                if len(_parts) == 2 and resolved == _parts[0]:
+                    for alias in node.names:
+                        if alias.name == _parts[1]:
+                            results.append(
+                                TrackedImport(
+                                    node=node,
+                                    local_name=target_symbol,
+                                    is_module_import=True,
+                                    module_alias=alias.asname or alias.name,
+                                    lineno=node.lineno,
+                                    end_lineno=node.end_lineno or node.lineno,
+                                )
                             )
-                        )
     return results
 
 
@@ -289,7 +303,28 @@ class RenameVisitor(ast.NodeVisitor):
     def visit_Assign(self, node: ast.Assign) -> None:
         for target in node.targets:
             if isinstance(target, ast.Name):
-                if not (self.is_definition_file and target.id == self.target_name):
+                # Rename symbol inside __all__ = ["OldName", ...] string lists.
+                # Applies both on the definition file and on re-exporting modules.
+                if target.id == "__all__" and not self.target_method:
+                    val = node.value
+                    if isinstance(val, (ast.List, ast.Tuple)):
+                        for elt in val.elts:
+                            if (
+                                isinstance(elt, ast.Constant)
+                                and isinstance(elt.value, str)
+                                and elt.value == self.target_name
+                            ):
+                                self.edits.append(
+                                    FileEdit(
+                                        start_line=elt.lineno - 1,
+                                        end_line=elt.lineno - 1,
+                                        start_col=elt.col_offset,
+                                        end_col=elt.end_col_offset,
+                                        new_text=repr(self.new_name),
+                                        description=f"Rename {elt.value!r} in __all__",
+                                    )
+                                )
+                elif not (self.is_definition_file and target.id == self.target_name):
                     self._add_local(target.id)
         self.generic_visit(node)
 
@@ -388,6 +423,11 @@ def do_rename(target_ref: str, new_name: str, root: Path, dry_run: bool) -> bool
         logger.error("cannot find module %r under %s", module_name, root)
         return False
 
+    # All dotted module names for def_path (covers src-layout aliases like
+    # "src.mypkg.utils" alongside the user-supplied "mypkg.utils").
+    _aliases = module_aliases_for_file(def_path, python_roots(root))
+    target_modules = frozenset(_aliases + [module_name])
+
     all_changes: list[FileChanges] = []
 
     for pyfile in collect_python_files(root):
@@ -413,7 +453,7 @@ def do_rename(target_ref: str, new_name: str, root: Path, dry_run: bool) -> bool
             visitor.visit(tree)
             fc.edits.extend(visitor.edits)
         else:
-            imports = find_imports_of_symbol(tree, pyfile, root, module_name, symbol_name)
+            imports = find_imports_of_symbol(tree, pyfile, root, target_modules, symbol_name)
             if not imports:
                 continue
             for imp in imports:

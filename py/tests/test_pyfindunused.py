@@ -167,3 +167,91 @@ class TestFindUnusedImports:
         )
         results = find_unused_imports(collect_python_files(root), root)
         assert "annotations" not in [r.name for r in results]
+
+    def test_dotted_import_used_not_reported(self, make_project):
+        """import os.path is accessed via `os`, not the dotted string `os.path`."""
+        root = make_project(
+            {
+                "src/mypkg/__init__.py": "",
+                "src/mypkg/utils.py": (
+                    "import os.path\n"
+                    "\n"
+                    "def func(a, b):\n"
+                    "    return os.path.join(a, b)\n"
+                ),
+            }
+        )
+        results = find_unused_imports(collect_python_files(root), root)
+        names = [r.name for r in results]
+        assert "os" not in names
+
+    def test_dotted_import_unused_reported(self, make_project):
+        """import os.path with no usage should be reported."""
+        root = make_project(
+            {
+                "src/mypkg/__init__.py": "",
+                "src/mypkg/utils.py": "import os.path\n\ndef func(): pass\n",
+            }
+        )
+        results = find_unused_imports(collect_python_files(root), root)
+        names = [r.name for r in results]
+        assert "os" in names
+
+    def test_dotted_import_with_alias_unused_reported(self, make_project):
+        """import os.path as p with no usage of p should be reported."""
+        root = make_project(
+            {
+                "src/mypkg/__init__.py": "",
+                "src/mypkg/utils.py": "import os.path as osp\n\ndef func(): pass\n",
+            }
+        )
+        results = find_unused_imports(collect_python_files(root), root)
+        names = [r.name for r in results]
+        assert "osp" in names
+
+
+class TestFindDeadCodeDecorators:
+    def test_property_not_reported(self, make_project):
+        """@property on a top-level function should be exempt from dead-code."""
+        root = make_project(
+            {
+                "src/mypkg/__init__.py": "",
+                "src/mypkg/utils.py": (
+                    "@property\n"
+                    "def computed():\n"
+                    "    return 42\n"
+                ),
+            }
+        )
+        results = find_dead_code(collect_python_files(root), root)
+        assert "computed" not in [r.name for r in results]
+
+    def test_abstractmethod_not_reported(self, make_project):
+        """@abstractmethod on a top-level function should be exempt."""
+        root = make_project(
+            {
+                "src/mypkg/__init__.py": "",
+                "src/mypkg/base.py": (
+                    "@abstractmethod\n"
+                    "def must_implement():\n"
+                    "    ...\n"
+                ),
+            }
+        )
+        results = find_dead_code(collect_python_files(root), root)
+        assert "must_implement" not in [r.name for r in results]
+
+    def test_cached_property_not_reported(self, make_project):
+        """@cached_property on a top-level function should be exempt."""
+        root = make_project(
+            {
+                "src/mypkg/__init__.py": "",
+                "src/mypkg/utils.py": (
+                    "@cached_property\n"
+                    "def expensive():\n"
+                    "    return list(range(1000))\n"
+                ),
+            }
+        )
+        results = find_dead_code(collect_python_files(root), root)
+        assert "expensive" not in [r.name for r in results]

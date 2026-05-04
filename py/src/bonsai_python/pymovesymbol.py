@@ -21,6 +21,7 @@ from ._common import (
     get_lines,
     normalize_target,
     parse_file,
+    python_roots,
     resolve_relative_import,
 )
 
@@ -140,7 +141,13 @@ def do_move_symbol(
     dst_path = find_module_path(dest_module, root)
     create_dst = dst_path is None or not dst_path.exists()
     if create_dst:
-        dst_path = module_to_new_path(dest_module, root)
+        # Use the same python sub-root as src_path (respects src/ layout).
+        # Find the most specific python root that src_path lives under.
+        src_py_root = root
+        for py_root in python_roots(root):
+            if src_path.is_relative_to(py_root) and len(py_root.parts) > len(src_py_root.parts):
+                src_py_root = py_root
+        dst_path = module_to_new_path(dest_module, src_py_root)
 
     # dst_path is always non-None here: module_to_path returning None triggered
     # create_dst, which assigns module_to_new_path (always returns a Path).
@@ -189,6 +196,39 @@ def do_move_symbol(
             description=f"Replace {symbol_name} with compat comment",
         )
     )
+
+    # Remove symbol from __all__ in source if present
+    src_tree = parse_file(src_path)
+    if src_tree:
+        for all_node in ast.iter_child_nodes(src_tree):
+            if not (
+                isinstance(all_node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "__all__" for t in all_node.targets)
+            ):
+                continue
+            val = all_node.value
+            if not isinstance(val, (ast.List, ast.Tuple)):
+                break
+            if not any(isinstance(e, ast.Constant) and e.value == symbol_name for e in val.elts):
+                break
+            remaining = [e for e in val.elts if not (isinstance(e, ast.Constant) and e.value == symbol_name)]
+            indent = " " * all_node.col_offset
+            items_str = ", ".join(repr(e.value) for e in remaining)
+            new_all_text = f"{indent}__all__ = [{items_str}]\n"
+            start_l = all_node.lineno - 1
+            end_l = (all_node.end_lineno or all_node.lineno) - 1
+            fc_src.edits.append(
+                FileEdit(
+                    start_line=start_l,
+                    end_line=end_l,
+                    start_col=0,
+                    end_col=len(src_lines[end_l]),
+                    new_text=new_all_text,
+                    description=f"Remove {symbol_name!r} from __all__",
+                )
+            )
+            break
+
     all_changes.append(fc_src)
 
     # ── Step 2: Append / create the destination ───────────────────────────────
@@ -226,6 +266,16 @@ def do_move_symbol(
                 content += "\n"
             dst_path.write_text(content, encoding="utf-8")
             print(f"  Created {dst_path.relative_to(root)}")
+            # Ensure all new intermediate directories are Python packages,
+            # but stop at any python root (e.g. root itself or src/).
+            py_root_set = set(python_roots(root))
+            for parent in dst_path.parents:
+                if parent in py_root_set or not parent.is_relative_to(root):
+                    break
+                init = parent / "__init__.py"
+                if not init.exists():
+                    init.touch()
+                    print(f"  Created {init.relative_to(root)}")
 
     # ── Step 3: Rewrite import references across the project ─────────────────
 

@@ -51,6 +51,10 @@ _FRAMEWORK_DECORATORS = {
     "classmethod",
     "staticmethod",
     "overload",
+    "property",
+    "abstractmethod",
+    "cached_property",
+    "override",
 }
 
 # Names that are implicitly called by a framework or runtime.
@@ -377,9 +381,12 @@ def find_unused_imports(all_files: list[Path], root: Path) -> list[UnusedResult]
                         imports.append((local, node.lineno, _snippet(fpath, node.lineno)))
             elif isinstance(node, ast.Import):
                 for a in node.names:
-                    local = a.asname or a.name
-                    if local not in type_checking_names:
-                        imports.append((local, node.lineno, _snippet(fpath, node.lineno)))
+                    # For "import os.path" (no alias), code accesses via the
+                    # root name "os", not the dotted string "os.path".
+                    track_name = a.asname if a.asname else a.name.split(".")[0]
+                    display_name = a.asname or a.name
+                    if display_name not in type_checking_names:
+                        imports.append((track_name, node.lineno, _snippet(fpath, node.lineno)))
 
         if not imports:
             continue

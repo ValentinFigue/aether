@@ -2,55 +2,117 @@
 
 import contextlib
 import io
-import sys
+import logging
 from collections.abc import Callable
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from .pycallers import main as _pycallers_main
-from .pyfindrefs import main as _pyfindrefs_main
-from .pyfindunused import main as _pyfindunused_main
-from .pygrep import main as _pygrep_main
-from .pymove import main as _pymove_main
-from .pymovesymbol import main as _pymovesymbol_main
-from .pyrename import main as _pyrename_main
-from .pysignature import main as _pysignature_main
+from ._common import collect_python_files, find_project_root, load_config
+from .pyfindunused import UnusedResult, find_dead_code, find_unused_imports, find_unused_params
+from .pyfindrefs import Ref, find_refs
+from .pygrep import GrepResult, grep
+from .pymove import execute_move
+from .pymovesymbol import do_move_symbol
+from .pyrename import do_rename
+from .pysignature import SignatureChange, do_signature
+
+logging.basicConfig(format="%(levelname)s: %(message)s")
 
 mcp = FastMCP("pytools")
 
 
-def _run(main_fn: Callable[[], None], argv: list[str]) -> str:
-    """Invoke *main_fn* with *argv* and return its combined stdout/stderr output.
+# ─── Helpers ──────────────────────────────────────────────────────────────────
 
-    Captures stdout and stderr via ``contextlib.redirect_*``, temporarily
-    replaces ``sys.argv``, and suppresses ``SystemExit`` so CLI tools can be
-    called safely from within the MCP server process.
 
-    Args:
-        main_fn: A CLI ``main()`` function that reads ``sys.argv``.
-        argv: Argument vector to set (``argv[0]`` is the program name).
+def _capture_output(fn: Callable, *args, **kwargs) -> str:
+    """Call *fn* capturing stdout/stderr. Raises ``ValueError`` on tool failure.
 
-    Returns:
-        Stripped combined output string, or ``"Done."`` when the tool produced
-        no output.
+    Used for mutation tools that print their own progress summaries. Safe for
+    single-threaded asyncio; mutation tools should not run concurrently anyway
+    since they modify the same files.
     """
     buf = io.StringIO()
     err = io.StringIO()
-    old_argv = sys.argv
-    sys.argv = argv
-    try:
-        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
-            try:
-                main_fn()
-            except SystemExit:
-                pass
-    finally:
-        sys.argv = old_argv
-    out = buf.getvalue().rstrip()
-    error_out = err.getvalue().rstrip()
-    if error_out:
-        return f"{out}\n{error_out}".strip()
-    return out or "Done."
+    result = None
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
+        try:
+            result = fn(*args, **kwargs)
+        except SystemExit as e:
+            if e.code not in (0, None):
+                msg = err.getvalue().strip() or f"tool exited with code {e.code}"
+                raise ValueError(msg) from None
+    if result is False:
+        msg = err.getvalue().strip() or "tool returned failure with no error message"
+        raise ValueError(msg)
+    out = buf.getvalue().strip()
+    extra = err.getvalue().strip()
+    return f"{out}\n{extra}".strip() if extra else out or "Done."
+
+
+_REF_ORDER = ["definition", "import", "call", "decorator", "base_class", "name", "attribute"]
+
+
+def _fmt_refs(refs: list[Ref]) -> str:
+    """Format refs grouped by type (definition > import > call > ...)."""
+    if not refs:
+        return "No references found."
+    by_type: dict[str, list[Ref]] = {}
+    for ref in refs:
+        by_type.setdefault(ref.ref_type, []).append(ref)
+    lines: list[str] = []
+    total = 0
+    for ref_type in _REF_ORDER:
+        group = by_type.get(ref_type, [])
+        if not group:
+            continue
+        lines.append(f"\n{ref_type.upper()} ({len(group)})")
+        for ref in sorted(group, key=lambda r: (r.filepath, r.line)):
+            loc = f"{ref.filepath}:{ref.line}"
+            lines.append(f"  {loc:<60}  {ref.snippet[:80]}")
+            total += 1
+    lines.append(f"\n{total} reference{'s' if total != 1 else ''} found.")
+    return "\n".join(lines)
+
+
+def _fmt_grep(results: list[GrepResult]) -> str:
+    """Format grep results as filepath:line: text."""
+    if not results:
+        return "No matches found."
+    lines = [f"{r.filepath}:{r.line}: {r.text}" for r in results]
+    lines.append(f"\n{len(results)} match{'es' if len(results) != 1 else ''} found.")
+    return "\n".join(lines)
+
+
+def _fmt_unused(results: list[UnusedResult]) -> str:
+    """Format unused-symbol results grouped by kind."""
+    if not results:
+        return "No unused symbols found."
+    by_kind: dict[str, list[UnusedResult]] = {}
+    for r in results:
+        by_kind.setdefault(r.kind, []).append(r)
+    kind_labels = {
+        "dead_code": "DEAD CODE",
+        "unused_param": "UNUSED PARAMS",
+        "unused_import": "UNUSED IMPORTS",
+    }
+    lines: list[str] = []
+    total = 0
+    for kind in ("dead_code", "unused_param", "unused_import"):
+        group = by_kind.get(kind, [])
+        if not group:
+            continue
+        lines.append(f"\n{kind_labels[kind]} ({len(group)})")
+        for r in sorted(group, key=lambda r: (r.filepath, r.line)):
+            loc = f"{r.filepath}:{r.line}"
+            detail = f"  [{r.detail}]" if r.detail else ""
+            lines.append(f"  {loc:<60}  {r.name}{detail}")
+            total += 1
+    lines.append(f"\n{total} unused symbol{'s' if total != 1 else ''} found.")
+    return "\n".join(lines)
+
+
+# ─── Query tools (parallel-safe: no global state mutation) ────────────────────
 
 
 @mcp.tool()
@@ -73,10 +135,12 @@ def pyfindrefs(target: str, project_root: str | None = None) -> str:
         target: E.g. 'src.models:User', 'src.models:User.save', or 'src/models.py:User'
         project_root: Absolute path to project root (auto-detected from cwd if omitted)
     """
-    argv = ["pyfindrefs", target]
-    if project_root:
-        argv += ["--project-root", project_root]
-    return _run(_pyfindrefs_main, argv)
+    root = Path(project_root) if project_root else find_project_root(Path.cwd())
+    try:
+        refs = find_refs(target, root)
+    except SystemExit:
+        return f"Error: invalid target {target!r} — expected 'module:Symbol' or 'module:Class.method'"
+    return _fmt_refs(refs)
 
 
 @mcp.tool()
@@ -98,10 +162,20 @@ def pycallers(target: str, project_root: str | None = None) -> str:
         target: E.g. 'src.api.views:create_user' or 'src/api/views.py:create_user'
         project_root: Absolute path to project root (auto-detected from cwd if omitted)
     """
-    argv = ["pycallers", target]
-    if project_root:
-        argv += ["--project-root", project_root]
-    return _run(_pycallers_main, argv)
+    root = Path(project_root) if project_root else find_project_root(Path.cwd())
+    try:
+        refs = find_refs(target, root)
+    except SystemExit:
+        return f"Error: invalid target {target!r} — expected 'module:function' or 'module:Class.method'"
+    calls = [r for r in refs if r.ref_type == "call"]
+    if not calls:
+        return "No call sites found."
+    lines = [
+        f"  {r.filepath}:{r.line:<4}  {r.snippet[:80]}"
+        for r in sorted(calls, key=lambda r: (r.filepath, r.line))
+    ]
+    lines.append(f"\n{len(calls)} call site{'s' if len(calls) != 1 else ''} found.")
+    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -127,18 +201,45 @@ def pyfindunused(
         imports: Find imports never referenced in their file
         file_path: Restrict --params or --imports analysis to a specific file or directory
     """
-    argv = ["pyfindunused"]
+    root = Path(project_root) if project_root else find_project_root(Path.cwd())
+    scan_root = Path(file_path) if file_path else root
+    all_files = collect_python_files(scan_root)
+    config = load_config(root)
+    results: list[UnusedResult] = []
     if dead_code:
-        argv.append("--dead-code")
+        results += find_dead_code(all_files, root, config)
     if params:
-        argv.append("--params")
+        results += find_unused_params(all_files, root)
     if imports:
-        argv.append("--imports")
-    if project_root:
-        argv += ["--project-root", project_root]
-    if file_path:
-        argv.append(file_path)
-    return _run(_pyfindunused_main, argv)
+        results += find_unused_imports(all_files, root)
+    return _fmt_unused(results)
+
+
+@mcp.tool()
+def pygrep(pattern: str, project_root: str | None = None, case_sensitive: bool = True) -> str:
+    """Search for a text pattern across all Python files in the project.
+
+    Use this for finding string literals, comments, or arbitrary text patterns.
+    For finding usages of a specific class or function by name, prefer pyfindrefs
+    (AST-based, more precise — won't match comments or unrelated identifiers).
+
+    The pattern is a Python regular expression. Results include file path, line
+    number, and the matching line.
+
+    Args:
+        pattern: Regular expression to search for. E.g. 'class Word' or 'TODO'
+        project_root: Absolute path to project root (auto-detected from cwd if omitted)
+        case_sensitive: Set to False for case-insensitive matching
+    """
+    root = Path(project_root) if project_root else find_project_root(Path.cwd())
+    try:
+        results = grep(pattern, root, case_sensitive=case_sensitive)
+    except SystemExit:
+        return f"Error: invalid regex pattern {pattern!r}"
+    return _fmt_grep(results)
+
+
+# ─── Mutation tools (stdout-captured; should not run concurrently) ────────────
 
 
 @mcp.tool()
@@ -156,12 +257,10 @@ def pymove(
         project_root: Absolute path to project root (auto-detected if omitted)
         dry_run: Preview changes without modifying any files
     """
-    argv = ["pymove", source, destination]
-    if project_root:
-        argv += ["--project-root", project_root]
-    if dry_run:
-        argv.append("--dry-run")
-    return _run(_pymove_main, argv)
+    src = Path(source)
+    dst = Path(destination)
+    root = Path(project_root).resolve() if project_root else None
+    return _capture_output(execute_move, src, dst, root, dry_run)
 
 
 @mcp.tool()
@@ -179,12 +278,8 @@ def pymovesymbol(
         project_root: Absolute path to project root (auto-detected if omitted)
         dry_run: Preview changes without modifying any files
     """
-    argv = ["pymovesymbol", target, dest_module]
-    if project_root:
-        argv += ["--project-root", project_root]
-    if dry_run:
-        argv.append("--dry-run")
-    return _run(_pymovesymbol_main, argv)
+    root = Path(project_root) if project_root else find_project_root(Path.cwd())
+    return _capture_output(do_move_symbol, target, dest_module, root, dry_run)
 
 
 @mcp.tool()
@@ -202,12 +297,8 @@ def pyrename(
         project_root: Absolute path to project root (auto-detected if omitted)
         dry_run: Preview changes without modifying any files
     """
-    argv = ["pyrename", target, new_name]
-    if project_root:
-        argv += ["--project-root", project_root]
-    if dry_run:
-        argv.append("--dry-run")
-    return _run(_pyrename_main, argv)
+    root = Path(project_root) if project_root else find_project_root(Path.cwd())
+    return _capture_output(do_rename, target, new_name, root, dry_run)
 
 
 @mcp.tool()
@@ -236,60 +327,48 @@ def pysignature(
         project_root: Absolute path to project root (auto-detected if omitted)
         dry_run: Preview changes without modifying any files
     """
-    argv = ["pysignature", target]
+    root = Path(project_root) if project_root else find_project_root(Path.cwd())
+    changes: list[SignatureChange] = []
     for item in add or []:
         if isinstance(item, dict):
-            parts = [item["name"]]
-            if "type" in item:
-                parts.append(item["type"])
-            if "default" in item:
-                parts.append(str(item["default"]))
+            changes.append(SignatureChange(
+                action="add",
+                param_name=item["name"],
+                new_type=item.get("type"),
+                new_default=item.get("default"),
+            ))
         else:
             parts = item.split()
-        argv += ["--add"] + parts
+            changes.append(SignatureChange(
+                action="add",
+                param_name=parts[0],
+                new_type=parts[1] if len(parts) > 1 else None,
+                new_default=parts[2] if len(parts) > 2 else None,
+            ))
     for name in remove or []:
-        argv += ["--remove", name]
+        changes.append(SignatureChange(action="remove", param_name=name))
     for pair in rename or []:
         if isinstance(pair, dict):
-            argv += ["--rename", pair["from"], pair["to"]]
+            changes.append(SignatureChange(action="rename", param_name=pair["from"], new_name=pair["to"]))
         else:
-            argv += ["--rename"] + pair.split()
+            parts = pair.split()
+            changes.append(SignatureChange(action="rename", param_name=parts[0], new_name=parts[1]))
     if reorder:
-        argv += ["--reorder"] + reorder
+        changes.append(SignatureChange(action="reorder", param_name="", new_order=reorder))
     for item in set_default or []:
         if isinstance(item, dict):
-            parts = [item["name"], str(item["value"])]
-            if "type" in item:
-                parts.append(item["type"])
+            changes.append(SignatureChange(
+                action="set_default",
+                param_name=item["name"],
+                new_default=str(item["value"]),
+                new_type=item.get("type"),
+            ))
         else:
             parts = item.split()
-        argv += ["--set-default"] + parts
-    if project_root:
-        argv += ["--project-root", project_root]
-    if dry_run:
-        argv.append("--dry-run")
-    return _run(_pysignature_main, argv)
-
-
-@mcp.tool()
-def pygrep(pattern: str, project_root: str | None = None, case_sensitive: bool = True) -> str:
-    """Search for a text pattern across all Python files in the project.
-
-    Use this for finding string literals, comments, or arbitrary text patterns.
-    For finding usages of a specific class or function by name, prefer pyfindrefs
-    (AST-based, more precise — won't match comments or unrelated identifiers).
-
-    The pattern is a Python regular expression. Results include file path, line
-    number, and the matching line.
-
-    Args:
-        pattern: Regular expression to search for. E.g. 'class Word' or 'TODO'
-        project_root: Absolute path to project root (auto-detected from cwd if omitted)
-        case_sensitive: Set to False for case-insensitive matching
-    """
-    argv = ["pygrep", pattern]
-    if not case_sensitive:
-        argv.append("--ignore-case")
-    if project_root:
-        argv += ["--project-root", project_root]
-    return _run(_pygrep_main, argv)
+            changes.append(SignatureChange(
+                action="set_default",
+                param_name=parts[0],
+                new_default=parts[1],
+                new_type=parts[2] if len(parts) > 2 else None,
+            ))
+    return _capture_output(do_signature, target, changes, root, dry_run)

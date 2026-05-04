@@ -361,7 +361,7 @@ def plan_move(
         src: Source file or package directory (will be resolved).
         dst: Destination path (will be resolved).
         root: Project root (will be resolved).
-        dry_run: Unused here; present for API symmetry with :func:`execute_move`.
+        dry_run: Unused here; present for API symmetry with :func:`do_move`.
 
     Returns:
         List of :class:`RewritePlan` objects, one per file that needs rewriting.
@@ -450,7 +450,7 @@ def apply_plan(plan: RewritePlan) -> None:
     plan.filepath.write_text("".join(lines), encoding="utf-8")
 
 
-def execute_move(
+def do_move(
     src: Path,
     dst: Path,
     root: Path | None = None,
@@ -556,7 +556,7 @@ def execute_move(
 
 
 def main() -> None:
-    """CLI entry point: parse arguments and invoke :func:`execute_move`."""
+    """CLI entry point: parse arguments and invoke :func:`do_move`."""
     parser = argparse.ArgumentParser(
         description="Safely move Python modules with AST-based import rewriting.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -575,7 +575,7 @@ def main() -> None:
         logger.error("source %s does not exist", src)
         sys.exit(1)
 
-    success = execute_move(
+    success = do_move(
         src=src,
         dst=Path(args.destination),
         root=Path(args.project_root) if args.project_root else None,

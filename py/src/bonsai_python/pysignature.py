@@ -16,8 +16,10 @@ from pathlib import Path
 from ._common import (
     FileChanges,
     FileEdit,
+    TrackedImport,
     apply_changes,
     collect_python_files,
+    find_imports_of_symbol,
     find_module_path,
     find_project_root,
     get_lines,
@@ -27,70 +29,6 @@ from ._common import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class TrackedImport:
-    """An import statement that brings the target function into scope.
-
-    ``is_module_import`` is ``True`` when the file imports the module
-    (``import mod``) rather than the function directly (``from mod import fn``).
-    In that case ``module_alias`` holds the local name used for the module.
-    """
-
-    node: ast.stmt
-    local_name: str
-    is_module_import: bool
-    module_alias: str | None = None
-
-
-def find_imports_of_symbol(
-    tree: ast.Module,
-    filepath: Path,
-    root: Path,
-    target_module: str,
-    target_symbol: str,
-) -> list[TrackedImport]:
-    """Find all import nodes in *tree* that bring *target_symbol* into scope.
-
-    Args:
-        tree: Parsed AST of the file to inspect.
-        filepath: Path of the file (used for relative import resolution).
-        root: Project root.
-        target_module: Dotted module name where the symbol is defined.
-        target_symbol: Name of the symbol whose call sites are being rewritten.
-
-    Returns:
-        List of :class:`TrackedImport` objects for each matching import.
-    """
-    results = []
-    for node in ast.iter_child_nodes(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == target_module or alias.name.startswith(target_module + "."):
-                    results.append(
-                        TrackedImport(
-                            node=node,
-                            local_name=target_symbol,
-                            is_module_import=True,
-                            module_alias=alias.asname or alias.name.split(".")[0],
-                        )
-                    )
-        elif isinstance(node, ast.ImportFrom):
-            resolved = (
-                resolve_relative_import(filepath, root, node.level, node.module) if node.level > 0 else node.module
-            )
-            if resolved == target_module:
-                for alias in node.names:
-                    if alias.name in (target_symbol, "*"):
-                        results.append(
-                            TrackedImport(
-                                node=node,
-                                local_name=alias.asname or target_symbol,
-                                is_module_import=False,
-                            )
-                        )
-    return results
 
 
 # ─── Signature Logic ─────────────────────────────────────────────────────────
@@ -595,7 +533,7 @@ def do_signature(
             fc = fc_def
         else:
             imports = find_imports_of_symbol(
-                tree, pyfile, root, module_name, symbol_name if not method_name else symbol_name
+                tree, pyfile, root, frozenset({module_name}), symbol_name
             )
             if not imports:
                 continue

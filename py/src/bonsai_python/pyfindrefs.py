@@ -137,18 +137,18 @@ def _classify_attr(node: ast.Attribute, parent_map: dict[int, ast.AST]) -> str:
 
 
 def _scan_file(
-    fpath: Path,
+    filepath: Path,
     root: Path,
     direct_aliases: list[str],
     module_aliases: list[str],
     symbol: str,
     method: str | None,
-    is_def_file: bool,
+    is_definition_file: bool,
 ) -> list[Ref]:
     """Scan a single file for all references to a target symbol.
 
     Args:
-        fpath: File to scan.
+        filepath: File to scan.
         root: Project root (used to compute relative paths for output).
         direct_aliases: Local names that refer directly to the symbol
             (e.g. the import alias or the symbol name itself).
@@ -156,16 +156,16 @@ def _scan_file(
             (used for ``module.symbol`` attribute access patterns).
         symbol: Top-level symbol name being searched.
         method: Method name when searching for ``Class.method``, else ``None``.
-        is_def_file: ``True`` when *fpath* is the file that defines the symbol
-            (enables definition-node detection).
+        is_definition_file: ``True`` when *filepath* is the file that defines
+            the symbol (enables definition-node detection).
 
     Returns:
         Sorted list of :class:`Ref` objects, one per unique line where a
         reference is found. When multiple reference types occur on the same
         line, the highest-priority type wins (see ``_REF_PRIORITY``).
     """
-    tree = parse_file(fpath)
-    lines = get_lines(fpath)
+    tree = parse_file(filepath)
+    lines = get_lines(filepath)
     if tree is None or lines is None:
         return []
 
@@ -194,7 +194,7 @@ def _scan_file(
                 if local in module_aliases:
                     add(node.lineno, "import")
 
-        elif is_def_file and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        elif is_definition_file and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             if node.name == search_name:
                 add(node.lineno, "definition")
 
@@ -212,7 +212,7 @@ def _scan_file(
 
     return [
         Ref(
-            filepath=str(fpath.relative_to(root)),
+            filepath=str(filepath.relative_to(root)),
             line=lineno,
             ref_type=ref_type,
             snippet=_snippet(lines, lineno),
@@ -298,22 +298,22 @@ def find_refs(target: str, project_root: Path) -> list[Ref]:
     refs: list[Ref] = []
     scanned: set[Path] = set()
 
-    def scan(fpath: Path, direct_aliases: list[str], mod_aliases: list[str], is_def: bool) -> None:
-        if fpath in scanned:
+    def scan(filepath: Path, direct_aliases: list[str], mod_aliases: list[str], is_definition_file: bool) -> None:
+        if filepath in scanned:
             return
-        scanned.add(fpath)
-        refs.extend(_scan_file(fpath, project_root, direct_aliases, mod_aliases, symbol, method, is_def))
+        scanned.add(filepath)
+        refs.extend(_scan_file(filepath, project_root, direct_aliases, mod_aliases, symbol, method, is_definition_file))
 
     if def_file:
         scan(def_file, [method or symbol], [], True)
 
-    for fpath, local_alias in direct.items():
-        if fpath != def_file:
-            scan(fpath, [local_alias], [], False)
+    for filepath, local_alias in direct.items():
+        if filepath != def_file:
+            scan(filepath, [local_alias], [], False)
 
-    for fpath, mod_names in module_imp.items():
-        if fpath not in scanned:
-            scan(fpath, [], mod_names, False)
+    for filepath, mod_names in module_imp.items():
+        if filepath not in scanned:
+            scan(filepath, [], mod_names, False)
 
     return refs
 

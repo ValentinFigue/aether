@@ -21,6 +21,7 @@ from ._common import (
     get_lines,
     normalize_target,
     parse_file,
+    parse_symbol_ref,
     python_roots,
     resolve_relative_import,
 )
@@ -43,26 +44,6 @@ def module_to_new_path(module: str, root: Path) -> Path:
     """
     parts = module.split(".")
     return root / Path(*parts[:-1]) / (parts[-1] + ".py") if len(parts) > 1 else root / (parts[0] + ".py")
-
-
-def parse_symbol_ref(ref: str) -> tuple[str, str]:
-    """Parse a ``module:Symbol`` reference; exit with an error for ``module:Class.method``.
-
-    Args:
-        ref: Reference string in ``"module:symbol"`` format.
-            A ``"."`` in the symbol part is rejected (methods cannot be moved).
-
-    Returns:
-        A ``(module_name, symbol_name)`` tuple.
-    """
-    if ":" not in ref:
-        logger.error("symbol reference must be 'module:symbol' (got %r)", ref)
-        sys.exit(1)
-    module, symbol = ref.split(":", 1)
-    if "." in symbol:
-        logger.error("cannot move individual methods — move the whole class instead")
-        sys.exit(1)
-    return module, symbol
 
 
 # ─── Move-Symbol Logic ───────────────────────────────────────────────────────
@@ -138,7 +119,10 @@ def do_move_symbol(
         ``True`` on success, ``False`` if a fatal error occurred.
     """
     target_ref = normalize_target(target_ref, root)
-    module_name, symbol_name = parse_symbol_ref(target_ref)
+    module_name, symbol_name, method_name = parse_symbol_ref(target_ref)
+    if method_name is not None:
+        logger.error("cannot move individual methods — move the whole class instead")
+        return False
 
     print(f"{'[DRY RUN] ' if dry_run else ''}Moving symbol:")
     print(f"  {module_name}:{symbol_name} -> {dest_module}:{symbol_name}")

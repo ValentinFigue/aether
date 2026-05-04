@@ -12,7 +12,7 @@ from ._common import collect_python_files, find_project_root, load_config
 from .pyfindrefs import Ref, find_refs
 from .pyfindunused import UnusedResult, find_dead_code, find_unused_imports, find_unused_params
 from .pygrep import GrepResult, grep
-from .pymove import execute_move
+from .pymove import do_move
 from .pymovesymbol import do_move_symbol
 from .pyrename import do_rename
 from .pysignature import SignatureChange, do_signature
@@ -79,7 +79,7 @@ def _fmt_grep(results: list[GrepResult]) -> str:
     """Format grep results as filepath:line: text."""
     if not results:
         return "No matches found."
-    lines = [f"{r.filepath}:{r.line}: {r.text}" for r in results]
+    lines = [f"{r.filepath}:{r.line}: {r.snippet}" for r in results]
     lines.append(f"\n{len(results)} match{'es' if len(results) != 1 else ''} found.")
     return "\n".join(lines)
 
@@ -184,7 +184,7 @@ def pyfindunused(
     dead_code: bool = True,
     params: bool = True,
     imports: bool = True,
-    file_path: str | None = None,
+    path: str | None = None,
 ) -> str:
     """Find unused Python symbols: dead top-level functions/classes, unused parameters, unused imports.
 
@@ -199,10 +199,10 @@ def pyfindunused(
         dead_code: Find top-level functions/classes with no cross-module references
         params: Find function parameters never used in the body
         imports: Find imports never referenced in their file
-        file_path: Restrict params or imports analysis to a specific file or directory
+        path: Restrict analysis to a specific file or directory (accepts files and directories)
     """
     root = Path(project_root) if project_root else find_project_root(Path.cwd())
-    scan_root = Path(file_path) if file_path else root
+    scan_root = Path(path) if path else root
     all_files = collect_python_files(scan_root)
     config = load_config(root)
     results: list[UnusedResult] = []
@@ -262,7 +262,7 @@ def pymove(
     src = Path(source)
     dst = Path(destination)
     root = Path(project_root).resolve() if project_root else None
-    return _capture_output(execute_move, src, dst, root, dry_run)
+    return _capture_output(do_move, src, dst, root, dry_run)
 
 
 @mcp.tool()

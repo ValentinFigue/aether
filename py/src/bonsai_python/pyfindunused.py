@@ -128,9 +128,9 @@ def _names_in_stmts(stmts: list[ast.stmt]) -> set[str]:
     return names
 
 
-def _snippet(fpath: Path, lineno: int) -> str:
-    """Return the stripped source line at *lineno* (1-based) of *fpath*, or ``""``."""
-    lines = get_lines(fpath)
+def _snippet(filepath: Path, lineno: int) -> str:
+    """Return the stripped source line at *lineno* (1-based) of *filepath*, or ``""``."""
+    lines = get_lines(filepath)
     if lines and 1 <= lineno <= len(lines):
         return lines[lineno - 1].strip()
     return ""

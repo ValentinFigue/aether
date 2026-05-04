@@ -14,12 +14,12 @@ class GrepResult:
     """A single line matched by a pattern search.
 
     ``filepath`` is relative to the project root. ``line`` is 1-based.
-    ``text`` is the matched line with trailing whitespace stripped.
+    ``snippet`` is the matched line with trailing whitespace stripped.
     """
 
     filepath: str
     line: int
-    text: str
+    snippet: str
 
 
 def grep(pattern: str, root: Path, *, case_sensitive: bool = True) -> list[GrepResult]:
@@ -48,7 +48,7 @@ def grep(pattern: str, root: Path, *, case_sensitive: bool = True) -> list[GrepR
         rel = str(fpath.relative_to(root))
         for lineno, line in enumerate(source.splitlines(), start=1):
             if rx.search(line):
-                results.append(GrepResult(filepath=rel, line=lineno, text=line.rstrip()))
+                results.append(GrepResult(filepath=rel, line=lineno, snippet=line.rstrip()))
     return results
 
 
@@ -72,7 +72,7 @@ def main() -> None:
         sys.exit(0)
 
     for r in results:
-        print(f"{r.filepath}:{r.line}: {r.text}")
+        print(f"{r.filepath}:{r.line}: {r.snippet}")
     print(f"\n{len(results)} match{'es' if len(results) != 1 else ''} found.")
     sys.exit(0)
 

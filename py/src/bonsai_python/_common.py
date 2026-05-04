@@ -328,6 +328,24 @@ class FileChanges:
         return result
 
 
+@dataclass
+class TrackedImport:
+    """An import statement that brings a target symbol into scope.
+
+    ``is_module_import`` is ``True`` when the file imports the module
+    (``import mod``) rather than the symbol directly (``from mod import sym``).
+    In that case ``module_alias`` holds the local name used for the module.
+    ``lineno`` and ``end_lineno`` are 1-based AST line numbers.
+    """
+
+    node: ast.stmt
+    local_name: str
+    is_module_import: bool
+    module_alias: str | None = None
+    lineno: int = 0
+    end_lineno: int = 0
+
+
 def python_roots(root: Path) -> list[Path]:
     """Return project root plus nested Python source roots.
 
@@ -385,6 +403,91 @@ def find_module_path(module_name: str, root: Path) -> Path | None:
 def module_aliases_for_file(fpath: Path, roots: list[Path]) -> list[str]:
     """Return all dotted module names for *fpath* across every Python root."""
     return [m for r in roots if (m := path_to_module(fpath, r))]
+
+
+def find_imports_of_symbol(
+    tree: ast.Module,
+    filepath: Path,
+    root: Path,
+    target_modules: frozenset[str],
+    target_symbol: str,
+) -> list[TrackedImport]:
+    """Find all import nodes in *tree* that bring *target_symbol* into scope.
+
+    Handles ``import mod``, ``from mod import sym``, ``from mod import sym as
+    alias``, star imports, and the ``from parent import module_leaf`` pattern
+    (where the symbol is later accessed as ``module_leaf.symbol``).
+
+    Args:
+        tree: Parsed AST of the file to inspect.
+        filepath: Path of the file (used for relative import resolution).
+        root: Project root.
+        target_modules: All known dotted module names for the definition file
+            (e.g. both ``"mypkg.utils"`` and ``"src.mypkg.utils"`` for
+            src-layout projects).
+        target_symbol: Name of the symbol being searched for.
+
+    Returns:
+        List of :class:`TrackedImport` objects for each import that exposes
+        *target_symbol* in this file.
+    """
+    results: list[TrackedImport] = []
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if any(
+                    alias.name == tm or alias.name.startswith(tm + ".")
+                    for tm in target_modules
+                ):
+                    results.append(
+                        TrackedImport(
+                            node=node,
+                            local_name=target_symbol,
+                            is_module_import=True,
+                            module_alias=alias.asname or alias.name.split(".")[0],
+                            lineno=node.lineno,
+                            end_lineno=node.end_lineno or node.lineno,
+                        )
+                    )
+        elif isinstance(node, ast.ImportFrom):
+            resolved = (
+                resolve_relative_import(filepath, root, node.level, node.module)
+                if node.level > 0
+                else node.module
+            )
+            if resolved in target_modules:
+                for alias in node.names:
+                    if alias.name in (target_symbol, "*"):
+                        results.append(
+                            TrackedImport(
+                                node=node,
+                                local_name=(
+                                    alias.asname or alias.name
+                                    if alias.name != "*"
+                                    else target_symbol
+                                ),
+                                is_module_import=False,
+                                lineno=node.lineno,
+                                end_lineno=node.end_lineno or node.lineno,
+                            )
+                        )
+            # from parent import module_leaf (then module_leaf.symbol)
+            for tm in target_modules:
+                _parts = tm.rsplit(".", 1)
+                if len(_parts) == 2 and resolved == _parts[0]:
+                    for alias in node.names:
+                        if alias.name == _parts[1]:
+                            results.append(
+                                TrackedImport(
+                                    node=node,
+                                    local_name=target_symbol,
+                                    is_module_import=True,
+                                    module_alias=alias.asname or alias.name,
+                                    lineno=node.lineno,
+                                    end_lineno=node.end_lineno or node.lineno,
+                                )
+                            )
+    return results
 
 
 def apply_changes(changes: list[FileChanges], dry_run: bool = False) -> int:

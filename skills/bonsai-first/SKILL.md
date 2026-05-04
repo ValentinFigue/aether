@@ -8,15 +8,14 @@ description: >
 when_to_use: >
   Triggered when about to rename a symbol, move a file or symbol, find all usages,
   change a function signature, detect dead code, or search for a pattern in
-  .py, .ts, or .tsx files. sed/awk/grep/find on these files is blocked by the
-  PreToolUse hook — this skill fires first so the right tool is chosen before the
-  block is hit.
+  .py, .ts, or .tsx files. Prefer bonsai AST tools over sed/awk/grep/find on
+  these files — text tools miss imports, re-exports, and type references.
 allowed-tools: mcp__bonsai_py__pyrename, mcp__bonsai_py__pymove, mcp__bonsai_py__pymovesymbol, mcp__bonsai_py__pyfindrefs, mcp__bonsai_py__pycallers, mcp__bonsai_py__pyfindunused, mcp__bonsai_py__pysignature, mcp__bonsai_py__pygrep, mcp__bonsai_ts__tsrename, mcp__bonsai_ts__tsmove, mcp__bonsai_ts__tsmovesymbol, mcp__bonsai_ts__tsfindrefs, mcp__bonsai_ts__tssignature
 ---
 
 # Bonsai-first: use AST tools, not text tools
 
-`sed`, `awk`, `grep`, and `find` on `.py`/`.ts`/`.tsx` files are blocked. Use the bonsai tool that matches the intent:
+`sed`, `awk`, `grep`, and `find` on `.py`/`.ts`/`.tsx` files are discouraged. Use the bonsai tool that matches the intent:
 
 | Intent | Python | TypeScript |
 |---|---|---|

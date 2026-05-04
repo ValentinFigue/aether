@@ -20,8 +20,8 @@ for skill_dir in skills/*/; do
   echo "  $skill_name"
 done
 
-echo "==> Registering enforcement hook in ~/.claude/settings.json (user scope)"
-HOOK_CMD="$(pwd)/.claude-plugin/hooks/enforce-bonsai.sh"
+echo "==> Registering bonsai-first prompt hook in ~/.claude/settings.json (user scope)"
+NUDGE_PROMPT="If the bash command uses grep, sed, awk, or find on .py/.ts/.tsx files, use a bonsai AST tool instead (pyfindrefs, tsfindrefs, pyrename, tsrename, pygrep, pyfindunused…). Only fall back to text tools if no bonsai tool covers the operation."
 python3 - <<PYEOF
 import json, os
 
@@ -35,22 +35,26 @@ except FileNotFoundError:
 hooks = settings.setdefault("hooks", {})
 pre = hooks.setdefault("PreToolUse", [])
 
-# Remove any existing bonsai Bash enforcement hook, then re-add with current path.
+# Remove any legacy bonsai Bash enforcement hook (command type) or prompt nudge, then re-add.
 pre[:] = [
     h for h in pre
     if not (h.get("matcher") == "Bash" and
-            any("enforce-bonsai" in hook.get("command", "") for hook in h.get("hooks", [])))
+            any(
+                "enforce-bonsai" in hook.get("command", "") or
+                "bonsai AST tool" in hook.get("prompt", "")
+                for hook in h.get("hooks", [])
+            ))
 ]
 pre.append({
     "matcher": "Bash",
-    "hooks": [{"type": "command", "command": "$HOOK_CMD"}]
+    "hooks": [{"type": "prompt", "prompt": "$NUDGE_PROMPT"}]
 })
 
 with open(settings_path, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")
 
-print("  Hook registered:", "$HOOK_CMD")
+print("  Prompt hook registered for Bash")
 PYEOF
 
 echo ""

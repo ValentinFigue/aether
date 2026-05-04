@@ -1,4 +1,4 @@
-"""pygrep — text-pattern search across Python files in the project."""
+"""pygrep — Text-pattern search across Python files in the project."""
 
 import argparse
 import re
@@ -11,6 +11,12 @@ from ._common import collect_python_files, find_project_root, read_source
 
 @dataclass
 class GrepResult:
+    """A single line matched by a pattern search.
+
+    ``filepath`` is relative to the project root. ``line`` is 1-based.
+    ``text`` is the matched line with trailing whitespace stripped.
+    """
+
     filepath: str
     line: int
     text: str

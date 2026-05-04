@@ -1,4 +1,4 @@
-"""pycallers — find every call site of a Python function or method."""
+"""pycallers — Find every call site of a Python function or method."""
 
 import argparse
 import json

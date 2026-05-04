@@ -334,6 +334,13 @@ def compute_destination(src: Path, dst: Path) -> Path:
 
     If *dst* is an existing directory or ends with ``/``, *src*'s filename is
     appended; otherwise *dst* is used as-is.
+
+    Args:
+        src: The source file being moved.
+        dst: The requested destination (directory or explicit file path).
+
+    Returns:
+        Resolved destination file path.
     """
     if dst.is_dir() or str(dst).endswith("/"):
         return dst / src.name

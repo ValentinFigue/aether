@@ -33,6 +33,13 @@ def module_to_new_path(module: str, root: Path) -> Path:
 
     Unlike :func:`module_to_path`, this does not check whether the file exists;
     it is used to compute the destination path for a new module.
+
+    Args:
+        module: Dotted module name (e.g. ``"src.utils.dates"``).
+        root: Project root directory used as the import base.
+
+    Returns:
+        Computed ``Path`` for the module file (may not exist yet).
     """
     parts = module.split(".")
     return root / Path(*parts[:-1]) / (parts[-1] + ".py") if len(parts) > 1 else root / (parts[0] + ".py")
@@ -62,10 +69,15 @@ def parse_symbol_ref(ref: str) -> tuple[str, str]:
 
 
 def extract_symbol(filepath: Path, symbol_name: str) -> tuple[str, int, int] | None:
-    """Extract a symbol's source text from a file.
+    """Extract a symbol's source text from a file, including its decorators.
 
-    Returns (source_text, start_line_0idx, end_line_0idx).
-    Includes decorators. start/end are inclusive 0-indexed line numbers.
+    Args:
+        filepath: Source file to read.
+        symbol_name: Name of the top-level function, class, or constant to extract.
+
+    Returns:
+        A ``(source_text, start_line, end_line)`` triple where start/end are
+        inclusive 0-based line indices, or ``None`` if the symbol is not found.
     """
     tree = parse_file(filepath)
     if tree is None:

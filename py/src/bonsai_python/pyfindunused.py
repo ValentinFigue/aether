@@ -1,9 +1,9 @@
-"""pyfindunused — find unused Python symbols across the project.
+"""pyfindunused — Find unused Python symbols across the project.
 
 Three detectors:
-  --dead-code   Top-level functions/classes with no cross-module refs (default)
-  --params      Function parameters never used in the body
-  --imports     Imports never used within their file
+  dead_code   Top-level functions/classes with no cross-module refs (default)
+  params      Function parameters never used in the body
+  imports     Imports never used within their file
 """
 
 import argparse
@@ -84,9 +84,17 @@ _DEAD_SKIP: frozenset[str] = frozenset({"migrations", "tests", "test", "alembic"
 
 @dataclass
 class UnusedResult:
+    """A single unused symbol found in the codebase.
+
+    ``kind`` is one of ``"dead_code"``, ``"unused_param"``, or
+    ``"unused_import"``. ``line`` is 1-based. ``detail`` holds a
+    short context string (e.g. the enclosing function signature for
+    unused params, or the import line text for unused imports).
+    """
+
     filepath: str
     line: int
-    kind: str  # dead_code | unused_param | unused_import
+    kind: str
     name: str
     detail: str
 

@@ -1,4 +1,4 @@
-"""Find all references to a Python symbol across the project using AST."""
+"""pyfindrefs — Find all references to a Python symbol across the project."""
 
 import argparse
 import ast
@@ -35,6 +35,13 @@ _REF_PRIORITY = {
 
 @dataclass
 class Ref:
+    """A single reference to a symbol found in the codebase.
+
+    ``line`` is 1-based. ``ref_type`` is one of ``"definition"``,
+    ``"import"``, ``"call"``, ``"decorator"``, ``"base_class"``,
+    ``"name"``, or ``"attribute"``.
+    """
+
     filepath: str
     line: int
     ref_type: str

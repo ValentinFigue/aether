@@ -9,8 +9,8 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from ._common import collect_python_files, find_project_root, load_config
-from .pyfindunused import UnusedResult, find_dead_code, find_unused_imports, find_unused_params
 from .pyfindrefs import Ref, find_refs
+from .pyfindunused import UnusedResult, find_dead_code, find_unused_imports, find_unused_params
 from .pygrep import GrepResult, grep
 from .pymove import execute_move
 from .pymovesymbol import do_move_symbol
@@ -199,7 +199,7 @@ def pyfindunused(
         dead_code: Find top-level functions/classes with no cross-module references
         params: Find function parameters never used in the body
         imports: Find imports never referenced in their file
-        file_path: Restrict --params or --imports analysis to a specific file or directory
+        file_path: Restrict params or imports analysis to a specific file or directory
     """
     root = Path(project_root) if project_root else find_project_root(Path.cwd())
     scan_root = Path(file_path) if file_path else root
@@ -249,7 +249,9 @@ def pymove(
     project_root: str | None = None,
     dry_run: bool = False,
 ) -> str:
-    """Move or rename a Python file/package and rewrite all import references across the project. For moving a single function or class between files, use pymovesymbol instead.
+    """Move or rename a Python file/package and rewrite all import references across the project.
+
+    For moving a single function or class between files, use pymovesymbol instead.
 
     Args:
         source: Path to the Python file or package directory to move (relative or absolute)
@@ -270,7 +272,9 @@ def pymovesymbol(
     project_root: str | None = None,
     dry_run: bool = False,
 ) -> str:
-    """Move a single Python function or class to a different module, rewriting all imports. For moving an entire file or package, use pymove instead.
+    """Move a single Python function or class to a different module, rewriting all imports.
+
+    For moving an entire file or package, use pymove instead.
 
     Args:
         target: Symbol in 'module:Symbol' format. E.g. 'src.utils.helpers:format_date'
@@ -289,7 +293,10 @@ def pyrename(
     project_root: str | None = None,
     dry_run: bool = False,
 ) -> str:
-    """Scope-aware rename of a Python symbol (function, class, method, variable, constant) across the entire project. Does not rename unrelated local variables that happen to share the name — only the symbol at the specified module path.
+    """Scope-aware rename of a Python symbol (function, class, method, variable, constant) across the entire project.
+
+    Does not rename unrelated local variables that happen to share the name —
+    only the symbol at the specified module path.
 
     Args:
         target: Symbol in 'module:Symbol' or 'module:Class.method' format. E.g. 'src.models:User'

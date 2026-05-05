@@ -355,6 +355,8 @@ All mutating tools accept `dry_run=true`. Always follow this pattern:
 
 Claude uses dry-run by default for all mutating operations.
 
+> **Tip:** Run bonsai tools on a clean git working tree (`git status` shows nothing uncommitted). This makes it trivial to review the full diff with `git diff` and to undo with `git checkout .` if anything looks wrong. The tools will warn you on stderr if uncommitted changes are detected.
+
 ---
 
 ## Troubleshooting

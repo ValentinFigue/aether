@@ -3,6 +3,7 @@
 import ast
 import logging
 import os
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -435,10 +436,7 @@ def find_imports_of_symbol(
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if any(
-                    alias.name == tm or alias.name.startswith(tm + ".")
-                    for tm in target_modules
-                ):
+                if any(alias.name == tm or alias.name.startswith(tm + ".") for tm in target_modules):
                     results.append(
                         TrackedImport(
                             node=node,
@@ -451,9 +449,7 @@ def find_imports_of_symbol(
                     )
         elif isinstance(node, ast.ImportFrom):
             resolved = (
-                resolve_relative_import(filepath, root, node.level, node.module)
-                if node.level > 0
-                else node.module
+                resolve_relative_import(filepath, root, node.level, node.module) if node.level > 0 else node.module
             )
             if resolved in target_modules:
                 for alias in node.names:
@@ -461,11 +457,7 @@ def find_imports_of_symbol(
                         results.append(
                             TrackedImport(
                                 node=node,
-                                local_name=(
-                                    alias.asname or alias.name
-                                    if alias.name != "*"
-                                    else target_symbol
-                                ),
+                                local_name=(alias.asname or alias.name if alias.name != "*" else target_symbol),
                                 is_module_import=False,
                                 lineno=node.lineno,
                                 end_lineno=node.end_lineno or node.lineno,
@@ -490,6 +482,26 @@ def find_imports_of_symbol(
     return results
 
 
+def _warn_if_dirty(hint_path: Path) -> None:
+    """Print a stderr warning when the git working tree has uncommitted changes."""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=hint_path if hint_path.is_dir() else hint_path.parent,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            print(
+                "Warning: working tree has uncommitted changes. "
+                "Run on a clean git state to make refactors easy to revert.",
+                file=sys.stderr,
+            )
+    except Exception:
+        pass  # not a git repo or git not available — skip silently
+
+
 def apply_changes(changes: list[FileChanges], dry_run: bool = False) -> int:
     """Apply a list of :class:`FileChanges` to disk, or preview them in dry-run mode.
 
@@ -503,6 +515,9 @@ def apply_changes(changes: list[FileChanges], dry_run: bool = False) -> int:
     Returns:
         Number of files modified (or that would be modified in dry-run mode).
     """
+    if not dry_run:
+        _warn_if_dirty(changes[0].filepath if changes else Path("."))
+
     modified = 0
     for fc in changes:
         if not fc.edits:

@@ -90,6 +90,9 @@ class UnusedResult:
     ``"unused_import"``. ``line`` is 1-based. ``detail`` holds a
     short context string (e.g. the enclosing function signature for
     unused params, or the import line text for unused imports).
+    ``confidence`` is ``"high"`` or ``"low"``; low-confidence results are
+    more likely to be false positives (e.g. from files that use dynamic
+    dispatch via ``getattr`` / ``globals`` / ``locals``).
     """
 
     filepath: str
@@ -97,6 +100,7 @@ class UnusedResult:
     kind: str
     name: str
     detail: str
+    confidence: str = "high"
 
 
 def _decorator_names(
@@ -141,6 +145,22 @@ def _skip_for_dead(fpath: Path, skip_dirs: frozenset[str]) -> bool:
     return any(part in skip_dirs for part in fpath.parts)
 
 
+_DYNAMIC_BUILTINS = {"getattr", "globals", "locals", "vars", "__getattribute__"}
+
+
+def _uses_dynamic_dispatch(tree: ast.Module) -> bool:
+    """Return True if the file calls getattr/globals/locals/vars — a signal that
+    static analysis may miss references, making dead-code results less reliable."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in _DYNAMIC_BUILTINS:
+                return True
+            if isinstance(func, ast.Attribute) and func.attr in _DYNAMIC_BUILTINS:
+                return True
+    return False
+
+
 # ── dead code ─────────────────────────────────────────────────────────────────
 
 
@@ -181,6 +201,7 @@ def find_dead_code(
     # Pass 1: collect top-level public definitions and __all__ per file
     defs: dict[str, tuple[Path, int, str]] = {}  # "mod:name" → (fpath, lineno, name)
     all_exports: dict[Path, set[str]] = {}
+    dynamic_files: set[Path] = set()  # files using getattr/globals/etc.
 
     for fpath in files:
         tree = parse_file(fpath)
@@ -189,6 +210,8 @@ def find_dead_code(
         modules = module_aliases_for_file(fpath, py_roots)
         if not modules:
             continue
+        if _uses_dynamic_dispatch(tree):
+            dynamic_files.add(fpath)
 
         exports: set[str] = set()
         for node in ast.iter_child_nodes(tree):
@@ -277,6 +300,7 @@ def find_dead_code(
                 kind="dead_code",
                 name=name,
                 detail=_snippet(fpath, lineno),
+                confidence="low" if fpath in dynamic_files else "high",
             )
         )
     return results
@@ -433,7 +457,8 @@ def print_results(results: list[UnusedResult], header: str) -> None:
     print(f"\n{header} ({len(results)})")
     for r in results:
         loc = f"{r.filepath}:{r.line}"
-        print(f"  {loc:<55}  {r.name:<25}  {r.detail[:55]}")
+        tag = " [low confidence]" if r.confidence == "low" else ""
+        print(f"  {loc:<55}  {r.name:<25}  {r.detail[:55]}{tag}")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────

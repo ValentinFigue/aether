@@ -16,7 +16,6 @@ from pathlib import Path
 from ._common import (
     FileChanges,
     FileEdit,
-    TrackedImport,
     apply_changes,
     collect_python_files,
     find_imports_of_symbol,
@@ -25,7 +24,6 @@ from ._common import (
     get_lines,
     parse_file,
     parse_symbol_ref,
-    resolve_relative_import,
 )
 
 logger = logging.getLogger(__name__)

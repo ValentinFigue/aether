@@ -530,9 +530,7 @@ def do_signature(
             finder.visit(tree)
             fc = fc_def
         else:
-            imports = find_imports_of_symbol(
-                tree, pyfile, root, frozenset({module_name}), symbol_name
-            )
+            imports = find_imports_of_symbol(tree, pyfile, root, frozenset({module_name}), symbol_name)
             if not imports:
                 continue
             imp = imports[0]

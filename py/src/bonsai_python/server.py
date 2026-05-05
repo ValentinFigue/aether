@@ -170,10 +170,7 @@ def pycallers(target: str, project_root: str | None = None) -> str:
     calls = [r for r in refs if r.ref_type == "call"]
     if not calls:
         return "No call sites found."
-    lines = [
-        f"  {r.filepath}:{r.line:<4}  {r.snippet[:80]}"
-        for r in sorted(calls, key=lambda r: (r.filepath, r.line))
-    ]
+    lines = [f"  {r.filepath}:{r.line:<4}  {r.snippet[:80]}" for r in sorted(calls, key=lambda r: (r.filepath, r.line))]
     lines.append(f"\n{len(calls)} call site{'s' if len(calls) != 1 else ''} found.")
     return "\n".join(lines)
 
@@ -338,20 +335,24 @@ def pysignature(
     changes: list[SignatureChange] = []
     for item in add or []:
         if isinstance(item, dict):
-            changes.append(SignatureChange(
-                action="add",
-                param_name=item["name"],
-                new_type=item.get("type"),
-                new_default=item.get("default"),
-            ))
+            changes.append(
+                SignatureChange(
+                    action="add",
+                    param_name=item["name"],
+                    new_type=item.get("type"),
+                    new_default=item.get("default"),
+                )
+            )
         else:
             parts = item.split()
-            changes.append(SignatureChange(
-                action="add",
-                param_name=parts[0],
-                new_type=parts[1] if len(parts) > 1 else None,
-                new_default=parts[2] if len(parts) > 2 else None,
-            ))
+            changes.append(
+                SignatureChange(
+                    action="add",
+                    param_name=parts[0],
+                    new_type=parts[1] if len(parts) > 1 else None,
+                    new_default=parts[2] if len(parts) > 2 else None,
+                )
+            )
     for name in remove or []:
         changes.append(SignatureChange(action="remove", param_name=name))
     for pair in rename or []:
@@ -364,18 +365,22 @@ def pysignature(
         changes.append(SignatureChange(action="reorder", param_name="", new_order=reorder))
     for item in set_default or []:
         if isinstance(item, dict):
-            changes.append(SignatureChange(
-                action="set_default",
-                param_name=item["name"],
-                new_default=str(item["value"]),
-                new_type=item.get("type"),
-            ))
+            changes.append(
+                SignatureChange(
+                    action="set_default",
+                    param_name=item["name"],
+                    new_default=str(item["value"]),
+                    new_type=item.get("type"),
+                )
+            )
         else:
             parts = item.split()
-            changes.append(SignatureChange(
-                action="set_default",
-                param_name=parts[0],
-                new_default=parts[1],
-                new_type=parts[2] if len(parts) > 2 else None,
-            ))
+            changes.append(
+                SignatureChange(
+                    action="set_default",
+                    param_name=parts[0],
+                    new_default=parts[1],
+                    new_type=parts[2] if len(parts) > 2 else None,
+                )
+            )
     return _capture_output(do_signature, target, changes, root, dry_run)

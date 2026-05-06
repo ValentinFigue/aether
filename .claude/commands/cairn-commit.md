@@ -3,9 +3,31 @@ Parse $ARGUMENTS for flags. Supported flags:
 - `--style=plain` — output a plain imperative-mood message with no type prefix
 - `--off` — print "cairn disabled for this run." and stop
 
-If `--off` is present, print "cairn disabled for this run." and stop immediately.
+If `--off` is present in $ARGUMENTS, print "cairn disabled for this run." and stop immediately.
 
-Resolve style: if `--style=plain` is in $ARGUMENTS use plain, otherwise default to conventional.
+---
+
+**Step 0 — Config check**
+
+Run this single Bash command and capture its full output:
+
+```bash
+{ cat ./cairn.config 2>/dev/null; echo "---CAIRN_SEP---"; cat "$HOME/.claude/cairn.config" 2>/dev/null; }
+```
+
+Split the output on the `---CAIRN_SEP---` line. Everything before it is the local config; everything after is the global config. Local takes precedence over global.
+
+Parse both sections for an `enabled:` key:
+- If the effective value (local wins if present, otherwise global) is `enabled: false`, print:
+  `cairn is disabled. Run \`cairn enable\` to re-enable.`
+  and stop immediately.
+- If no `enabled:` key is found in either section, default to enabled (continue).
+
+Also resolve `style` from config (used as fallback in Step 3):
+- Check local config for `style:` key, then global config.
+- Store the resolved config style for use if no `--style` flag is present in $ARGUMENTS.
+
+Note: config values for `enabled` and `style` only contain `true`/`false` or `conventional`/`plain`, so the `---CAIRN_SEP---` separator is safe from false matches.
 
 ---
 
@@ -32,7 +54,13 @@ Continuing with message generation — no commit will be executed.
 
 **Step 3 — Generate commit message**
 
-Analyse the diff and produce a commit message using the style resolved in Step 1.
+Resolve style in this priority order:
+1. `--style=<x>` in $ARGUMENTS (highest priority)
+2. `style:` key from local `cairn.config` (read in Step 0)
+3. `style:` key from global `cairn.config` (read in Step 0)
+4. Default: `conventional`
+
+Analyse the diff and produce a commit message using the resolved style.
 
 **Conventional style** format:
 ```

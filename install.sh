@@ -21,6 +21,8 @@ else
   CLAUDE_FILE="./CLAUDE.md"
 fi
 
+ALL_COMMANDS="cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md"
+
 _json_add_perms() {
   local file="$1"
   if command -v python3 &>/dev/null; then
@@ -49,12 +51,83 @@ JSEOF
   fi
 }
 
-# Install command file
+_json_add_hook() {
+  local file="$1" hook_path="$2"
+  if command -v python3 &>/dev/null; then
+    python3 - "$file" "$hook_path" <<'PYEOF'
+import json, sys
+f, hook_path = sys.argv[1], sys.argv[2]
+with open(f) as fh: s = json.load(fh)
+hooks = s.setdefault("hooks", {})
+pre = hooks.setdefault("PreToolUse", [])
+bash_entry = next((e for e in pre if e.get("matcher") == "Bash"), None)
+if bash_entry is None:
+    bash_entry = {"matcher": "Bash", "hooks": []}
+    pre.append(bash_entry)
+new_hook = {"type": "command", "command": hook_path}
+if not any(h.get("command") == hook_path for h in bash_entry["hooks"]):
+    bash_entry["hooks"].append(new_hook)
+print(json.dumps(s, indent=2))
+PYEOF
+  elif command -v node &>/dev/null; then
+    node - "$file" "$hook_path" <<'JSEOF'
+const [f, hookPath] = process.argv.slice(2);
+const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
+s.hooks = s.hooks || {};
+s.hooks.PreToolUse = s.hooks.PreToolUse || [];
+let bashEntry = s.hooks.PreToolUse.find(e => e.matcher === "Bash");
+if (!bashEntry) { bashEntry = { matcher: "Bash", hooks: [] }; s.hooks.PreToolUse.push(bashEntry); }
+bashEntry.hooks = bashEntry.hooks || [];
+if (!bashEntry.hooks.some(h => h.command === hookPath)) {
+    bashEntry.hooks.push({ type: "command", command: hookPath });
+}
+process.stdout.write(JSON.stringify(s, null, 2) + "\n");
+JSEOF
+  elif command -v jq &>/dev/null; then
+    jq --arg p "$hook_path" '
+      .hooks.PreToolUse |= (
+        if . == null then [{"matcher":"Bash","hooks":[{"type":"command","command":$p}]}]
+        else
+          if any(.[]; .matcher == "Bash") then
+            map(if .matcher == "Bash" then
+              .hooks |= if any(.[]; .command == $p) then . else . + [{"type":"command","command":$p}] end
+            else . end)
+          else . + [{"matcher":"Bash","hooks":[{"type":"command","command":$p}]}]
+          end
+        end
+      )' "$file"
+  else
+    return 1
+  fi
+}
+
+_json_remove_hook() {
+  local file="$1" hook_path="$2"
+  if command -v python3 &>/dev/null; then
+    python3 - "$file" "$hook_path" <<'PYEOF'
+import json, sys
+f, hook_path = sys.argv[1], sys.argv[2]
+with open(f) as fh: s = json.load(fh)
+pre = s.get("hooks", {}).get("PreToolUse", [])
+for entry in pre:
+    if entry.get("matcher") == "Bash":
+        entry["hooks"] = [h for h in entry.get("hooks", []) if h.get("command") != hook_path]
+print(json.dumps(s, indent=2))
+PYEOF
+  else
+    return 1
+  fi
+}
+
+# Install command files
 mkdir -p "$COMMANDS_DIR"
-curl -fsSL \
-  -o "$COMMANDS_DIR/cairn.md" \
-  "https://raw.githubusercontent.com/ValentinFigue/cairn/main/.claude/commands/cairn.md"
-echo "✓ /cairn installed to $COMMANDS_DIR"
+for name in $ALL_COMMANDS; do
+  curl -fsSL \
+    -o "$COMMANDS_DIR/$name" \
+    "https://raw.githubusercontent.com/ValentinFigue/cairn/main/.claude/commands/$name"
+  cmd_name="${name%.md}"
+  echo "✓ /$cmd_name installed to $COMMANDS_DIR"
+done
 
 # Inject Bash + Read + Write permissions into settings.json
 SETTINGS_FILE="$SETTINGS_DIR/settings.json"
@@ -88,7 +161,7 @@ if [ "$WITH_CLAUDE_MD" = true ]; then
   fi
 fi
 
-# Install cairn CLI for global mode
+# Install cairn CLI and hook for global mode
 if [ "$MODE" = "global" ]; then
   CLI_DIR="$HOME/.local/bin"
   mkdir -p "$CLI_DIR"
@@ -101,15 +174,40 @@ if [ "$MODE" = "global" ]; then
   if ! echo "$PATH" | grep -q "$CLI_DIR"; then
     echo "  Note: add $CLI_DIR to your PATH to use the 'cairn' command"
   fi
+
+  # Install enforce-cairn hook
+  HOOK_DIR="$HOME/.local/share/cairn"
+  HOOK_FILE="$HOOK_DIR/enforce-cairn.sh"
+  mkdir -p "$HOOK_DIR"
+  curl -fsSL \
+    -o "$HOOK_FILE" \
+    "https://raw.githubusercontent.com/ValentinFigue/cairn/main/hooks/enforce-cairn.sh"
+  chmod +x "$HOOK_FILE"
+  echo "✓ enforce-cairn hook installed to $HOOK_FILE"
+
+  GLOBAL_SETTINGS="$HOME/.claude/settings.json"
+  if [ ! -f "$GLOBAL_SETTINGS" ]; then
+    printf '{\n  "hooks": {\n    "PreToolUse": [{\n      "matcher": "Bash",\n      "hooks": [{"type": "command", "command": "%s"}]\n    }]\n  }\n}\n' "$HOOK_FILE" > "$GLOBAL_SETTINGS"
+    echo "✓ Hook registered in $GLOBAL_SETTINGS"
+  elif _json_add_hook "$GLOBAL_SETTINGS" "$HOOK_FILE" > "$GLOBAL_SETTINGS.tmp" && mv "$GLOBAL_SETTINGS.tmp" "$GLOBAL_SETTINGS"; then
+    echo "✓ Hook registered in $GLOBAL_SETTINGS"
+  else
+    echo "  Could not register hook automatically (install python3, node, or jq)."
+    echo "  Add a PreToolUse Bash hook pointing to $HOOK_FILE manually."
+  fi
 fi
 
 echo ""
 if [ "$MODE" = "global" ]; then
   echo "Available in all Claude Code projects. Restart Claude Code to activate."
   echo ""
+  echo "Commands: /cairn-commit  /cairn-pr  /cairn-changelog  /cairn-summary"
+  echo ""
   echo "Run 'cairn status' to verify your install."
 else
   echo "Available in this project. Restart Claude Code to activate."
+  echo ""
+  echo "Commands: /cairn-commit  /cairn-pr  /cairn-changelog  /cairn-summary"
   echo ""
   echo "Tips:"
   echo "  Global install:             bash install.sh global"

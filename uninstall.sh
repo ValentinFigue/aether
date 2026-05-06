@@ -19,26 +19,32 @@ else
   CLAUDE_FILE="./CLAUDE.md"
 fi
 
-# Remove command file
-if [ -f "$COMMANDS_DIR/cairn.md" ]; then
-  rm "$COMMANDS_DIR/cairn.md"
-  echo "✓ Removed $COMMANDS_DIR/cairn.md"
-else
-  echo "  $COMMANDS_DIR/cairn.md not found"
-fi
+ALL_COMMANDS="cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md"
 
-# Remove cairn section from CLAUDE.md
-if [ "$WITH_CLAUDE_MD" = true ]; then
-  if [ -f "$CLAUDE_FILE" ] && grep -q "<!-- cairn:start -->" "$CLAUDE_FILE"; then
-    awk '/<!-- cairn:start -->/{skip=1} !skip{print} /<!-- cairn:end -->/{skip=0}' \
-      "$CLAUDE_FILE" > "$CLAUDE_FILE.tmp" && mv "$CLAUDE_FILE.tmp" "$CLAUDE_FILE"
-    echo "✓ Removed cairn section from $CLAUDE_FILE"
+# Remove command files
+for name in $ALL_COMMANDS; do
+  if [ -f "$COMMANDS_DIR/$name" ]; then
+    rm "$COMMANDS_DIR/$name"
+    echo "✓ Removed $COMMANDS_DIR/$name"
   else
-    echo "  No cairn section found in $CLAUDE_FILE"
+    echo "  $COMMANDS_DIR/$name not found"
   fi
+done
+
+# Remove cairn and docs sections from CLAUDE.md
+if [ "$WITH_CLAUDE_MD" = true ]; then
+  for marker in "cairn" "docs"; do
+    if [ -f "$CLAUDE_FILE" ] && grep -q "<!-- ${marker}:start -->" "$CLAUDE_FILE"; then
+      awk "/<!-- ${marker}:start -->/{skip=1} !skip{print} /<!-- ${marker}:end -->/{skip=0}" \
+        "$CLAUDE_FILE" > "$CLAUDE_FILE.tmp" && mv "$CLAUDE_FILE.tmp" "$CLAUDE_FILE"
+      echo "✓ Removed ${marker} section from $CLAUDE_FILE"
+    else
+      echo "  No ${marker} section found in $CLAUDE_FILE"
+    fi
+  done
 fi
 
-# Remove CLI binary for global mode
+# Remove CLI binary and hook for global mode
 if [ "$MODE" = "global" ]; then
   CLI_BIN="$HOME/.local/bin/cairn"
   if [ -f "$CLI_BIN" ]; then
@@ -46,6 +52,30 @@ if [ "$MODE" = "global" ]; then
     echo "✓ Removed $CLI_BIN"
   else
     echo "  $CLI_BIN not found"
+  fi
+
+  HOOK_FILE="$HOME/.local/share/cairn/enforce-cairn.sh"
+  GLOBAL_SETTINGS="$HOME/.claude/settings.json"
+
+  if [ -f "$HOOK_FILE" ]; then
+    rm "$HOOK_FILE"
+    echo "✓ Removed $HOOK_FILE"
+  fi
+
+  # Remove hook entry from settings.json
+  if command -v python3 &>/dev/null && [ -f "$GLOBAL_SETTINGS" ]; then
+    python3 - "$GLOBAL_SETTINGS" "$HOOK_FILE" <<'PYEOF' > "$GLOBAL_SETTINGS.tmp" \
+      && mv "$GLOBAL_SETTINGS.tmp" "$GLOBAL_SETTINGS" \
+      && echo "✓ Hook entry removed from $GLOBAL_SETTINGS"
+import json, sys
+f, hook_path = sys.argv[1], sys.argv[2]
+with open(f) as fh: s = json.load(fh)
+pre = s.get("hooks", {}).get("PreToolUse", [])
+for entry in pre:
+    if entry.get("matcher") == "Bash":
+        entry["hooks"] = [h for h in entry.get("hooks", []) if h.get("command") != hook_path]
+print(json.dumps(s, indent=2))
+PYEOF
   fi
 fi
 

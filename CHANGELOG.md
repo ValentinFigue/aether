@@ -6,6 +6,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.2.0] — 2026-05-06
+
+### Added
+
+- `/cairn-pr` command: generate PR title and description from branch diff vs base branch; supports `--base`, `--style`, PR template file (`pr.template_file`), and prose rules file (`pr.rules_file`)
+- `/cairn-changelog` command: generate a Keep-a-Changelog entry from a commit range; supports `--from`, `--to`, `--version`, `--style`, extra types, and exclude paths
+- `/cairn-summary` command: standup/slack/paragraph summary of recent commits; supports `--from`, `--to`, `--format`, and `--author`
+- `hooks/enforce-cairn.sh`: PreToolUse hook that nudges toward `/cairn-commit` when a weak `git commit -m` message is detected; supports `# cairn:skip` bypass
+
+### Changed
+
+- `/cairn` renamed to `/cairn-commit` for consistent `cairn-<verb>` naming across all commands
+- `cairn-commit.md` now reads `enabled:` from `cairn.config` at runtime — `cairn disable` is now respected by the command itself
+- `cairn-commit.md` now reads `style:` from `cairn.config` as fallback when no `--style` flag is passed
+- `bin/cairn update` now updates all four installed command files (`cairn-commit.md`, `cairn-pr.md`, `cairn-changelog.md`, `cairn-summary.md`)
+- `bin/cairn status` shows install state for all four command files
+- `bin/cairn uninstall` removes all four command files and the hook entry
+- `bin/cairn config set` supports ten new flags covering per-command settings
+- `bin/cairn config show` added: prints effective merged config with source for each key
+- `install.sh` installs all four command files, the enforce-cairn hook, and registers the hook in `settings.json` (global mode)
+- `uninstall.sh` removes all four command files and the hook registration
+- `templates/CLAUDE.md` documentation-sync rule updated to cover all `cairn-*.md` files
+- `~/.claude/CLAUDE.md` cairn section updated with per-command trigger guidance
+- `~/.claude/CLAUDE.md` now includes a global documentation best-practices rule (applies to all projects)
+
+---
+
 ## [0.1.0] — 2026-05-06
 
 ### Added

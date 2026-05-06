@@ -27,7 +27,11 @@ bonsai/
 ├── ts/                        # TypeScript MCP server
 │   ├── src/                   # TypeScript source modules
 │   └── tests/                 # vitest suite + fixtures
-├── scripts/                   # dev helper scripts
+├── bin/
+│   └── bonsai                 # CLI for install / uninstall / status / update
+├── templates/
+│   └── CLAUDE.md              # snippet injected into ~/.claude/CLAUDE.md
+├── scripts/                   # dev helper scripts (setup / test / clean)
 ├── skills/                    # Claude Code skill definitions
 ├── .claude-plugin/            # plugin manifest, hooks, marketplace config
 └── .mcp.json                  # registers both MCP servers for local dev
@@ -101,48 +105,53 @@ claude mcp remove bonsai-ts --scope user
 
 ### 6. Use the tools in other projects
 
-The `.mcp.json` only activates when you open the `bonsai/` directory. To use your local build in any project, register it globally once:
+The `.mcp.json` only activates when you open the `bonsai/` directory. To make both servers available globally (across all projects), run from the repo root:
 
 ```bash
-claude mcp add bonsai-py --scope user -- uv run --directory "$(pwd)/py" bonsai-py
-claude mcp add bonsai-ts --scope user -- node "$(pwd)/ts/dist/server.js"
+./install.sh           # registers MCP servers, hooks, skills, and the bonsai CLI
+./install.sh --claude-md   # same + injects the bonsai tool reference into ~/.claude/CLAUDE.md
 ```
 
-When you publish and want to switch to the released packages:
+Verify with `bonsai status`. Restart Claude Code once to pick up the changes.
 
-```bash
-claude mcp add bonsai-py --scope user -- uvx bonsai-py
-claude mcp add bonsai-ts --scope user -- npx --yes bonsai-ts
-```
+When the packages are published and you want to switch to released versions, update `.mcp.json` to use `uvx bonsai-py` / `npx --yes bonsai-ts` and re-run `bonsai update`.
 
 ---
 
 ## Install
 
-### Option A — Manual install (recommended for now)
+### Option A — From the repo (recommended for now)
 
-**Python server:**
+Clone the repo once, then run the install script from the repo root:
+
 ```bash
-# With uv (recommended):
-claude mcp add bonsai-py --scope user -- uvx bonsai-py
-
-# With pip:
-pip install bonsai-py
-claude mcp add bonsai-py --scope user -- python -m bonsai_python
+git clone https://github.com/ValentinFigue/bonsai
+cd bonsai
+./install.sh
 ```
 
-**TypeScript server:**
+With `--claude-md`, the installer also injects a bonsai reference table into `~/.claude/CLAUDE.md`, which trains Claude to reach for AST tools automatically across all your projects:
+
 ```bash
-claude mcp add bonsai-ts --scope user -- npx --yes bonsai-ts
+./install.sh --claude-md
 ```
 
-Verify Python setup:
+Restart Claude Code, then verify with:
+
 ```bash
-python -m bonsai_python --verify
+bonsai status
 ```
 
-> This option skips the plugin skills layer. Claude will still invoke the tools when asked,
-> but won't auto-select them for refactoring tasks the way the skills layer enables.
+#### Managing the installation
+
+```
+bonsai install    [--claude-md]   Install (or re-install after a repo update)
+bonsai uninstall  [--claude-md]   Remove everything bonsai installed
+bonsai status                     Show what's installed / what's missing
+bonsai update                     Rebuild servers and reinstall
+```
+
+`bonsai` is installed to `~/.local/bin/bonsai`. If it's not on your PATH, add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile.
 
 ### Option B — Claude Code plugin system
 
@@ -191,21 +200,24 @@ npm publish --access public   # requires npm login
 
 Verify: `npx --yes bonsai-ts --help`
 
-### Step 3 — Switch `.mcp.json` to published packages
+### Step 3 — Switch to published packages
 
-Once both packages are live, update `.mcp.json` to the published form:
+Once both packages are live, switch the install script to use them:
+
+```bash
+bonsai install --published          # registers uvx bonsai-py + npx bonsai-ts
+bonsai install --published --claude-md   # same + CLAUDE.md
+```
+
+No more need to keep a local build — the servers run from the registry on demand.
+
+Also update `.mcp.json` (for local dev) to the published form:
 
 ```json
 {
   "mcpServers": {
-    "bonsai-py": {
-      "command": "uvx",
-      "args": ["bonsai-py"]
-    },
-    "bonsai-ts": {
-      "command": "npx",
-      "args": ["--yes", "bonsai-ts@latest"]
-    }
+    "bonsai-py": { "command": "uvx", "args": ["bonsai-py"] },
+    "bonsai-ts": { "command": "npx", "args": ["--yes", "bonsai-ts"] }
   }
 }
 ```
@@ -361,13 +373,19 @@ Claude uses dry-run by default for all mutating operations.
 
 ## Troubleshooting
 
+**First step: run `bonsai status`**
+
+This shows exactly which pieces are installed and which are missing — MCP server entries, permissions, hooks, skills, and the CLAUDE.md section.
+
 **Tools don't appear after install**
 
-Run `python -m bonsai_python --verify`, then restart Claude Code. If that doesn't help:
+Run `bonsai status`, fix anything flagged ✗, then restart Claude Code. If the servers still fail to connect, test them directly:
+
 ```bash
-claude mcp add bonsai-py --scope user -- uvx bonsai-py
-claude mcp add bonsai-ts --scope user -- npx --yes bonsai-ts
+uv run --directory py bonsai-py   # Python server
+node ts/dist/server.js             # TypeScript server
 ```
+
 Then restart.
 
 **`uvx` not found**

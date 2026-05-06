@@ -26,7 +26,10 @@ if printf '%s' "$cmd" | grep -q '# *cairn:skip'; then
   exit 0
 fi
 
-result=$(python3 - "$cmd" <<'PYEOF'
+# Write the checker to a temp file to avoid bash quote-tracking issues
+# inside $() command substitution with heredoc (bash parses " inside $(...)).
+_tmppy=$(mktemp /tmp/cairn_check.XXXXXX.py)
+cat > "$_tmppy" << 'PYEOF'
 import re, sys
 
 cmd = sys.argv[1]
@@ -36,7 +39,7 @@ if not re.search(r'\bgit\b.*\bcommit\b', cmd):
     print("none")
     sys.exit(0)
 
-if not re.search(r'(-m|--message)\s*["\']?(.+)', cmd):
+if not re.search(r'(-m|--message)\s*.+', cmd):
     print("none")
     sys.exit(0)
 
@@ -63,7 +66,9 @@ if is_short or is_weak_word or is_no_prefix:
 else:
     print("none")
 PYEOF
-) || exit 0
+
+result=$(python3 "$_tmppy" "$cmd" 2>/dev/null) || { rm -f "$_tmppy"; exit 0; }
+rm -f "$_tmppy"
 
 if [ "$result" = "match" ]; then
   cat <<'MSG'

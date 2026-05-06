@@ -145,10 +145,12 @@ bonsai status
 #### Managing the installation
 
 ```
-bonsai install    [--claude-md]   Install (or re-install after a repo update)
-bonsai uninstall  [--claude-md]   Remove everything bonsai installed
-bonsai status                     Show what's installed / what's missing
-bonsai update                     Rebuild servers and reinstall
+bonsai install      [--claude-md]   Install (or re-install after a repo update)
+bonsai uninstall    [--claude-md]   Remove everything bonsai installed
+bonsai status                       Show what's installed / what's missing
+bonsai enable-hook                  Enable the Bash nudge hook
+bonsai disable-hook                 Disable the Bash nudge hook
+bonsai update                       Rebuild servers and reinstall
 ```
 
 `bonsai` is installed to `~/.local/bin/bonsai`. If it's not on your PATH, add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile.

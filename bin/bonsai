@@ -8,6 +8,8 @@ if [ -L "$SELF" ]; then
 fi
 REPO_ROOT="$(cd "$(dirname "$SELF")/.." && pwd -P)"
 
+NUDGE_PROMPT="$(cat "$REPO_ROOT/templates/bash_nudge_prompt.txt")"
+
 usage() {
   cat <<EOF
 Usage: bonsai <command> [options]
@@ -16,6 +18,8 @@ Commands:
   install    [--claude-md] [--published]   Install bonsai MCP servers and hooks
   uninstall  [--claude-md]                 Remove bonsai installation
   status                                   Show installation status
+  enable-hook                              Enable the Bash nudge hook
+  disable-hook                             Disable the Bash nudge hook
   update     [--claude-md] [--published]   Rebuild servers and reinstall
   help                                     Show this help message
 
@@ -83,9 +87,9 @@ has_hook = any(
     for h in pre
 )
 if has_hook:
-    ok("Bash nudge hook installed")
+    ok("Bash nudge hook  [enabled]   (run: bonsai disable-hook to turn off)")
 else:
-    fail("Bash nudge hook missing  (run: bonsai install)")
+    dim("Bash nudge hook  [disabled]  (run: bonsai enable-hook to turn on)")
 
 # Skills
 skills_dir = os.path.expanduser("~/.claude/skills/bonsai-first")
@@ -110,6 +114,80 @@ else:
 PYEOF
 }
 
+cmd_enable() {
+  python3 - "$NUDGE_PROMPT" <<'PYEOF'
+import json, os, sys
+
+nudge = sys.argv[1]
+settings_path = os.path.expanduser("~/.claude/settings.json")
+settings = {}
+if os.path.exists(settings_path):
+    try:
+        with open(settings_path) as f:
+            settings = json.load(f)
+    except json.JSONDecodeError:
+        pass
+
+pre = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
+already = any(
+    h.get("matcher") == "Bash" and
+    any("bonsai AST tool" in hook.get("prompt", "") for hook in h.get("hooks", []))
+    for h in pre
+)
+if already:
+    print("Bash nudge hook is already enabled.")
+else:
+    pre.append({"matcher": "Bash", "hooks": [{"type": "prompt", "prompt": nudge}]})
+    os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+    tmp = settings_path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, settings_path)
+    print("✓ Bash nudge hook enabled. Restart Claude Code to apply.")
+PYEOF
+}
+
+cmd_disable() {
+  python3 - <<'PYEOF'
+import json, os
+
+settings_path = os.path.expanduser("~/.claude/settings.json")
+if not os.path.exists(settings_path):
+    print("~/.claude/settings.json not found — nothing to disable.")
+    exit(0)
+
+try:
+    with open(settings_path) as f:
+        settings = json.load(f)
+except json.JSONDecodeError:
+    print("~/.claude/settings.json unreadable — skipping.")
+    exit(0)
+
+pre = settings.get("hooks", {}).get("PreToolUse", [])
+before = len(pre)
+settings.setdefault("hooks", {})["PreToolUse"] = [
+    h for h in pre
+    if not (
+        h.get("matcher") == "Bash" and
+        any("bonsai AST tool" in hook.get("prompt", "") for hook in h.get("hooks", []))
+    )
+]
+removed = before - len(settings["hooks"]["PreToolUse"])
+
+tmp = settings_path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+os.replace(tmp, settings_path)
+
+if removed:
+    print("✓ Bash nudge hook disabled. Restart Claude Code to apply.")
+else:
+    print("Bash nudge hook was not enabled.")
+PYEOF
+}
+
 case "${1:-help}" in
   install)
     exec "$REPO_ROOT/install.sh" "${@:2}"
@@ -119,6 +197,12 @@ case "${1:-help}" in
     ;;
   status)
     cmd_status
+    ;;
+  enable-hook)
+    cmd_enable
+    ;;
+  disable-hook)
+    cmd_disable
     ;;
   update)
     echo "==> Rebuilding and reinstalling bonsai"

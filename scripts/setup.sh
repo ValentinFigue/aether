@@ -21,7 +21,8 @@ for skill_dir in skills/*/; do
 done
 
 echo "==> Registering bonsai-first prompt hook in ~/.claude/settings.json (user scope)"
-NUDGE_PROMPT="If the bash command uses grep, sed, awk, or find on .py/.ts/.tsx files, use a bonsai AST tool instead (pyfindrefs, tsfindrefs, pyrename, tsrename, pygrep, pyfindunused…). Only fall back to text tools if no bonsai tool covers the operation."
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+NUDGE_PROMPT="$(cat "$REPO_ROOT/templates/bash_nudge_prompt.txt")"
 python3 - <<PYEOF
 import json, os
 

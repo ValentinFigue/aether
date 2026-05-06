@@ -156,7 +156,7 @@ PYEOF
 echo ""
 echo "==> Registering PreToolUse hook in ~/.claude/settings.json"
 
-NUDGE_PROMPT="If the bash command uses grep, sed, awk, or find on .py/.ts/.tsx files, use a bonsai AST tool instead (pyfindrefs, tsfindrefs, pyrename, tsrename, pygrep, pyfindunused…). Only fall back to text tools if no bonsai tool covers the operation."
+NUDGE_PROMPT="$(cat "$REPO_ROOT/templates/bash_nudge_prompt.txt")"
 
 python3 - "$NUDGE_PROMPT" <<'PYEOF'
 import json, os, sys

@@ -8,7 +8,7 @@ if [ -L "$SELF" ]; then
 fi
 REPO_ROOT="$(cd "$(dirname "$SELF")/.." && pwd -P)"
 
-NUDGE_PROMPT="$(cat "$REPO_ROOT/templates/bash_nudge_prompt.txt")"
+ENFORCE_SCRIPT="$REPO_ROOT/hooks/enforce-bonsai.sh"
 
 usage() {
   cat <<EOF
@@ -81,11 +81,18 @@ for perm in ["mcp__bonsai_py__*", "mcp__bonsai_ts__*"]:
         fail(f"Permission missing: {perm}  (run: bonsai install)")
 
 pre = settings.get("hooks", {}).get("PreToolUse", [])
-has_hook = any(
-    h.get("matcher") == "Bash" and
-    any("bonsai AST tool" in hook.get("prompt", "") for hook in h.get("hooks", []))
-    for h in pre
-)
+
+def is_bonsai_hook(h):
+    if h.get("matcher") != "Bash":
+        return False
+    for hook in h.get("hooks", []):
+        if hook.get("type") == "prompt" and "bonsai AST tool" in hook.get("prompt", ""):
+            return True
+        if hook.get("type") == "command" and "enforce-bonsai" in hook.get("command", ""):
+            return True
+    return False
+
+has_hook = any(is_bonsai_hook(h) for h in pre)
 if has_hook:
     ok("Bash nudge hook  [enabled]   (run: bonsai disable-hook to turn off)")
 else:
@@ -115,10 +122,10 @@ PYEOF
 }
 
 cmd_enable() {
-  python3 - "$NUDGE_PROMPT" <<'PYEOF'
+  python3 - "$ENFORCE_SCRIPT" <<'PYEOF'
 import json, os, sys
 
-nudge = sys.argv[1]
+script_path = sys.argv[1]
 settings_path = os.path.expanduser("~/.claude/settings.json")
 settings = {}
 if os.path.exists(settings_path):
@@ -129,22 +136,42 @@ if os.path.exists(settings_path):
         pass
 
 pre = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
-already = any(
-    h.get("matcher") == "Bash" and
-    any("bonsai AST tool" in hook.get("prompt", "") for hook in h.get("hooks", []))
-    for h in pre
-)
-if already:
+
+def is_old_prompt_hook(h):
+    return (h.get("matcher") == "Bash" and
+            any(hook.get("type") == "prompt" and "bonsai AST tool" in hook.get("prompt", "")
+                for hook in h.get("hooks", [])))
+
+def is_new_command_hook(h):
+    return (h.get("matcher") == "Bash" and
+            any(hook.get("type") == "command" and "enforce-bonsai" in hook.get("command", "")
+                for hook in h.get("hooks", [])))
+
+has_old = any(is_old_prompt_hook(h) for h in pre)
+has_new = any(is_new_command_hook(h) for h in pre)
+
+if has_new and not has_old:
     print("Bash nudge hook is already enabled.")
+    exit(0)
+
+# Remove stale bonsai Bash hooks (migrate old prompt type, deduplicate command type).
+pre[:] = [h for h in pre if not is_old_prompt_hook(h) and not is_new_command_hook(h)]
+pre.append({"matcher": "Bash", "hooks": [{"type": "command", "command": script_path}]})
+
+os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+os.chmod(script_path, 0o755)
+tmp = settings_path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(settings, f, indent=2)
+    f.write("\n")
+os.replace(tmp, settings_path)
+
+if has_old:
+    print("✓ Bash nudge hook migrated to command type. Restart Claude Code to apply.")
+    print("  Note: hook path is " + script_path + " — re-run enable-hook if you move the repo.")
 else:
-    pre.append({"matcher": "Bash", "hooks": [{"type": "prompt", "prompt": nudge}]})
-    os.makedirs(os.path.dirname(settings_path), exist_ok=True)
-    tmp = settings_path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(settings, f, indent=2)
-        f.write("\n")
-    os.replace(tmp, settings_path)
     print("✓ Bash nudge hook enabled. Restart Claude Code to apply.")
+    print("  Note: hook path is " + script_path + " — re-run enable-hook if you move the repo.")
 PYEOF
 }
 
@@ -164,15 +191,19 @@ except json.JSONDecodeError:
     print("~/.claude/settings.json unreadable — skipping.")
     exit(0)
 
+def is_bonsai_hook(h):
+    if h.get("matcher") != "Bash":
+        return False
+    for hook in h.get("hooks", []):
+        if hook.get("type") == "prompt" and "bonsai AST tool" in hook.get("prompt", ""):
+            return True
+        if hook.get("type") == "command" and "enforce-bonsai" in hook.get("command", ""):
+            return True
+    return False
+
 pre = settings.get("hooks", {}).get("PreToolUse", [])
 before = len(pre)
-settings.setdefault("hooks", {})["PreToolUse"] = [
-    h for h in pre
-    if not (
-        h.get("matcher") == "Bash" and
-        any("bonsai AST tool" in hook.get("prompt", "") for hook in h.get("hooks", []))
-    )
-]
+settings.setdefault("hooks", {})["PreToolUse"] = [h for h in pre if not is_bonsai_hook(h)]
 removed = before - len(settings["hooks"]["PreToolUse"])
 
 tmp = settings_path + ".tmp"

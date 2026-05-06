@@ -156,12 +156,13 @@ PYEOF
 echo ""
 echo "==> Registering PreToolUse hook in ~/.claude/settings.json"
 
-NUDGE_PROMPT="$(cat "$REPO_ROOT/templates/bash_nudge_prompt.txt")"
+HOOK_SCRIPT="$REPO_ROOT/hooks/enforce-bonsai.sh"
+chmod +x "$HOOK_SCRIPT"
 
-python3 - "$NUDGE_PROMPT" <<'PYEOF'
+python3 - "$HOOK_SCRIPT" <<'PYEOF'
 import json, os, sys
 
-nudge = sys.argv[1]
+script_path = sys.argv[1]
 settings_path = os.path.expanduser("~/.claude/settings.json")
 settings = {}
 if os.path.exists(settings_path):
@@ -173,15 +174,19 @@ if os.path.exists(settings_path):
 
 pre = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
 
-# Remove stale bonsai Bash hooks, then re-add.
+# Remove all stale bonsai Bash hooks (old prompt type and any command type), then re-add.
 pre[:] = [
     h for h in pre
     if not (
         h.get("matcher") == "Bash" and
-        any("bonsai AST tool" in hook.get("prompt", "") for hook in h.get("hooks", []))
+        any(
+            (hook.get("type") == "prompt" and "bonsai AST tool" in hook.get("prompt", "")) or
+            (hook.get("type") == "command" and "enforce-bonsai" in hook.get("command", ""))
+            for hook in h.get("hooks", [])
+        )
     )
 ]
-pre.append({"matcher": "Bash", "hooks": [{"type": "prompt", "prompt": nudge}]})
+pre.append({"matcher": "Bash", "hooks": [{"type": "command", "command": script_path}]})
 
 os.makedirs(os.path.dirname(settings_path), exist_ok=True)
 tmp = settings_path + ".tmp"
@@ -189,7 +194,7 @@ with open(tmp, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")
 os.replace(tmp, settings_path)
-print("  ✓ Bash nudge hook registered")
+print("  ✓ Bash nudge hook registered (command type)")
 PYEOF
 
 # ── skills ─────────────────────────────────────────────────────────────────────

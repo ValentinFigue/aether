@@ -119,7 +119,11 @@ settings.setdefault("hooks", {})["PreToolUse"] = [
     h for h in pre
     if not (
         h.get("matcher") == "Bash" and
-        any("bonsai AST tool" in hook.get("prompt", "") for hook in h.get("hooks", []))
+        any(
+            (hook.get("type") == "prompt" and "bonsai AST tool" in hook.get("prompt", "")) or
+            (hook.get("type") == "command" and "enforce-bonsai" in hook.get("command", ""))
+            for hook in h.get("hooks", [])
+        )
     )
 ]
 removed_count = before - len(settings["hooks"]["PreToolUse"])

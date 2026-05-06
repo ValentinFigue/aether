@@ -1,6 +1,6 @@
 {
   "name": "bonsai-ts",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Type-aware TypeScript/JavaScript refactoring tools for Claude Code MCP",
   "type": "module",
   "main": "dist/server.js",

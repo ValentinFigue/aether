@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-05-06
+
+### Added
+- `install.sh` / `uninstall.sh` for one-shot global installation with optional `--claude-md` flag to inject bonsai guidance into `~/.claude/CLAUDE.md`
+- `bin/bonsai` CLI: `install`, `uninstall`, `status`, `enable-hook`, `disable-hook`, `update`
+- `--published` flag on `install` / `update` to switch MCP registration to `uvx` / `npx` once packages land on PyPI and npm
+- `templates/CLAUDE.md` — bonsai tool reference table injected into `~/.claude/CLAUDE.md`
+- `templates/bash_nudge_prompt.txt` — single source of truth for the Bash hook prompt (shared by `install.sh`, `scripts/setup.sh`, and `bin/bonsai`)
+
 ## [0.0.1] - 2026-05-05
 
 ### Added

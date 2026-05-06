@@ -1,0 +1,210 @@
+#!/bin/bash
+set -e
+
+GLOBAL_CONFIG="$HOME/.claude/cairn.config"
+LOCAL_CONFIG="./cairn.config"
+GLOBAL_COMMANDS="$HOME/.claude/commands"
+LOCAL_COMMANDS=".claude/commands"
+REMOTE_BASE="https://raw.githubusercontent.com/ValentinFigue/cairn/main"
+
+usage() {
+  cat << 'EOF'
+cairn — manage your /cairn install
+
+Usage:
+  cairn status                          Show install state and effective config
+  cairn enable  [local|global]          Enable cairn (default: local)
+  cairn disable [local|global]          Disable cairn
+  cairn config set <flags> [--global]   Set default flags
+  cairn config reset [local|global]     Remove config file
+  cairn update                          Re-download latest cairn.md
+  cairn uninstall [local|global] [--claude-md]  Remove command + optionally CLAUDE.md section
+  cairn help                            Show this message
+
+Config flags (for 'config set'):
+  --style=conventional    Use Conventional Commits format (default)
+  --style=plain           Use plain imperative-mood format
+  --global                Write to global config (~/.claude/cairn.config)
+
+Examples:
+  cairn config set --style=plain
+  cairn config set --style=conventional --global
+  cairn config reset local
+  cairn uninstall global --claude-md
+EOF
+}
+
+config_get() {
+  local file="$1" key="$2"
+  [ -f "$file" ] && grep "^$key:" "$file" | sed "s/^$key: *//" || true
+}
+
+config_set_key() {
+  local file="$1" key="$2" value="$3"
+  if [ -f "$file" ] && grep -q "^$key:" "$file"; then
+    awk -v k="$key" -v v="$value" '$0 ~ "^"k":" {print k": "v; next} {print}' \
+      "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+  else
+    echo "$key: $value" >> "$file"
+  fi
+}
+
+cmd_status() {
+  echo "Install:"
+  if [ -f "$GLOBAL_COMMANDS/cairn.md" ]; then
+    echo "  ~/.claude/commands/cairn.md    installed"
+  else
+    echo "  ~/.claude/commands/cairn.md    not installed"
+  fi
+  if [ -f "$LOCAL_COMMANDS/cairn.md" ]; then
+    echo "  .claude/commands/cairn.md      installed"
+  else
+    echo "  .claude/commands/cairn.md      not installed"
+  fi
+  echo ""
+
+  echo "Global config ($GLOBAL_CONFIG):"
+  if [ -f "$GLOBAL_CONFIG" ]; then
+    sed 's/^/  /' "$GLOBAL_CONFIG"
+  else
+    echo "  (none)"
+  fi
+  echo ""
+
+  echo "Local config ($LOCAL_CONFIG):"
+  if [ -f "$LOCAL_CONFIG" ]; then
+    sed 's/^/  /' "$LOCAL_CONFIG"
+  else
+    echo "  (none)"
+  fi
+  echo ""
+
+  local enabled style
+  enabled=$(config_get "$GLOBAL_CONFIG" "enabled")
+  local le; le=$(config_get "$LOCAL_CONFIG" "enabled"); [ -n "$le" ] && enabled="$le"
+  style=$(config_get "$GLOBAL_CONFIG" "style")
+  local ls; ls=$(config_get "$LOCAL_CONFIG" "style"); [ -n "$ls" ] && style="$ls"
+
+  echo "Effective config:"
+  echo "  enabled: ${enabled:-true}"
+  echo "  style:   ${style:-conventional}"
+}
+
+cmd_enable() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  config_set_key "$target" "enabled" "true"
+  echo "✓ cairn enabled ($target)"
+}
+
+cmd_disable() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  config_set_key "$target" "enabled" "false"
+  echo "✓ cairn disabled ($target)"
+}
+
+cmd_config_set() {
+  local target="$LOCAL_CONFIG"
+  local style=""
+
+  for arg in "$@"; do
+    case "$arg" in
+      --global)         target="$GLOBAL_CONFIG" ;;
+      --style=*)        style="${arg#--style=}" ;;
+    esac
+  done
+
+  if [ -z "$style" ]; then
+    echo "No flags provided. Use --style=conventional or --style=plain"
+    exit 1
+  fi
+
+  [ -n "$style" ] && config_set_key "$target" "style" "$style" && echo "✓ style: $style"
+  echo "  Written to $target"
+}
+
+cmd_config_reset() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  if [ -f "$target" ]; then
+    rm "$target"
+    echo "✓ Removed $target"
+  else
+    echo "  $target not found — nothing to reset"
+  fi
+}
+
+cmd_update() {
+  local updated=0
+  for target in "$GLOBAL_COMMANDS/cairn.md" "$LOCAL_COMMANDS/cairn.md"; do
+    if [ -f "$target" ]; then
+      curl -fsSL -o "$target" "$REMOTE_BASE/.claude/commands/cairn.md"
+      echo "✓ Updated $target"
+      updated=$((updated + 1))
+    fi
+  done
+  [ "$updated" -eq 0 ] && echo "No cairn.md found. Run install.sh first." && exit 1
+  true
+}
+
+cmd_uninstall() {
+  local scope="local"
+  local clean_claude_md=false
+
+  for arg in "$@"; do
+    case "$arg" in
+      global)       scope="global" ;;
+      --claude-md)  clean_claude_md=true ;;
+    esac
+  done
+
+  local commands_dir claude_file
+  if [ "$scope" = "global" ]; then
+    commands_dir="$GLOBAL_COMMANDS"
+    claude_file="$HOME/.claude/CLAUDE.md"
+  else
+    commands_dir="$LOCAL_COMMANDS"
+    claude_file="./CLAUDE.md"
+  fi
+
+  if [ -f "$commands_dir/cairn.md" ]; then
+    rm "$commands_dir/cairn.md"
+    echo "✓ Removed $commands_dir/cairn.md"
+  else
+    echo "  $commands_dir/cairn.md not found"
+  fi
+
+  if [ "$clean_claude_md" = true ]; then
+    if [ -f "$claude_file" ] && grep -q "<!-- cairn:start -->" "$claude_file"; then
+      awk '/<!-- cairn:start -->/{skip=1} !skip{print} /<!-- cairn:end -->/{skip=0}' \
+        "$claude_file" > "$claude_file.tmp" && mv "$claude_file.tmp" "$claude_file"
+      echo "✓ Removed cairn section from $claude_file"
+    else
+      echo "  No cairn section found in $claude_file"
+    fi
+  fi
+
+  echo ""
+  echo "Restart Claude Code to apply changes."
+}
+
+COMMAND="${1:-help}"
+shift || true
+
+case "$COMMAND" in
+  status)    cmd_status ;;
+  enable)    cmd_enable "$@" ;;
+  disable)   cmd_disable "$@" ;;
+  config)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      set)   cmd_config_set "$@" ;;
+      reset) cmd_config_reset "$@" ;;
+      *)     echo "Unknown subcommand: config $SUB"; echo ""; usage; exit 1 ;;
+    esac ;;
+  update)    cmd_update ;;
+  uninstall) cmd_uninstall "$@" ;;
+  help|--help|-h) usage ;;
+  *) echo "Unknown command: $COMMAND"; echo ""; usage; exit 1 ;;
+esac

@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-06
+
+### Changed
+- Bash nudge hook replaced: `prompt` type (LLM-evaluated, caused over-blocking of `git`, `gh`, and other unrelated commands) switched to `command` type backed by a deterministic shell script (`hooks/enforce-bonsai.sh`)
+- Hook is now advisory only (exit 1 = warn but allow), not a hard blocker
+
+### Added
+- `hooks/enforce-bonsai.sh` — deterministic PreToolUse hook: nudges on `grep`/`sed`/`awk`/`find` against `.py`/`.ts`/`.tsx` files, passes everything else through silently
+- `# bonsai:skip` bypass marker: append to any command to silence the nudge when no bonsai alternative exists (Bash ignores it as a comment)
+- `bonsai enable-hook` now auto-migrates an installed `prompt` type hook to the new `command` type
+- `bonsai enable-hook` prints the installed script path as a reminder to re-run if the repo is moved
+
 ## [0.0.2] - 2026-05-06
 
 ### Added

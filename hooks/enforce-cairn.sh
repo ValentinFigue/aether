@@ -68,7 +68,7 @@ PYEOF
 if [ "$result" = "match" ]; then
   cat <<'MSG'
 Cairn nudge: consider using /cairn-commit to generate a semantic commit message.
-  git commit -m "fix"  →  /cairn-commit  (stage your changes, then paste the suggested message)
+  git commit -m "fix"  ->  /cairn-commit  (stage your changes, then paste the suggested message)
 
 If you want to commit with this message anyway, append  # cairn:skip  to silence this.
 MSG

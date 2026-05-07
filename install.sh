@@ -28,8 +28,18 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 _json_add_perms_and_hook() {
   local file="$1"
   local hook_path="$2"
-  if command -v python3 &>/dev/null; then
-    python3 - "$file" "$hook_path" <<'PYEOF'
+  local lockfile="${file}.lock"
+
+  # Protect the read-modify-write cycle against concurrent installs (e.g. a suite installer
+  # running all plugins in parallel).  flock is native on Linux and available on macOS via
+  # Homebrew's util-linux; falls back to unguarded execution when not present.
+  (
+    if command -v flock &>/dev/null; then
+      exec 9>"$lockfile" && flock -x 9 || true
+    fi
+
+    if command -v python3 &>/dev/null; then
+      python3 - "$file" "$hook_path" <<'PYEOF'
 import json, sys
 f, hook_path = sys.argv[1], sys.argv[2]
 with open(f) as fh: s = json.load(fh)
@@ -40,7 +50,7 @@ hooks = s.setdefault("hooks", {})
 pre = hooks.setdefault("PreToolUse", [])
 existing = [h for h in pre if isinstance(h, dict) and "temper" in str(h.get("hooks", []))]
 if not existing:
-    pre.append({
+    pre.insert(0, {
         "matcher": "Bash",
         "hooks": [{
             "type": "command",
@@ -49,8 +59,8 @@ if not existing:
     })
 print(json.dumps(s, indent=2))
 PYEOF
-  elif command -v node &>/dev/null; then
-    node - "$file" "$hook_path" <<'JSEOF'
+    elif command -v node &>/dev/null; then
+      node - "$file" "$hook_path" <<'JSEOF'
 const f = process.argv[2], hookPath = process.argv[3];
 const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
 s.permissions = s.permissions || {};
@@ -62,18 +72,20 @@ s.hooks = s.hooks || {};
 s.hooks.PreToolUse = s.hooks.PreToolUse || [];
 const existing = s.hooks.PreToolUse.filter(h => h && JSON.stringify(h).includes("temper"));
 if (!existing.length) {
-  s.hooks.PreToolUse.push({ matcher: "Bash", hooks: [{ type: "command", command: hookPath }] });
+  s.hooks.PreToolUse.unshift({ matcher: "Bash", hooks: [{ type: "command", command: hookPath }] });
 }
 process.stdout.write(JSON.stringify(s, null, 2) + "\n");
 JSEOF
-  elif command -v jq &>/dev/null; then
-    jq --arg hp "$hook_path" '
-      .permissions.allow |= (. + ["Read","Write","Bash"] | unique) |
-      .hooks.PreToolUse |= (. // [] | if any(tostring | contains("temper")) then . else . + [{"matcher":"Bash","hooks":[{"type":"command","command":$hp}]}] end)
-    ' "$file"
-  else
-    return 1
-  fi
+    elif command -v jq &>/dev/null; then
+      jq --arg hp "$hook_path" '
+        .permissions.allow |= (. + ["Read","Write","Bash"] | unique) |
+        .hooks.PreToolUse |= (. // [] | if any(tostring | contains("temper")) then . else [{"matcher":"Bash","hooks":[{"type":"command","command":$hp}]}] + . end)
+      ' "$file"
+    else
+      return 1
+    fi
+  )
+  rm -f "$lockfile" 2>/dev/null || true
 }
 
 # Install command file
@@ -147,4 +159,5 @@ else
   echo "  With proactive CLAUDE.md rules:   bash install.sh --claude-md"
   echo "  Global + proactive rules:         bash install.sh global --claude-md"
   echo "  Disable proactive suggestions:    bash install.sh --claude-md --no-proactive"
+  echo "  One-liner (no clone needed):      curl -fsSL https://raw.githubusercontent.com/ValentinFigue/temper/main/install.sh | bash -s global"
 fi

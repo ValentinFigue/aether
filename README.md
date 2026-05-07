@@ -43,16 +43,23 @@ If blockers are found, temper gates the push until they're resolved.
 
 ## Install
 
-### Quick start (this project)
+### Quick start — one-liner (no clone needed)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ValentinFigue/temper/main/install.sh | bash -s global
+```
+
+### Or clone first
+
+```bash
+git clone https://github.com/ValentinFigue/temper
+cd temper && bash install.sh global
+```
+
+### Local install (this project only)
 
 ```bash
 bash install.sh
-```
-
-### Global install (all projects)
-
-```bash
-bash install.sh global
 ```
 
 ### With proactive CLAUDE.md rules
@@ -96,10 +103,11 @@ The `enforce-temper.sh` PreToolUse hook blocks the following operations and asks
 | `git rebase -i` | Range touches > 5 commits |
 | `git stash pop` | Stash diff > 200 lines |
 
-**Bypass:** append `# temper:skip` to any command to silence the hook for that run.
+**Bypass:** append `# temper:skip` to silence the temper hook, or `# suite:skip` to silence all suite hooks (temper, cairn, whetstone) at once.
 
 ```bash
 git push origin main  # temper:skip
+git push origin main  # suite:skip
 ```
 
 ---
@@ -172,3 +180,5 @@ bash uninstall.sh global --claude-md  # also remove CLAUDE.md section
 | [bonsai](https://github.com/ValentinFigue/bonsai) | AST refactoring | While you build |
 | **temper** | Critique diffs | After you build |
 | [cairn](https://github.com/ValentinFigue/cairn) | Git narration | When you ship |
+
+> **Suite install order:** install temper before cairn. Both hooks intercept `git commit` — temper (review gate) should fire first, then cairn (narration). Install order matches hook execution order in `settings.json`.

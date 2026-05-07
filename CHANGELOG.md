@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.1] — 2026-05-07
+
+### Added
+- `# suite:skip` bypass token — silences all suite hooks (temper, cairn, whetstone) with one annotation
+- Curl one-liner install pattern in README and install.sh tips output
+
+### Changed
+- Hook entry is now prepended (not appended) in `settings.json` so temper fires before cairn on `git commit`
+- `settings.json` mutation is now wrapped in `flock` when available, guarding against concurrent suite installs
+
+### Fixed
+- Bypass regex updated to `# *(temper|suite):skip` — both tokens handled consistently across all hook messages
+
+---
+
 ## [0.1.0] — 2026-05-06
 
 Initial release.

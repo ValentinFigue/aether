@@ -29,7 +29,8 @@ If this Claude Code session has involved more than 5 file edits, proactively sug
 
 ## Bypass
 
-Append `# temper:skip` to your `git push` or `git commit` command to bypass the hook.
+Append `# temper:skip` to bypass only the temper hook, or `# suite:skip` to bypass all
+suite hooks (temper, cairn, whetstone) in one annotation.
 Never bypass a 🔴 finding without a written reason in the commit message.
 
 ## Severity contract

@@ -11,7 +11,7 @@
 #   git rebase -i *   — if rebase range exceeds 5 commits
 #   git stash pop *   — if stash diff exceeds size threshold
 #
-# Bypass: append  # temper:skip  to any command to silence this hook.
+# Bypass: append  # temper:skip  (or  # suite:skip  to silence all suite hooks) to any command.
 # Exit 1 = block the command and show the message.
 # Exit 0 = allow silently.
 
@@ -30,8 +30,8 @@ print(data.get('tool_input', {}).get('command', ''))
 
 [ -z "$cmd" ] && exit 0
 
-# Bypass marker
-if printf '%s' "$cmd" | grep -q '# *temper:skip'; then
+# Bypass marker — accepts # temper:skip or # suite:skip (silences all suite hooks)
+if printf '%s' "$cmd" | grep -qE '# *(temper|suite):skip'; then
   exit 0
 fi
 
@@ -169,7 +169,7 @@ case "$result" in
     cat <<'MSG'
 temper: about to push — have you run /temper to review your changes?
   Run /temper first, then push.
-  Append  # temper:skip  to your push command to bypass this check.
+  Append  # temper:skip  (or  # suite:skip) to your push command to bypass this check.
 MSG
     exit 1
     ;;
@@ -177,7 +177,7 @@ MSG
     cat <<'MSG'
 temper: large commit detected — consider running /temper first.
   Your staged diff exceeds the size threshold (lines or files).
-  Append  # temper:skip  to your commit command to bypass this check.
+  Append  # temper:skip  (or  # suite:skip) to your commit command to bypass this check.
 MSG
     exit 1
     ;;
@@ -185,7 +185,7 @@ MSG
     cat <<'MSG'
 temper: critical path file detected in staged changes — run /temper first.
   One or more staged files matches a critical path pattern (auth, schema, migrations, credentials).
-  Append  # temper:skip  to your commit command to bypass this check.
+  Append  # temper:skip  (or  # suite:skip) to your commit command to bypass this check.
 MSG
     exit 1
     ;;
@@ -193,14 +193,14 @@ MSG
     cat <<'MSG'
 temper: merging into a primary branch — consider running /temper --diff=all first.
   Merges into main/master/develop/trunk have high surface area.
-  Append  # temper:skip  to your merge command to bypass this check.
+  Append  # temper:skip  (or  # suite:skip) to your merge command to bypass this check.
 MSG
     exit 1
     ;;
   rebase_large)
     cat <<'MSG'
 temper: interactive rebase touching many commits — consider /temper --diff=all after.
-  Append  # temper:skip  to your rebase command to bypass this check.
+  Append  # temper:skip  (or  # suite:skip) to your rebase command to bypass this check.
 MSG
     exit 1
     ;;
@@ -208,7 +208,7 @@ MSG
     cat <<'MSG'
 temper: large stash detected — consider running /temper before committing.
   Your stash exceeds the size threshold. Apply it, then run /temper before committing.
-  Append  # temper:skip  to your stash pop command to bypass this check.
+  Append  # temper:skip  (or  # suite:skip) to your stash pop command to bypass this check.
 MSG
     exit 1
     ;;

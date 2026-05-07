@@ -1,0 +1,256 @@
+#!/bin/bash
+set -e
+
+VERSION="1.0.0"
+
+GLOBAL_HOOK_DIR="$HOME/.local/share/aether"
+GLOBAL_HOOK="$GLOBAL_HOOK_DIR/enforce-suite.sh"
+GLOBAL_SETTINGS="$HOME/.claude/settings.json"
+GLOBAL_MANIFEST="$HOME/.claude/aether.manifest"
+LOCAL_MANIFEST=".claude/aether.manifest"
+
+PLUGINS="bonsai whetstone temper cairn"
+
+usage() {
+  cat << 'EOF'
+aether — manage your aether suite install
+
+Usage:
+  aether status                         Show install state for all plugins
+  aether enable  [local|global]         Enable all plugins (default: local)
+  aether disable [local|global]         Disable all plugins
+  aether update                         Update all plugins to their latest versions
+  aether uninstall [global] [--claude-md]  Remove suite hook, CLI, optional CLAUDE.md block
+  aether help                           Show this message
+
+Examples:
+  aether status
+  aether disable global
+  aether enable local
+  aether uninstall global --claude-md
+EOF
+}
+
+_config_get() {
+  local file="$1" key="$2"
+  [ -f "$file" ] && grep "^$key:" "$file" | sed "s/^$key: *//" | head -1 || true
+}
+
+_config_set() {
+  local file="$1" key="$2" value="$3"
+  if [ -f "$file" ] && grep -q "^$key:" "$file"; then
+    awk -v k="$key" -v v="$value" '$0 ~ "^"k":" {print k": "v; next} {print}' \
+      "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+  else
+    mkdir -p "$(dirname "$file")"
+    printf '%s: %s\n' "$key" "$value" >> "$file"
+  fi
+}
+
+_hook_registered() {
+  [ -f "$GLOBAL_SETTINGS" ] && grep -q "enforce-suite" "$GLOBAL_SETTINGS" 2>/dev/null
+}
+
+_manifest_get() {
+  local key="$1"
+  local manifest=""
+  [ -f "$GLOBAL_MANIFEST" ] && manifest="$GLOBAL_MANIFEST"
+  [ -f "$LOCAL_MANIFEST"  ] && manifest="$LOCAL_MANIFEST"
+  [ -z "$manifest" ] && return 0
+  grep "^$key=" "$manifest" | sed "s/^$key=//" | head -1 || true
+}
+
+cmd_status() {
+  printf 'aether v%s\n\n' "$VERSION"
+
+  for plugin in $PLUGINS; do
+    local global_cfg="$HOME/.claude/${plugin}.config"
+    local local_cfg="./${plugin}.config"
+    local enabled_val=""
+
+    [ -f "$global_cfg" ] && enabled_val=$(_config_get "$global_cfg" "enabled") || true
+    [ -f "$local_cfg"  ] && {
+      local lv; lv=$(_config_get "$local_cfg" "enabled")
+      [ -n "$lv" ] && enabled_val="$lv"
+    } || true
+
+    local state="enabled"
+    [ "$enabled_val" = "false" ] && state="disabled"
+
+    local extra=""
+    if [ "$plugin" = "bonsai" ]; then
+      local has_py has_ts
+      has_py=$(grep -l "bonsai-py" "$HOME/.claude.json" 2>/dev/null | wc -l | tr -d ' ') || has_py=0
+      has_ts=$(grep -l "bonsai-ts" "$HOME/.claude.json" 2>/dev/null | wc -l | tr -d ' ') || has_ts=0
+      [ "$has_py" -gt 0 ] && extra="  MCP: bonsai-py"
+      [ "$has_ts" -gt 0 ] && extra="${extra} bonsai-ts"
+    fi
+
+    printf '  %-12s %s%s\n' "$plugin" "$state" "$extra"
+  done
+
+  printf '\n'
+
+  if _hook_registered; then
+    local scope
+    scope=$(_manifest_get "scope") || scope=""
+    printf '  Suite hook: enforce-suite.sh registered (%s)\n' "${scope:-global}"
+  else
+    printf '  Suite hook: NOT registered — run install.sh to fix\n'
+  fi
+
+  local manifest_version
+  manifest_version=$(_manifest_get "version") || true
+  [ -n "$manifest_version" ] && printf '  Installed version: %s\n' "$manifest_version"
+
+  printf '\n'
+}
+
+cmd_enable() {
+  local scope="${1:-local}"
+  for plugin in $PLUGINS; do
+    local target
+    if [ "$scope" = "global" ]; then
+      target="$HOME/.claude/${plugin}.config"
+    else
+      target="./${plugin}.config"
+    fi
+    _config_set "$target" "enabled" "true"
+    printf '  ✓ %s enabled (%s)\n' "$plugin" "$target"
+  done
+}
+
+cmd_disable() {
+  local scope="${1:-local}"
+  for plugin in $PLUGINS; do
+    local target
+    if [ "$scope" = "global" ]; then
+      target="$HOME/.claude/${plugin}.config"
+    else
+      target="./${plugin}.config"
+    fi
+    _config_set "$target" "enabled" "false"
+    printf '  ✓ %s disabled (%s)\n' "$plugin" "$target"
+  done
+}
+
+PLUGIN_URLS=(
+  "cairn:https://raw.githubusercontent.com/ValentinFigue/cairn/main/install.sh"
+  "whetstone:https://raw.githubusercontent.com/ValentinFigue/whetstone/main/install.sh"
+  "temper:https://raw.githubusercontent.com/ValentinFigue/temper/main/install.sh"
+)
+
+cmd_update() {
+  printf 'Updating aether suite plugins from GitHub...\n\n'
+
+  local scope
+  scope=$(_manifest_get "scope") || scope=""
+  local scope_arg=""; [ "$scope" = "global" ] && scope_arg="global"
+
+  for entry in "${PLUGIN_URLS[@]}"; do
+    local plugin="${entry%%:*}"
+    local url="${entry#*:}"
+    printf '  Updating %s...\n' "$plugin"
+    curl -fsSL "$url" | bash -s -- $scope_arg 2>&1 | grep -E '(✓|could not|Note:)' || true
+  done
+
+  # bonsai: not on PyPI/npm yet — skip with a note
+  printf '  bonsai: skipped — not yet on PyPI/npm. Update manually from the repo.\n'
+  printf '          See: https://github.com/valentinfigue/bonsai\n'
+
+  # Re-install enforce-suite.sh from the aether repo to pick up any updates
+  local aether_hook_url="https://raw.githubusercontent.com/ValentinFigue/aether/main/hooks/enforce-suite.sh"
+  local hook_dest
+  hook_dest=$(_manifest_get "hook") || hook_dest=""
+  if [ -n "$hook_dest" ]; then
+    printf '  Updating enforce-suite.sh...\n'
+    curl -fsSL -o "$hook_dest" "$aether_hook_url" && chmod +x "$hook_dest"
+    printf '  ✓ enforce-suite.sh updated\n'
+  fi
+
+  printf '\nRestart Claude Code to activate updated hooks.\n'
+}
+
+cmd_uninstall() {
+  local scope="local"
+  local clean_claude_md=false
+
+  for arg in "$@"; do
+    case "$arg" in
+      global)       scope="global" ;;
+      --claude-md)  clean_claude_md=true ;;
+    esac
+  done
+
+  local settings_file claude_file
+  if [ "$scope" = "global" ]; then
+    settings_file="$GLOBAL_SETTINGS"
+    claude_file="$HOME/.claude/CLAUDE.md"
+  else
+    settings_file=".claude/settings.json"
+    claude_file="./CLAUDE.md"
+  fi
+
+  # Remove enforce-suite.sh hook from settings.json
+  if [ -f "$settings_file" ] && command -v python3 &>/dev/null; then
+    python3 - "$settings_file" <<'PYEOF' > "$settings_file.tmp" && mv "$settings_file.tmp" "$settings_file"
+import json, sys
+f = sys.argv[1]
+with open(f) as fh: s = json.load(fh)
+STALE = ["enforce-suite", "enforce-cairn", "enforce-temper", "enforce-whetstone",
+         "enforce-bonsai", "post-cairn", "post-bonsai"]
+for phase in ("PreToolUse", "PostToolUse"):
+    entries = s.get("hooks", {}).get(phase, [])
+    for entry in entries:
+        entry["hooks"] = [
+            h for h in entry.get("hooks", [])
+            if not any(kw in h.get("command", "") for kw in STALE)
+        ]
+print(json.dumps(s, indent=2))
+PYEOF
+    printf '  ✓ Removed enforce-suite.sh hook from %s\n' "$settings_file"
+  fi
+
+  # Remove aether CLI
+  if [ -f "$HOME/.local/bin/aether" ]; then
+    rm "$HOME/.local/bin/aether"
+    printf '  ✓ Removed ~/.local/bin/aether\n'
+  fi
+
+  # Remove enforce-suite.sh from hook dir
+  if [ -f "$GLOBAL_HOOK" ]; then
+    rm "$GLOBAL_HOOK"
+    printf '  ✓ Removed %s\n' "$GLOBAL_HOOK"
+  fi
+
+  # Remove CLAUDE.md block
+  if [ "$clean_claude_md" = true ] && [ -f "$claude_file" ]; then
+    for marker in "aether" "cairn" "temper" "whetstone" "bonsai"; do
+      if grep -q "<!-- ${marker}:start -->" "$claude_file" 2>/dev/null; then
+        awk "/<!-- ${marker}:start -->/{skip=1} !skip{print} /<!-- ${marker}:end -->/{skip=0}" \
+          "$claude_file" > "$claude_file.tmp" && mv "$claude_file.tmp" "$claude_file"
+        printf '  ✓ Removed %s section from %s\n' "$marker" "$claude_file"
+      fi
+    done
+  fi
+
+  # Remove manifest
+  [ -f "$GLOBAL_MANIFEST" ] && rm "$GLOBAL_MANIFEST" && printf '  ✓ Removed %s\n' "$GLOBAL_MANIFEST"
+  [ -f "$LOCAL_MANIFEST"  ] && rm "$LOCAL_MANIFEST"  && printf '  ✓ Removed %s\n' "$LOCAL_MANIFEST"
+
+  printf '\nPlugins (bonsai, whetstone, temper, cairn) remain installed for standalone use.\n'
+  printf 'Restart Claude Code to apply changes.\n'
+}
+
+COMMAND="${1:-help}"
+shift || true
+
+case "$COMMAND" in
+  status)    cmd_status ;;
+  enable)    cmd_enable "$@" ;;
+  disable)   cmd_disable "$@" ;;
+  update)    cmd_update ;;
+  uninstall) cmd_uninstall "$@" ;;
+  help|--help|-h) usage ;;
+  *) printf 'Unknown command: %s\n\n' "$COMMAND"; usage; exit 1 ;;
+esac

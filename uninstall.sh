@@ -54,7 +54,9 @@ if [ "$MODE" = "global" ]; then
     echo "  $CLI_BIN not found"
   fi
 
-  HOOK_FILE="$HOME/.local/share/cairn/enforce-cairn.sh"
+  HOOK_DIR="$HOME/.local/share/cairn"
+  HOOK_FILE="$HOOK_DIR/enforce-cairn.sh"
+  POST_HOOK_FILE="$HOOK_DIR/post-cairn.sh"
   GLOBAL_SETTINGS="$HOME/.claude/settings.json"
 
   if [ -f "$HOOK_FILE" ]; then
@@ -62,17 +64,36 @@ if [ "$MODE" = "global" ]; then
     echo "✓ Removed $HOOK_FILE"
   fi
 
-  # Remove hook entry from settings.json
+  if [ -f "$POST_HOOK_FILE" ]; then
+    rm "$POST_HOOK_FILE"
+    echo "✓ Removed $POST_HOOK_FILE"
+  fi
+
+  # Remove PreToolUse hook entry from settings.json
   if command -v python3 &>/dev/null && [ -f "$GLOBAL_SETTINGS" ]; then
     python3 - "$GLOBAL_SETTINGS" "$HOOK_FILE" <<'PYEOF' > "$GLOBAL_SETTINGS.tmp" \
       && mv "$GLOBAL_SETTINGS.tmp" "$GLOBAL_SETTINGS" \
-      && echo "✓ Hook entry removed from $GLOBAL_SETTINGS"
+      && echo "✓ PreToolUse hook entry removed from $GLOBAL_SETTINGS"
 import json, sys
 f, hook_path = sys.argv[1], sys.argv[2]
 with open(f) as fh: s = json.load(fh)
 pre = s.get("hooks", {}).get("PreToolUse", [])
 for entry in pre:
     if entry.get("matcher") == "Bash":
+        entry["hooks"] = [h for h in entry.get("hooks", []) if h.get("command") != hook_path]
+print(json.dumps(s, indent=2))
+PYEOF
+
+    # Remove PostToolUse hook entry from settings.json
+    python3 - "$GLOBAL_SETTINGS" "$POST_HOOK_FILE" <<'PYEOF' > "$GLOBAL_SETTINGS.tmp" \
+      && mv "$GLOBAL_SETTINGS.tmp" "$GLOBAL_SETTINGS" \
+      && echo "✓ PostToolUse hook entry removed from $GLOBAL_SETTINGS"
+import json, sys
+f, hook_path = sys.argv[1], sys.argv[2]
+with open(f) as fh: s = json.load(fh)
+post = s.get("hooks", {}).get("PostToolUse", [])
+for entry in post:
+    if entry.get("matcher") == "Bash|Write|Edit":
         entry["hooks"] = [h for h in entry.get("hooks", []) if h.get("command") != hook_path]
 print(json.dumps(s, indent=2))
 PYEOF

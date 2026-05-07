@@ -33,7 +33,7 @@ Not because the work was unclear — because writing a good commit message after
 curl -fsSL https://raw.githubusercontent.com/ValentinFigue/cairn/main/install.sh | bash -s global
 ```
 
-This installs all four cairn commands, the `cairn` CLI to `~/.local/bin/`, the `enforce-cairn` hook, and configures the required `Bash`, `Read`, and `Write` permissions in `~/.claude/settings.json` so git commands run without permission prompts.
+This installs all four cairn commands, the `cairn` CLI to `~/.local/bin/`, the `enforce-cairn` (PreToolUse) and `post-cairn` (PostToolUse) hooks, and configures the required `Bash`, `Read`, and `Write` permissions in `~/.claude/settings.json` so git commands run without permission prompts.
 
 **With documentation rules** — also injects project behaviour rules into `~/.claude/CLAUDE.md`:
 
@@ -78,6 +78,17 @@ curl -fsSL https://raw.githubusercontent.com/ValentinFigue/cairn/main/uninstall.
 # Local
 curl -fsSL https://raw.githubusercontent.com/ValentinFigue/cairn/main/uninstall.sh | bash
 ```
+
+**Hook bypass:**
+
+The hooks are non-blocking nudges. To silence a specific nudge, append a bypass marker to the git command:
+
+```bash
+git commit -m "wip"        # cairn:skip   — silence cairn only
+git push origin main       # suite:skip   — silence all suite hooks
+```
+
+`# cairn:skip` silences cairn's nudge for that command. `# suite:skip` silences all installed suite hooks (cairn, temper, whetstone, bonsai) simultaneously. Bash treats these as comments, so the command runs unchanged.
 
 ---
 
@@ -300,14 +311,22 @@ Run `cairn help` for the full reference.
 - [x] `cairn.config` support for extra conventional types, exclude paths, and per-command settings
 - [x] `cairn disable` / `enable` respected by the command file at runtime
 - [ ] MCP server upgrade for richer git integration
+- [ ] Workflow guide: run `/temper` to review the diff → `/cairn-commit` to narrate it (temper→cairn handoff)
 
 ---
 
 ## Works well with
 
-[**bonsai**](https://github.com/ValentinFigue/bonsai) — AST-powered refactoring for Claude Code. Bonsai makes the cuts; cairn records them.
+Cairn is part of a four-tool suite. Each tool covers a different moment in the development loop:
 
-[**whetstone**](https://github.com/ValentinFigue/whetstone) — Plan critic. Whetstone sharpens the plan before you build; cairn narrates what you built.
+| Tool | When | What it does |
+|---|---|---|
+| [**whetstone**](https://github.com/ValentinFigue/whetstone) | Before you build | Critiques plans — sharpens the approach before any code is written |
+| [**bonsai**](https://github.com/ValentinFigue/bonsai) | While you build | AST-safe rename, move, and dead-code detection for Python and TypeScript |
+| [**temper**](https://github.com/ValentinFigue/temper) | After you build | Critiques diffs before commit — catches issues while context is live |
+| **cairn** | When you ship | Narrates commits, PRs, and changelogs from the actual diff |
+
+The highest-value handoff in the suite: after temper finds no blockers, run `/cairn-commit` immediately — the review is fresh and the staged diff is ready.
 
 ---
 

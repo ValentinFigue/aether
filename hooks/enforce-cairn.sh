@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # enforce-cairn.sh — PreToolUse command hook (matcher: Bash)
 #
-# Nudges the agent to use /cairn-commit instead of writing a weak git commit message.
-# Exit 1 = allow the command but show the nudge as informational context.
-# Exit 0 = allow silently (no weak message detected, or # cairn:skip bypass present).
+# Three gates:
+#   1. git commit with a weak or missing message    → suggest /cairn-commit
+#   2. git push to a remote                         → suggest /cairn-pr
+#   3. git commit with no inline -m flag            → suggest /cairn-commit
 #
-# Bypass: append  # cairn:skip  to any command to silence this nudge.
-# Bash treats it as a comment and ignores it at runtime.
+# Bypass: append  # cairn:skip  or  # suite:skip  to silence.
+# Exit 1 = show nudge (non-blocking).
+# Exit 0 = allow silently.
 
 set -euo pipefail
 
 input=$(cat)
 
-# If python3 fails for any reason (empty stdin, parse error), allow silently.
 cmd=$(printf '%s' "$input" | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
@@ -21,63 +22,109 @@ print(data.get('tool_input', {}).get('command', ''))
 
 [ -z "$cmd" ] && exit 0
 
-# Bypass marker: agent appends "# cairn:skip" when no better alternative exists.
-if printf '%s' "$cmd" | grep -q '# *cairn:skip'; then
+# Bypass markers
+if printf '%s' "$cmd" | grep -qE '# *(cairn|suite):skip'; then
   exit 0
 fi
 
-# Write the checker to a temp file to avoid bash quote-tracking issues
-# inside $() command substitution with heredoc (bash parses " inside $(...)).
-_tmppy=$(mktemp /tmp/cairn_check.XXXXXX.py)
-cat > "$_tmppy" << 'PYEOF'
+# ── Classify the command ────────────────────────────────────────────────────
+result=$(python3 - "$cmd" <<'PYEOF'
 import re, sys
-
 cmd = sys.argv[1]
 
-# Only trigger on git commit with an inline message flag
-if not re.search(r'\bgit\b.*\bcommit\b', cmd):
-    print("none")
-    sys.exit(0)
+IS_COMMIT = re.search(r'\bgit\b.*\bcommit\b', cmd)
+IS_PUSH   = re.search(r'\bgit\b.*\bpush\b', cmd)
 
-if not re.search(r'(-m|--message)\s*.+', cmd):
-    print("none")
-    sys.exit(0)
+# ── Gate 2: git push ─────────────────────────────────────────────────────────
+if IS_PUSH:
+    # Skip dry-runs — the user is not actually pushing
+    if re.search(r'--dry-run|-n\b', cmd):
+        print("none"); sys.exit()
+    print("push"); sys.exit()
 
-# Extract the commit message value
-m = re.search(r'(?:-m|--message)\s*["\']?([^"\']+)["\']?', cmd)
-if not m:
-    print("none")
-    sys.exit(0)
+# ── Gate 1: git commit with weak or missing message ──────────────────────────
+if IS_COMMIT:
+    # No inline -m flag → message will open an editor; cairn is the better path
+    has_inline_msg = bool(re.search(r'(-m|--message)\s*.+', cmd))
+    if not has_inline_msg:
+        print("commit_no_message"); sys.exit()
 
-msg = m.group(1).strip()
+    # Extract the inline message
+    m = re.search(r'(?:-m|--message)\s*(?:"([^"]+)"|\'([^\']+)\'|(\S+))', cmd)
+    if not m:
+        print("commit_no_message"); sys.exit()
+    msg = (m.group(1) or m.group(2) or m.group(3) or "").strip()
 
-WEAK_WORDS = {
-    "fix", "wip", "misc", "update", "changes", "stuff",
-    "test", "temp", "tmp", "commit", "save", "done", "ok"
-}
+    WEAK_SINGLE = {
+        "fix", "wip", "misc", "update", "changes", "stuff",
+        "test", "temp", "tmp", "commit", "save", "done", "ok",
+        "patch", "tweak", "cleanup", "refactor", "work", "more",
+    }
+    WEAK_PATTERNS = [
+        r'^(fix(ed|es|ing)?|updat(e|ed|ing)|add(s|ed|ing)?)\s+(bug|issue|stuff|things?|it|this)$',
+        r'^more (changes|fixes|updates|work)$',
+        r'^(minor|small|quick)\s+\w+$',
+        r'^\w+$',              # single word, no conventional prefix
+    ]
 
-# Flag as weak if: very short, single word with no conventional prefix, or known weak word
-is_short     = len(msg) < 10
-is_weak_word = msg.lower().rstrip(".,!") in WEAK_WORDS
-is_no_prefix = bool(re.match(r'^[a-zA-Z]+$', msg.split()[0])) and ':' not in msg
+    msg_lower = msg.lower().rstrip(".,!")
+    is_weak = (
+        len(msg) < 12
+        or msg_lower in WEAK_SINGLE
+        or any(re.match(p, msg_lower) for p in WEAK_PATTERNS)
+    )
 
-if is_short or is_weak_word or is_no_prefix:
-    print("match")
-else:
-    print("none")
+    # Well-formed conventional commit: type(scope): description  — never weak
+    is_conventional = bool(re.match(
+        r'^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?!?: .{10,}',
+        msg
+    ))
+
+    if is_conventional:
+        print("none"); sys.exit()
+
+    if is_weak:
+        print("commit_weak"); sys.exit()
+
+    print("none"); sys.exit()
+
+print("none")
 PYEOF
+) || exit 0
 
-result=$(python3 "$_tmppy" "$cmd" 2>/dev/null) || { rm -f "$_tmppy"; exit 0; }
-rm -f "$_tmppy"
+case "$result" in
+  commit_weak)
+    cat <<'MSG'
+Cairn nudge: the commit message looks weak — /cairn-commit writes a better one.
+  Stage your changes, then:  /cairn-commit
+  It generates a Conventional Commits message from the actual diff.
+  Paste the result into:  git commit -m "<cairn output>"
 
-if [ "$result" = "match" ]; then
-  cat <<'MSG'
-Cairn nudge: consider using /cairn-commit to generate a semantic commit message.
-  git commit -m "fix"  ->  /cairn-commit  (stage your changes, then paste the suggested message)
-
-If you want to commit with this message anyway, append  # cairn:skip  to silence this.
+  Append  # cairn:skip  to commit with this message anyway.
 MSG
-  exit 1
-fi
+    exit 1
+    ;;
+  commit_no_message)
+    cat <<'MSG'
+Cairn nudge: no inline message — /cairn-commit generates one from your staged diff.
+  /cairn-commit
+  Then:  git commit -m "<cairn output>"
 
-exit 0
+  Append  # cairn:skip  to open your editor instead.
+MSG
+    exit 1
+    ;;
+  push)
+    cat <<'MSG'
+Cairn nudge: about to push — /cairn-pr writes the PR title and description.
+  /cairn-pr              (auto-detects base branch)
+  /cairn-pr --base=develop
+
+  Append  # cairn:skip  to push without a PR description.
+MSG
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac

@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-07
+
+### Added
+- `hooks/post-bonsai.sh` — new PostToolUse hook (matcher: `Write|Edit|MultiEdit`): nudges to verify reference integrity after edits that look like renames or signature changes
+- `# suite:skip` bypass marker: unified cross-suite bypass accepted alongside `# bonsai:skip` in `enforce-bonsai.sh`
+- "Works well with" suite table in README linking to temper, cairn, and whetstone
+- Curl-pipe install option in README (`curl -fsSL … | bash`)
+
+### Changed
+- `hooks/enforce-bonsai.sh` expanded: now intercepts `rg`, `ripgrep`, `ag`, `ack`, `perl`, `xargs` chains, and `mv`/`git mv`/`cp` on source files; nudge messages are operation-specific (search / mutate / move)
+- Source file extension coverage extended to `.js`, `.jsx`, `.mjs`
+- `templates/CLAUDE.md` rewritten with proactive trigger rules, temper integration cues, and a "when NOT to use bonsai" section
+- `install.sh` now registers both PreToolUse (`enforce-bonsai.sh`) and PostToolUse (`post-bonsai.sh`) hooks
+- `uninstall.sh` now removes both hooks
+- README Publishing section removed (install.sh handles everything end-users need)
+
 ## [0.1.0] - 2026-05-06
 
 ### Changed

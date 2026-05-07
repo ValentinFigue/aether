@@ -16,6 +16,17 @@ Two MCP servers, one repo:
 | `bonsai-py` | Python 3.10+ | AST-based, no type inference needed, zero extra deps |
 | `bonsai-ts` | TypeScript / JavaScript | TypeScript compiler API — fully type-aware, no false positives from same-named methods |
 
+## Works well with
+
+Bonsai is part of a four-tool Claude Code suite:
+
+| Plugin | What it does | 
+|---|---|
+| **bonsai** *(this repo)* | AST-safe rename/move/find for Python & TypeScript | 
+| [temper](https://github.com/ValentinFigue/temper) | Pre-commit diff reviewer | 
+| [cairn](https://github.com/ValentinFigue/cairn) | Commit narrator / CHANGELOG writer | 
+| [whetstone](https://github.com/ValentinFigue/whetstone) | Pre-push quality gate | bash 
+
 ## Repository layout
 
 ```
@@ -130,6 +141,12 @@ cd bonsai
 ./install.sh
 ```
 
+Or pipe directly from GitHub (no clone needed):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ValentinFigue/bonsai/main/install.sh | bash
+```
+
 With `--claude-md`, the installer also injects a bonsai reference table into `~/.claude/CLAUDE.md`, which trains Claude to reach for AST tools automatically across all your projects:
 
 ```bash
@@ -168,63 +185,6 @@ bonsai update                       Rebuild servers and reinstall
 - `/bonsai:setup` registers both MCP servers (`bonsai-py` and `bonsai-ts`) in `~/.claude.json`.
 
 Then restart Claude Code.
-
----
-
-## Publishing
-
-> What needs to happen before end-users can install bonsai without cloning the repo.
-
-### Current blockers
-
-| Blocker | Status |
-|---|---|
-| `bonsai-py` not yet published to PyPI | ❌ |
-| `bonsai-ts` not yet published to npm | ❌ |
-
-### Step 1 — Publish the Python package to PyPI
-
-```bash
-cd py
-uv build
-uv publish   # set PYPI_TOKEN env var or pass --token
-```
-
-Verify: `uvx bonsai-py --help`
-
-### Step 2 — Publish the TypeScript package to npm
-
-```bash
-cd ts
-npm run build
-npm publish --access public   # requires npm login
-```
-
-Verify: `npx --yes bonsai-ts --help`
-
-### Step 3 — Switch to published packages
-
-Once both packages are live, switch the install script to use them:
-
-```bash
-bonsai install --published          # registers uvx bonsai-py + npx bonsai-ts
-bonsai install --published --claude-md   # same + CLAUDE.md
-```
-
-No more need to keep a local build — the servers run from the registry on demand.
-
-Also update `.mcp.json` (for local dev) to the published form:
-
-```json
-{
-  "mcpServers": {
-    "bonsai-py": { "command": "uvx", "args": ["bonsai-py"] },
-    "bonsai-ts": { "command": "npx", "args": ["--yes", "bonsai-ts"] }
-  }
-}
-```
-
-At that point the plugin install flow in `## Install → Option B` works end-to-end.
 
 ---
 

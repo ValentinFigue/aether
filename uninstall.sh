@@ -96,7 +96,7 @@ PYEOF
 
 # ── hooks ──────────────────────────────────────────────────────────────────────
 echo ""
-echo "==> Removing bonsai hook from ~/.claude/settings.json"
+echo "==> Removing bonsai hooks from ~/.claude/settings.json"
 
 python3 - <<'PYEOF'
 import json, os
@@ -113,6 +113,9 @@ except json.JSONDecodeError:
     print("  - ~/.claude/settings.json unreadable, skipping")
     exit(0)
 
+removed_count = 0
+
+# PreToolUse — Bash nudge hook
 pre = settings.get("hooks", {}).get("PreToolUse", [])
 before = len(pre)
 settings.setdefault("hooks", {})["PreToolUse"] = [
@@ -126,7 +129,19 @@ settings.setdefault("hooks", {})["PreToolUse"] = [
         )
     )
 ]
-removed_count = before - len(settings["hooks"]["PreToolUse"])
+removed_count += before - len(settings["hooks"]["PreToolUse"])
+
+# PostToolUse — reference-drift hook
+post = settings.get("hooks", {}).get("PostToolUse", [])
+before = len(post)
+settings.setdefault("hooks", {})["PostToolUse"] = [
+    h for h in post
+    if not (
+        h.get("matcher") in ("Write|Edit|MultiEdit", "Write", "Edit", "MultiEdit") and
+        any("post-bonsai" in hook.get("command", "") for hook in h.get("hooks", []))
+    )
+]
+removed_count += before - len(settings["hooks"]["PostToolUse"])
 
 tmp = settings_path + ".tmp"
 with open(tmp, "w") as f:

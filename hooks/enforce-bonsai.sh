@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# enforce-bonsai.sh — PreToolUse command hook (matcher: Bash)
+# enforce-bonsai.sh — PreToolUse hook (matcher: Bash)
 #
-# Nudges the agent to use bonsai AST tools instead of text tools on source files.
-# Exit 1 = allow the command but show the nudge as informational context.
-# Exit 0 = allow silently (no nudge needed, or # bonsai:skip bypass present).
+# Intercepts two categories:
+#   1. Text tools used on source files  (grep, sed, awk, find, rg, ag, perl, xargs)
+#   2. File move/rename operations      (mv, git mv, cp)
 #
-# Bypass: append  # bonsai:skip  to any command to silence this nudge.
+# Bypass: append  # bonsai:skip  or  # suite:skip  to silence for that command.
 # Bash treats it as a comment and ignores it at runtime.
+# Exit 1 = allow the command but show the nudge as informational context.
+# Exit 0 = allow silently.
 
 set -euo pipefail
 
@@ -21,30 +23,77 @@ print(data.get('tool_input', {}).get('command', ''))
 
 [ -z "$cmd" ] && exit 0
 
-# Bypass marker: agent appends "# bonsai:skip" when no bonsai alternative exists.
-if printf '%s' "$cmd" | grep -q '# *bonsai:skip'; then
+# Bypass marker
+if printf '%s' "$cmd" | grep -qE '# *(bonsai|suite):skip'; then
   exit 0
 fi
 
-match=$(python3 - "$cmd" <<'PYEOF'
+# Classify the command into one of three operation types
+result=$(python3 - "$cmd" <<'PYEOF'
 import re, sys
 cmd = sys.argv[1]
-TOOL_RE = re.compile(r'\b(grep|sed|awk|find)\b')
-EXT_RE  = re.compile(r'\.(py|tsx|ts)\b')
-print("match" if TOOL_RE.search(cmd) and EXT_RE.search(cmd) else "none")
+
+SRC = r'\.(py|ts|tsx|js|jsx|mjs)(\b|$)'
+
+# Category A — text search/read tools on source files
+SEARCH_RE = re.compile(r'\b(grep|rg|ripgrep|ag|ack|pygrep|fgrep)\b')
+
+# Category B — text mutation tools on source files
+MUTATE_RE = re.compile(r'\b(sed|awk|perl)\b')
+
+# Category C — move / rename / copy of source files
+MOVE_RE   = re.compile(r'\b(mv|git\s+mv|cp)\b')
+
+# Category D — xargs chains that pipe into mutation
+XARGS_RE  = re.compile(r'\bxargs\b.*(sed|awk|perl)', re.DOTALL)
+
+has_src = bool(re.search(SRC, cmd))
+
+if MOVE_RE.search(cmd) and has_src:
+    print("move")
+elif (MUTATE_RE.search(cmd) or XARGS_RE.search(cmd)) and has_src:
+    print("mutate")
+elif SEARCH_RE.search(cmd) and has_src:
+    print("search")
+else:
+    print("none")
 PYEOF
 ) || exit 0
 
-if [ "$match" = "match" ]; then
-  cat <<'MSG'
-Bonsai nudge: consider an AST tool instead of text tools on source files.
-  grep/find .py/.ts  →  pyfindrefs, pygrep, pyfindunused / tsfindrefs
-  sed/awk rename     →  pyrename / tsrename
-  move file          →  pymove / tsmove
-
-If no bonsai tool covers your use case, append  # bonsai:skip  to silence this.
+case "$result" in
+  search)
+    cat <<'MSG'
+Bonsai nudge — searching source files:
+  grep/rg on .py   →  pyfindrefs <symbol>  or  pygrep <pattern> (AST-aware, follows re-exports)
+  grep/rg on .ts   →  tsfindrefs <symbol>  (catches type references grep misses)
+  looking for dead code?  →  pyfindunused
+Append  # bonsai:skip  if you need raw text search.
 MSG
-  exit 1
-fi
-
-exit 0
+    exit 1
+    ;;
+  mutate)
+    cat <<'MSG'
+Bonsai nudge — mutating source files with a text tool:
+  sed/perl rename  →  pyrename <old> <new>  or  tsrename (safe: updates imports, types, re-exports)
+  sed signature    →  pysignature / tssignature (propagates call-site changes)
+  Text substitution silently breaks aliased imports and type references.
+  Always dry-run first: pyrename --dry-run <old> <new>
+Append  # bonsai:skip  if bonsai has no equivalent for your operation.
+MSG
+    exit 1
+    ;;
+  move)
+    cat <<'MSG'
+Bonsai nudge — moving or copying a source file:
+  mv / git mv .py  →  pymove <src> <dst>   (rewrites all import paths automatically)
+  mv / git mv .ts  →  tsmove <src> <dst>
+  Raw mv leaves all import statements pointing at the old path.
+  Always dry-run first: pymove --dry-run <src> <dst>
+Append  # bonsai:skip  if this is a new/untracked file with no importers.
+MSG
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac

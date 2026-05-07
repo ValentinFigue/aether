@@ -154,15 +154,17 @@ PYEOF
 
 # ── hooks ──────────────────────────────────────────────────────────────────────
 echo ""
-echo "==> Registering PreToolUse hook in ~/.claude/settings.json"
+echo "==> Registering PreToolUse and PostToolUse hooks in ~/.claude/settings.json"
 
-HOOK_SCRIPT="$REPO_ROOT/hooks/enforce-bonsai.sh"
-chmod +x "$HOOK_SCRIPT"
+PRE_HOOK_SCRIPT="$REPO_ROOT/hooks/enforce-bonsai.sh"
+POST_HOOK_SCRIPT="$REPO_ROOT/hooks/post-bonsai.sh"
+chmod +x "$PRE_HOOK_SCRIPT" "$POST_HOOK_SCRIPT"
 
-python3 - "$HOOK_SCRIPT" <<'PYEOF'
+python3 - "$PRE_HOOK_SCRIPT" "$POST_HOOK_SCRIPT" <<'PYEOF'
 import json, os, sys
 
-script_path = sys.argv[1]
+pre_script  = sys.argv[1]
+post_script = sys.argv[2]
 settings_path = os.path.expanduser("~/.claude/settings.json")
 settings = {}
 if os.path.exists(settings_path):
@@ -172,8 +174,8 @@ if os.path.exists(settings_path):
     except json.JSONDecodeError:
         pass
 
+# PreToolUse — Bash nudge hook
 pre = settings.setdefault("hooks", {}).setdefault("PreToolUse", [])
-
 # Remove all stale bonsai Bash hooks (old prompt type and any command type), then re-add.
 pre[:] = [
     h for h in pre
@@ -186,7 +188,21 @@ pre[:] = [
         )
     )
 ]
-pre.append({"matcher": "Bash", "hooks": [{"type": "command", "command": script_path}]})
+pre.append({"matcher": "Bash", "hooks": [{"type": "command", "command": pre_script}]})
+
+# PostToolUse — reference-drift nudge hook
+post = settings.setdefault("hooks", {}).setdefault("PostToolUse", [])
+post[:] = [
+    h for h in post
+    if not (
+        h.get("matcher") in ("Write|Edit|MultiEdit", "Write", "Edit", "MultiEdit") and
+        any("post-bonsai" in hook.get("command", "") for hook in h.get("hooks", []))
+    )
+]
+post.append({
+    "matcher": "Write|Edit|MultiEdit",
+    "hooks": [{"type": "command", "command": post_script}],
+})
 
 os.makedirs(os.path.dirname(settings_path), exist_ok=True)
 tmp = settings_path + ".tmp"
@@ -194,7 +210,8 @@ with open(tmp, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")
 os.replace(tmp, settings_path)
-print("  ✓ Bash nudge hook registered (command type)")
+print("  ✓ PreToolUse Bash nudge hook registered (enforce-bonsai.sh)")
+print("  ✓ PostToolUse reference-drift hook registered (post-bonsai.sh)")
 PYEOF
 
 # ── skills ─────────────────────────────────────────────────────────────────────

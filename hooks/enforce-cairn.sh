@@ -94,34 +94,31 @@ PYEOF
 
 case "$result" in
   commit_weak)
-    cat <<'MSG'
-Cairn nudge: the commit message looks weak — /cairn-commit writes a better one.
-  Stage your changes, then:  /cairn-commit
-  It generates a Conventional Commits message from the actual diff.
-  Paste the result into:  git commit -m "<cairn output>"
-
-  Append  # cairn:skip  to commit with this message anyway.
-MSG
+    printf '%s\n' \
+      'Cairn nudge: the commit message looks weak — /cairn-commit writes a better one.' \
+      '  Stage your changes, then:  /cairn-commit' \
+      '  It generates a Conventional Commits message from the actual diff.' \
+      '  Paste the result into:  git commit -m "<cairn output>"' \
+      '' \
+      '  Append  # cairn:skip  to commit with this message anyway.'
     exit 1
     ;;
   commit_no_message)
-    cat <<'MSG'
-Cairn nudge: no inline message — /cairn-commit generates one from your staged diff.
-  /cairn-commit
-  Then:  git commit -m "<cairn output>"
-
-  Append  # cairn:skip  to open your editor instead.
-MSG
+    printf '%s\n' \
+      'Cairn nudge: no inline message — /cairn-commit generates one from your staged diff.' \
+      '  /cairn-commit' \
+      '  Then:  git commit -m "<cairn output>"' \
+      '' \
+      '  Append  # cairn:skip  to open your editor instead.'
     exit 1
     ;;
   push)
-    cat <<'MSG'
-Cairn nudge: about to push — /cairn-pr writes the PR title and description.
-  /cairn-pr              (auto-detects base branch)
-  /cairn-pr --base=develop
-
-  Append  # cairn:skip  to push without a PR description.
-MSG
+    printf '%s\n' \
+      'Cairn nudge: about to push — /cairn-pr writes the PR title and description.' \
+      '  /cairn-pr              (auto-detects base branch)' \
+      '  /cairn-pr --base=develop' \
+      '' \
+      '  Append  # cairn:skip  to push without a PR description.'
     exit 1
     ;;
   *)

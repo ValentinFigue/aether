@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.2.1] — 2026-05-07
+
+### Fixed
+
+- `hooks/enforce-cairn.sh`: replaced `cat <<'MSG'` heredocs with `printf` to prevent bash parse failures caused by CRLF line endings making the closing delimiter unrecognisable (`line 118: unexpected EOF while looking for matching '\''`)
+- `hooks/post-cairn.sh`: same heredoc fix; additionally replaced the broken `python3 - <<'PYEOF' ... PYEOF <<< "$input"` pattern — bash treated `<<<` after the delimiter as a new heredoc, cascading a parse error; rewrote to pass JSON input as `sys.argv[1]` (matching the pattern in `enforce-cairn.sh`) and use `json.loads()` accordingly
+
+---
+
 ## [0.2.0] — 2026-05-06
 
 ### Added

@@ -1,9 +1,19 @@
-name: CI
+name: bonsai CI
+
+# Hoisted from plugins/bonsai/.github/workflows/ci.yml — GitHub only runs
+# workflows at the repo root. Paths are filtered so bonsai's matrix does not
+# fire on shell-only changes elsewhere in the suite.
 
 on:
   push:
+    paths:
+      - 'plugins/bonsai/**'
+      - '.github/workflows/bonsai-ci.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'plugins/bonsai/**'
+      - '.github/workflows/bonsai-ci.yml'
 
 jobs:
   py-lint:
@@ -11,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: py
+        working-directory: plugins/bonsai/py
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -27,7 +37,7 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     defaults:
       run:
-        working-directory: py
+        working-directory: plugins/bonsai/py
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -45,7 +55,7 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     defaults:
       run:
-        working-directory: py
+        working-directory: plugins/bonsai/py
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -73,11 +83,11 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: ts/package-lock.json
+          cache-dependency-path: plugins/bonsai/ts/package-lock.json
       - run: npm ci
-        working-directory: ts
+        working-directory: plugins/bonsai/ts
       - run: npx tsc --noEmit
-        working-directory: ts
+        working-directory: plugins/bonsai/ts
 
   ts-test:
     name: TypeScript Tests (Node ${{ matrix.node-version }})
@@ -92,13 +102,13 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: "npm"
-          cache-dependency-path: ts/package-lock.json
+          cache-dependency-path: plugins/bonsai/ts/package-lock.json
       - run: npm ci
-        working-directory: ts
+        working-directory: plugins/bonsai/ts
       - run: npm run build
-        working-directory: ts
+        working-directory: plugins/bonsai/ts
       - run: npm test
-        working-directory: ts
+        working-directory: plugins/bonsai/ts
 
   ts-smoke:
     name: TypeScript Smoke Test
@@ -109,12 +119,12 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-          cache-dependency-path: ts/package-lock.json
+          cache-dependency-path: plugins/bonsai/ts/package-lock.json
       - run: npm ci && npm run build
-        working-directory: ts
+        working-directory: plugins/bonsai/ts
       - name: MCP server starts
-        working-directory: ts
+        working-directory: plugins/bonsai/ts
         run: timeout 3 node dist/server.js || true
       - name: tsfindrefs smoke
-        working-directory: ts
+        working-directory: plugins/bonsai/ts
         run: node --input-type=module -e "import { findRefs } from './dist/tsfindrefs.js'; console.log(findRefs('src/_common:parseSymbolRef', '$(pwd)'));"

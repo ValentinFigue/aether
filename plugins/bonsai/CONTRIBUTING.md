@@ -3,8 +3,8 @@
 ## Setup
 
 ```bash
-git clone https://github.com/valentinfigue/bonsai
-cd bonsai
+git clone https://github.com/ValentinFigue/aether
+cd aether/plugins/bonsai
 ./setup.sh
 ```
 

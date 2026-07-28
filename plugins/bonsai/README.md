@@ -1,7 +1,7 @@
 # bonsai
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![CI](https://github.com/ValentinFigue/bonsai/actions/workflows/ci.yml/badge.svg)](https://github.com/ValentinFigue/bonsai/actions/workflows/ci.yml)
+[![CI](https://github.com/ValentinFigue/aether/actions/workflows/bonsai-ci.yml/badge.svg)](https://github.com/ValentinFigue/aether/actions/workflows/bonsai-ci.yml)
 
 Static-analysis refactoring tools for Claude Code — Python (AST) and TypeScript (compiler API).
 
@@ -23,9 +23,9 @@ Bonsai is part of a four-tool Claude Code suite:
 | Plugin | What it does | 
 |---|---|
 | **bonsai** *(this repo)* | AST-safe rename/move/find for Python & TypeScript | 
-| [temper](https://github.com/ValentinFigue/temper) | Pre-commit diff reviewer | 
-| [cairn](https://github.com/ValentinFigue/cairn) | Commit narrator / CHANGELOG writer | 
-| [whetstone](https://github.com/ValentinFigue/whetstone) | Pre-push quality gate | bash 
+| [temper](../temper/) | Pre-commit diff reviewer | 
+| [cairn](../cairn/) | Commit narrator / CHANGELOG writer | 
+| [whetstone](../whetstone/) | Pre-push quality gate | bash 
 
 ## Repository layout
 
@@ -55,8 +55,8 @@ bonsai/
 ### 1. Clone and build
 
 ```bash
-git clone https://github.com/ValentinFigue/bonsai
-cd bonsai
+git clone https://github.com/ValentinFigue/aether
+cd aether/plugins/bonsai
 bash scripts/setup.sh
 ```
 
@@ -136,16 +136,14 @@ When the packages are published and you want to switch to released versions, upd
 Clone the repo once, then run the install script from the repo root:
 
 ```bash
-git clone https://github.com/ValentinFigue/bonsai
-cd bonsai
+git clone https://github.com/ValentinFigue/aether
+cd aether/plugins/bonsai
 ./install.sh
 ```
 
-Or pipe directly from GitHub (no clone needed):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/bonsai/main/install.sh | bash
-```
+There is no `curl | bash` one-liner. bonsai builds `py/` and `ts/` from the repository
+and registers its MCP servers by absolute path into it, so the clone has to exist and
+has to stay put — re-run `./install.sh` if you move it.
 
 With `--claude-md`, the installer also injects a bonsai reference table into `~/.claude/CLAUDE.md`, which trains Claude to reach for AST tools automatically across all your projects:
 

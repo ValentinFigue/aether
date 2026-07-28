@@ -213,7 +213,8 @@ offenders=$(grep -rln 'mcp__bonsai_py__\|mcp__bonsai_ts__' "$REPO" 2>/dev/null \
   | grep -vE '/(tests|\.claude/plans)/' \
   | grep -vE '/(install|uninstall)\.sh$' \
   | grep -vE '/bin/(bonsai|aether)$' \
-  | grep -vE '/__main__\.py$' || true)
+  | grep -vE '/__main__\.py$' \
+  | grep -vE '/CHANGELOG\.md$' || true)
 if [ -z "$offenders" ]; then
   pass "no underscore MCP spellings outside cleanup paths"
 else

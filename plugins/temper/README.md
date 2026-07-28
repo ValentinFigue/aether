@@ -2,7 +2,7 @@
 
 Harden your code before it ships. Temper runs four adversarial critics against your diff — catching logic errors, design drift, production risks, and coverage gaps at review time, not incident time.
 
-It is the symmetric counterpart to [whetstone](https://github.com/ValentinFigue/whetstone): where whetstone critiques *plans*, temper critiques *diffs*.
+It is the symmetric counterpart to [whetstone](../whetstone/): where whetstone critiques *plans*, temper critiques *diffs*.
 
 > Tempering is the hardening process applied *after* forging. The metal has been shaped — now we make sure it holds.
 
@@ -43,18 +43,26 @@ If blockers are found, temper gates the push until they're resolved.
 
 ## Install
 
-### Quick start — one-liner (no clone needed)
+temper ships as part of the [aether suite](../../README.md). Clone once, then install
+either the whole suite or temper alone.
+
+### Whole suite — whetstone, bonsai, temper and cairn behind one hook
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/temper/main/install.sh | bash -s global
+git clone https://github.com/ValentinFigue/aether
+cd aether && bash install.sh --global --claude-md
 ```
 
-### Or clone first
+### temper alone — global
 
 ```bash
-git clone https://github.com/ValentinFigue/temper
-cd temper && bash install.sh global
+git clone https://github.com/ValentinFigue/aether
+cd aether/plugins/temper && bash install.sh global
 ```
+
+The installer reads everything from the clone, so keep it around — or re-run it after
+moving it. There is no `curl | bash` one-liner: the script copies files out of the
+repository and cannot work when piped.
 
 ### Local install (this project only)
 
@@ -176,9 +184,9 @@ bash uninstall.sh global --claude-md  # also remove CLAUDE.md section
 
 | Plugin | Purpose | When |
 |--------|---------|------|
-| [whetstone](https://github.com/ValentinFigue/whetstone) | Critique plans | Before you build |
-| [bonsai](https://github.com/ValentinFigue/bonsai) | AST refactoring | While you build |
+| [whetstone](../whetstone/) | Critique plans | Before you build |
+| [bonsai](../bonsai/) | AST refactoring | While you build |
 | **temper** | Critique diffs | After you build |
-| [cairn](https://github.com/ValentinFigue/cairn) | Git narration | When you ship |
+| [cairn](../cairn/) | Git narration | When you ship |
 
 > **Suite install order:** install temper before cairn. Both hooks intercept `git commit` — temper (review gate) should fire first, then cairn (narration). Install order matches hook execution order in `settings.json`.

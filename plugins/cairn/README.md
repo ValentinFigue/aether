@@ -27,56 +27,51 @@ Not because the work was unclear — because writing a good commit message after
 
 ## Install
 
-**Recommended — global, available in every project:**
+cairn ships as part of the [aether suite](../../README.md). Clone once, then install
+either the whole suite or cairn alone.
+
+**Whole suite** — whetstone, bonsai, temper and cairn behind one hook:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/cairn/main/install.sh | bash -s global
+git clone https://github.com/ValentinFigue/aether
+cd aether && bash install.sh --global --claude-md
 ```
 
-This installs all four cairn commands, the `cairn` CLI to `~/.local/bin/`, the `enforce-cairn` (PreToolUse) and `post-cairn` (PostToolUse) hooks, and configures the required `Bash`, `Read`, and `Write` permissions in `~/.claude/settings.json` so git commands run without permission prompts.
+**cairn alone** — global, available in every project:
+
+```bash
+git clone https://github.com/ValentinFigue/aether
+cd aether/plugins/cairn && bash install.sh global
+```
+
+This installs all four cairn commands, the `cairn` CLI to `~/.local/bin/`, the
+`enforce-cairn` (PreToolUse) and `post-cairn` (PostToolUse) hooks, and the required
+`Bash`, `Read` and `Write` permissions in `~/.claude/settings.json` so git commands run
+without permission prompts.
 
 **With documentation rules** — also injects project behaviour rules into `~/.claude/CLAUDE.md`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/cairn/main/install.sh | bash -s global --claude-md
+bash install.sh global --claude-md
 ```
 
 **Local only** — available in this project only:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/cairn/main/install.sh | bash
+bash install.sh
 ```
 
-**Manual one-liner** (no script):
-
-```bash
-# Global
-mkdir -p ~/.claude/commands
-for cmd in cairn-commit cairn-pr cairn-changelog cairn-summary; do
-  curl -fsSL -o ~/.claude/commands/${cmd}.md \
-    https://raw.githubusercontent.com/ValentinFigue/cairn/main/.claude/commands/${cmd}.md
-done
-
-# Local
-mkdir -p .claude/commands
-for cmd in cairn-commit cairn-pr cairn-changelog cairn-summary; do
-  curl -fsSL -o .claude/commands/${cmd}.md \
-    https://raw.githubusercontent.com/ValentinFigue/cairn/main/.claude/commands/${cmd}.md
-done
-```
-
-If installing manually, add `"Bash"`, `"Read"`, and `"Write"` to `permissions.allow` in the relevant `settings.json` to avoid prompts when cairn reads diffs.
+The installer reads everything from the clone, so keep it around — or re-run it after
+moving it. There is no `curl | bash` one-liner: the script copies files out of the
+repository and cannot work when piped.
 
 Restart Claude Code. The cairn commands are immediately available.
 
 **To uninstall:**
 
 ```bash
-# Global
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/cairn/main/uninstall.sh | bash -s global --claude-md
-
-# Local
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/cairn/main/uninstall.sh | bash
+bash uninstall.sh global --claude-md   # global
+bash uninstall.sh                      # local
 ```
 
 **Hook bypass:**
@@ -321,9 +316,9 @@ Cairn is part of a four-tool suite. Each tool covers a different moment in the d
 
 | Tool | When | What it does |
 |---|---|---|
-| [**whetstone**](https://github.com/ValentinFigue/whetstone) | Before you build | Critiques plans — sharpens the approach before any code is written |
-| [**bonsai**](https://github.com/ValentinFigue/bonsai) | While you build | AST-safe rename, move, and dead-code detection for Python and TypeScript |
-| [**temper**](https://github.com/ValentinFigue/temper) | After you build | Critiques diffs before commit — catches issues while context is live |
+| [**whetstone**](../whetstone/) | Before you build | Critiques plans — sharpens the approach before any code is written |
+| [**bonsai**](../bonsai/) | While you build | AST-safe rename, move, and dead-code detection for Python and TypeScript |
+| [**temper**](../temper/) | After you build | Critiques diffs before commit — catches issues while context is live |
 | **cairn** | When you ship | Narrates commits, PRs, and changelogs from the actual diff |
 
 The highest-value handoff in the suite: after temper finds no blockers, run `/cairn-commit` immediately — the review is fresh and the staged diff is ready.

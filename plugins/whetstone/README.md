@@ -24,65 +24,65 @@ Each finding is rated by severity. No revisions, no rewrites — just a clear ta
 
 ## Install
 
-**Recommended — global, available in every project:**
+whetstone ships as part of the [aether suite](../../README.md). Clone once, then
+install either the whole suite or whetstone alone.
+
+**Whole suite** — whetstone, bonsai, temper and cairn behind one hook:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/whetstone/main/install.sh | bash -s global
+git clone https://github.com/ValentinFigue/aether
+cd aether && bash install.sh --global --claude-md
 ```
 
-This installs the `/autocritic` command, the `whetstone` CLI to `~/.local/bin/`, and configures the required `Read`/`Write` permissions in `~/.claude/settings.json` so the critic runs without permission prompts.
+**whetstone alone** — global, available in every project:
+
+```bash
+git clone https://github.com/ValentinFigue/aether
+cd aether/plugins/whetstone && bash install.sh global
+```
+
+This installs the `/autocritic` command, the `whetstone` CLI to `~/.local/bin/`, the
+`enforce-whetstone` PreToolUse hook, and the required `Read`/`Write` permissions in
+`~/.claude/settings.json` so the critic runs without permission prompts.
 
 **With auto-trigger** — also injects the planning discipline into `~/.claude/CLAUDE.md`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/whetstone/main/install.sh | bash -s global --claude-md
+bash install.sh global --claude-md
 ```
 
 **Local only** — available in this project only:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/whetstone/main/install.sh | bash
+bash install.sh
 ```
 
-**Manual one-liner** (no script):
-
-```bash
-# Global
-mkdir -p ~/.claude/commands
-curl -fsSL -o ~/.claude/commands/autocritic.md \
-  https://raw.githubusercontent.com/ValentinFigue/whetstone/main/.claude/commands/autocritic.md
-
-# Local
-mkdir -p .claude/commands
-curl -fsSL -o .claude/commands/autocritic.md \
-  https://raw.githubusercontent.com/ValentinFigue/whetstone/main/.claude/commands/autocritic.md
-```
-
-If installing manually, also add `"Read"` and `"Write"` to `permissions.allow` in the relevant `settings.json` (`~/.claude/settings.json` for global, `.claude/settings.json` for local) to avoid permission prompts when the critic reads config files or writes `CRITIQUE.md`.
+The installer reads everything from the clone, so keep it around — or re-run it after
+moving it. There is no `curl | bash` one-liner: the script copies files out of the
+repository and cannot work when piped.
 
 Restart Claude Code. The `/autocritic` command is immediately available.
 
 **To uninstall:**
 
 ```bash
-# Global (removes CLI binary, command file, permissions, and optionally CLAUDE.md section)
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/whetstone/main/uninstall.sh | bash -s global --claude-md
-
-# Local
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/whetstone/main/uninstall.sh | bash
+bash uninstall.sh global --claude-md   # global
+bash uninstall.sh                      # local
 ```
 
 ---
 
 ## Make it automatic
 
-Add [templates/CLAUDE.md](templates/CLAUDE.md) to your project's `CLAUDE.md` to make the critic run automatically after every plan — no manual invocation needed. Use `--claude-md` during install (above), or manually:
+Add [templates/CLAUDE.md](templates/CLAUDE.md) to your project's `CLAUDE.md` to make the
+critic run automatically after every plan — no manual invocation needed. Pass
+`--claude-md` during install, or, if you are running the full suite, use the unified
+aether block instead (`bash install.sh --global --claude-md` from the repo root), which
+covers all four plugins at once.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ValentinFigue/whetstone/main/install.sh | bash -s --claude-md
-```
-
-With this in place, Claude Code runs `/autocritic` after presenting any plan and blocks implementation if blockers are found. Use `/autocritic --off` to skip a specific run without disabling it globally.
+With this in place, Claude Code runs `/autocritic` after presenting any plan and blocks
+implementation if blockers are found. Use `/autocritic --off` to skip a specific run
+without disabling it globally.
 
 ---
 
@@ -235,10 +235,10 @@ Three ways to skip the critic, in order of scope:
 
 | Plugin | What it does |
 |--------|-------------|
-| [**temper**](https://github.com/ValentinFigue/temper) | Reviews the diff before every commit |
-| [**cairn**](https://github.com/ValentinFigue/cairn) | Narrates commits with structured changelogs |
-| [**bonsai**](https://github.com/ValentinFigue/bonsai) | Finds dead Python code and suggests renames |
-| [**whetstone**](https://github.com/ValentinFigue/whetstone) | ← you are here — sharpens plans before code is written |
+| [**temper**](../temper/) | Reviews the diff before every commit |
+| [**cairn**](../cairn/) | Narrates commits with structured changelogs |
+| [**bonsai**](../bonsai/) | Finds dead Python code and suggests renames |
+| [**whetstone**](./) | ← you are here — sharpens plans before code is written |
 
 ---
 

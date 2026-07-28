@@ -228,4 +228,72 @@ for f in "$REPO/install.sh" "$REPO/plugins/bonsai/install.sh"; do
   assert_eq "0" "$adds" "$(basename "$(dirname "$f")")/$(basename "$f") never writes the underscore spelling"
 done
 
+# ── JSON backend equivalence ─────────────────────────────────────────────────
+# install.sh rewrites settings.json with python3, node or jq, whichever is
+# present. python3 always wins in practice, so the other two branches would
+# never run on a developer machine — AETHER_JSON_BACKEND pins each one so all
+# three are exercised and compared. Seeded with hooks and permissions that must
+# be migrated, so the comparison covers removal as well as insertion.
+suite "JSON backend equivalence"
+SEED='{
+  "hooks": {
+    "PreToolUse": [
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "/old/enforce-cairn.sh"}]},
+      {"matcher": "Other", "hooks": [{"type": "command", "command": "/keep/me.sh"}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "Bash|Write|Edit", "hooks": [{"type": "command", "command": "/old/post-cairn.sh"}]}
+    ]
+  },
+  "permissions": {"allow": ["Bash", "mcp__bonsai_py__*", "SomethingElse"]}
+}'
+
+RESULTS=()
+for backend in python3 node jq; do
+  if ! command -v "$backend" >/dev/null 2>&1; then
+    pass "$backend not installed — branch skipped"
+    continue
+  fi
+  HB=$(new_home)
+  mkdir -p "$HB/.claude"
+  printf '%s\n' "$SEED" > "$HB/.claude/settings.json"
+  env HOME="$HB" AETHER_JSON_BACKEND="$backend" \
+    bash "$REPO/install.sh" --global --no-bonsai >"$HB/out.log" 2>&1
+  e=$?
+  assert_exit 0 "$e" "install succeeds with the $backend backend"
+  # Normalise: hook paths embed the throwaway HOME.
+  norm=$(python3 -c '
+import json, sys
+s = json.load(open(sys.argv[1]))
+print(json.dumps(s, indent=2, sort_keys=True).replace(sys.argv[2], "<HOME>"))
+' "$HB/.claude/settings.json" "$HB" 2>/dev/null)
+  RESULTS+=("$backend:$norm")
+done
+
+if [ "${#RESULTS[@]}" -ge 2 ]; then
+  first_name="${RESULTS[0]%%:*}"; first_val="${RESULTS[0]#*:}"
+  for r in "${RESULTS[@]:1}"; do
+    name="${r%%:*}"; val="${r#*:}"
+    if [ "$first_val" = "$val" ]; then
+      pass "$name backend produces the same settings.json as $first_name"
+    else
+      fail "$name backend produces the same settings.json as $first_name" \
+        "$(diff <(printf '%s' "$first_val") <(printf '%s' "$val") | head -12)"
+    fi
+  done
+  # And the shared result must actually be correct, not merely consistent.
+  assert_contains "$first_val" "enforce-suite.sh"  "all backends register the suite hook"
+  assert_contains "$first_val" "post-cairn.sh"     "all backends preserve the PostToolUse hook"
+  assert_contains "$first_val" "mcp__bonsai-py__*" "all backends write the hyphen permission"
+  assert_contains "$first_val" "/keep/me.sh"       "all backends leave unrelated hooks alone"
+  case "$first_val" in
+    *enforce-cairn*) fail "all backends strip the superseded PreToolUse hook" ;;
+    *) pass "all backends strip the superseded PreToolUse hook" ;;
+  esac
+  case "$first_val" in
+    *mcp__bonsai_py__*) fail "all backends drop the underscore permission" ;;
+    *) pass "all backends drop the underscore permission" ;;
+  esac
+fi
+
 summary

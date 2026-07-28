@@ -99,11 +99,20 @@ _plugin_enabled() {
 # prefix on `.`, whose persistence differs between bash's POSIX and default
 # modes. A missing gate file is not an error — the suite degrades to whichever
 # plugins are actually installed.
+#
+# -e is dropped *before* the loop, not after it. This hook runs on every Bash,
+# Write and Edit call, and a gate file that is corrupt or half-written (an
+# interrupted install, a full disk) makes sourcing fail. Under -e that aborted
+# the hook with exit 2, which Claude Code treats as "block the tool call" — one
+# bad file would have locked the user out of every command. Stderr is discarded
+# for the same reason: a broken gate must degrade to silence, never to noise on
+# every prompt. `aether status` reports gates that fail to parse.
 
+set +e
 export SUITE_MODE=1
 for _p in whetstone bonsai temper cairn; do
   _f=$(_gate_file "$_p")
-  [ -n "$_f" ] && . "$_f"
+  [ -n "$_f" ] && . "$_f" 2>/dev/null
 done
 unset _p _f
 
@@ -122,11 +131,9 @@ _run_gate() {
   "$fn"
 }
 
-# The gates are written to run without -e (see the standalone entrypoints in
-# each plugin hook, which set it only for themselves). Disable it here so a
-# non-zero intermediate command inside a gate cannot abort the whole hook —
-# that is the fail-open guarantee.
-set +e
+# -e is already off (see the gate-loading section). The gates are written to run
+# without it, so a non-zero intermediate command inside one cannot abort the
+# hook — that is the fail-open guarantee.
 
 _exit=0
 

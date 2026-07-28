@@ -102,13 +102,24 @@ cmd_status() {
   fi
 
   # The gates are what enforce-suite.sh actually sources, so an empty directory
-  # means the hook is registered but silent.
-  local gates_dir gate_count
+  # means the hook is registered but silent. The hook itself ignores a gate that
+  # fails to parse — it must never block a tool call — so this is the only place
+  # a corrupt gate is reported.
+  local gates_dir gate_count bad_gates
   gates_dir=$(_manifest_get "gates") || gates_dir=""
   gates_dir="${gates_dir:-$GLOBAL_GATES}"
   if [ -d "$gates_dir" ]; then
-    gate_count=$(ls "$gates_dir" 2>/dev/null | wc -l | tr -d ' ')
+    gate_count=0; bad_gates=""
+    for g in "$gates_dir"/enforce-*.sh; do
+      [ -f "$g" ] || continue
+      gate_count=$((gate_count + 1))
+      bash -n "$g" 2>/dev/null || bad_gates="$bad_gates $(basename "$g")"
+    done
     printf '  Gates:      %s loaded from %s\n' "$gate_count" "$gates_dir"
+    if [ -n "$bad_gates" ]; then
+      printf '              ✗ failed to parse and are being skipped:%s\n' "$bad_gates"
+      printf '                re-run install.sh to restore them\n'
+    fi
   else
     printf '  Gates:      none found at %s — run install.sh to fix\n' "$gates_dir"
   fi

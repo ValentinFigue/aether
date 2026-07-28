@@ -72,13 +72,26 @@ _backup() {
   cp "$file" "$file.bak"
 }
 
+# Which interpreter rewrites settings.json. Left to itself this always picks
+# python3, so the node and jq branches below would never run on a developer
+# machine and could rot unnoticed — AETHER_JSON_BACKEND pins one so the test
+# suite can exercise all three and assert they agree.
+_json_backend() {
+  if [ -n "${AETHER_JSON_BACKEND:-}" ]; then printf '%s' "$AETHER_JSON_BACKEND"; return 0; fi
+  if   command -v python3 &>/dev/null; then printf 'python3'
+  elif command -v node    &>/dev/null; then printf 'node'
+  elif command -v jq      &>/dev/null; then printf 'jq'
+  else printf 'none'; fi
+}
+
 # Strip superseded PreToolUse hooks. PostToolUse is deliberately untouched:
 # post-cairn.sh and post-bonsai.sh have no equivalent in enforce-suite.sh, and
 # an earlier version of this list removed them, silently deleting bonsai's
 # reference-drift nudge and cairn's post-review and changelog nudges.
 _json_remove_stale_hooks() {
   local file="$1"
-  if command -v python3 &>/dev/null; then
+  case "$(_json_backend)" in
+   python3)
     python3 - "$file" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
 import json, sys
 f = sys.argv[1]
@@ -95,7 +108,8 @@ if "hooks" in s and "PreToolUse" in s["hooks"]:
     s["hooks"]["PreToolUse"] = [e for e in entries if e.get("hooks")]
 print(json.dumps(s, indent=2))
 PYEOF
-  elif command -v node &>/dev/null; then
+    ;;
+   node)
     node - "$file" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
 const f = process.argv[2];
 const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
@@ -109,7 +123,8 @@ if (s.hooks && s.hooks.PreToolUse) {
 }
 process.stdout.write(JSON.stringify(s, null, 2) + "\n");
 JSEOF
-  elif command -v jq &>/dev/null; then
+    ;;
+   jq)
     jq '
       def stale: ["enforce-cairn","enforce-temper","enforce-whetstone","enforce-bonsai","enforce-suite"];
       if (.hooks.PreToolUse | type) == "array" then
@@ -119,16 +134,19 @@ JSEOF
         )
       else . end
     ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
-  else
+    ;;
+   *)
     printf '  Could not clean stale hooks (install python3, node, or jq).\n'
     return 1
-  fi
+    ;;
+  esac
 }
 
 _json_register_suite_hook() {
   local file="$1" hook_path="$2"
   local matcher="Bash|Write|Edit|MultiEdit"
-  if command -v python3 &>/dev/null; then
+  case "$(_json_backend)" in
+   python3)
     python3 - "$file" "$hook_path" "$matcher" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
 import json, sys
 f, hook_path, matcher = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -143,7 +161,8 @@ if not any(h.get("command") == hook_path for h in entry["hooks"]):
     entry["hooks"].append({"type": "command", "command": hook_path})
 print(json.dumps(s, indent=2))
 PYEOF
-  elif command -v node &>/dev/null; then
+    ;;
+   node)
     node - "$file" "$hook_path" "$matcher" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
 const [f, hookPath, matcher] = process.argv.slice(2);
 const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
@@ -157,7 +176,8 @@ if (!entry.hooks.some(h => h.command === hookPath)) {
 }
 process.stdout.write(JSON.stringify(s, null, 2) + "\n");
 JSEOF
-  elif command -v jq &>/dev/null; then
+    ;;
+   jq)
     jq --arg p "$hook_path" --arg m "$matcher" '
       .hooks.PreToolUse |= (
         if . == null then [{"matcher":$m,"hooks":[{"type":"command","command":$p}]}]
@@ -170,18 +190,21 @@ JSEOF
           end
         end
       )' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
-  else
+    ;;
+   *)
     printf '  Could not register hook (install python3, node, or jq).\n'
     printf '  Add a PreToolUse hook pointing to %s manually.\n' "$hook_path"
     return 1
-  fi
+    ;;
+  esac
 }
 
 # Servers register as bonsai-py / bonsai-ts, so their tools are named
 # mcp__bonsai-py__*. The underscore spelling this used to write matched nothing.
 _json_add_perms() {
   local file="$1"
-  if command -v python3 &>/dev/null; then
+  case "$(_json_backend)" in
+   python3)
     python3 - "$file" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
 import json, sys
 f = sys.argv[1]
@@ -195,7 +218,8 @@ for dead in ("mcp__bonsai_py__*", "mcp__bonsai_ts__*"):
     while dead in allow: allow.remove(dead)
 print(json.dumps(s, indent=2))
 PYEOF
-  elif command -v node &>/dev/null; then
+    ;;
+   node)
     node - "$file" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
 const f = process.argv[2];
 const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
@@ -207,14 +231,22 @@ s.permissions.allow = s.permissions.allow.filter(
   p => p !== "mcp__bonsai_py__*" && p !== "mcp__bonsai_ts__*");
 process.stdout.write(JSON.stringify(s, null, 2) + "\n");
 JSEOF
-  elif command -v jq &>/dev/null; then
-    jq '.permissions.allow |= ((. // []) + ["Bash","Read","Write","mcp__bonsai-py__*","mcp__bonsai-ts__*"]
-        | map(select(. != "mcp__bonsai_py__*" and . != "mcp__bonsai_ts__*")) | unique)' \
-      "$file" > "$file.tmp" && mv "$file.tmp" "$file"
-  else
+    ;;
+   jq)
+    # Deduplicate with reduce, not `unique`: `unique` sorts, which would
+    # reorder permissions the user already had and make this branch produce a
+    # different file from the python3 and node ones.
+    jq '.permissions.allow = (
+          ((.permissions.allow // []) + ["Bash","Read","Write","mcp__bonsai-py__*","mcp__bonsai-ts__*"])
+          | map(select(. != "mcp__bonsai_py__*" and . != "mcp__bonsai_ts__*"))
+          | reduce .[] as $x ([]; if index($x) then . else . + [$x] end)
+        )' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+    ;;
+   *)
     printf '  Could not add permissions (install python3, node, or jq).\n'
     return 1
-  fi
+    ;;
+  esac
 }
 
 # ── Step 1: Ensure settings.json exists ──────────────────────────────────────
@@ -242,6 +274,13 @@ fi
 
 printf '\nInstalling plugins from %s/plugins ...\n' "$SCRIPT_DIR"
 
+# Per-plugin output is captured so a success stays quiet and a failure can show
+# the tail. mktemp rather than a predictable /tmp/aether-install-<plugin>.log:
+# that name could be pre-created as a symlink by another user on a shared box
+# and this would clobber the target.
+LOG_DIR=$(mktemp -d "${TMPDIR:-/tmp}/aether-install.XXXXXX")
+trap 'rm -rf "$LOG_DIR"' EXIT
+
 for p in cairn whetstone temper; do
   if $DRY_RUN; then
     printf '  [dry-run] Would install %s (%s)\n' "$p" "$MODE"
@@ -249,12 +288,12 @@ for p in cairn whetstone temper; do
     continue
   fi
   if bash "$SCRIPT_DIR/plugins/$p/install.sh" $SCOPE_ARG --suite \
-       > /tmp/aether-install-$p.log 2>&1; then
+       > "$LOG_DIR/$p.log" 2>&1; then
     printf '  ✓ %s installed\n' "$p"
     INSTALLED_PLUGINS="$INSTALLED_PLUGINS $p"
   else
-    printf '  ✗ %s failed to install — see /tmp/aether-install-%s.log\n' "$p" "$p"
-    tail -3 "/tmp/aether-install-$p.log" | sed 's/^/      /'
+    printf '  ✗ %s failed to install:\n' "$p"
+    tail -5 "$LOG_DIR/$p.log" | sed 's/^/      /'
     FAILED=1
   fi
 done
@@ -272,12 +311,12 @@ elif ! command -v uv &>/dev/null || ! command -v node &>/dev/null || ! command -
 else
   printf '  bonsai: building py/ and ts/, this takes a minute...\n'
   if bash "$SCRIPT_DIR/plugins/bonsai/install.sh" --suite \
-       > /tmp/aether-install-bonsai.log 2>&1; then
+       > "$LOG_DIR/bonsai.log" 2>&1; then
     printf '  ✓ bonsai installed\n'
     INSTALLED_PLUGINS="$INSTALLED_PLUGINS bonsai"
   else
-    printf '  ✗ bonsai failed to install — see /tmp/aether-install-bonsai.log\n'
-    tail -3 /tmp/aether-install-bonsai.log | sed 's/^/      /'
+    printf '  ✗ bonsai failed to install:\n'
+    tail -5 "$LOG_DIR/bonsai.log" | sed 's/^/      /'
     FAILED=1
   fi
 fi

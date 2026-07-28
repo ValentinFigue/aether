@@ -129,6 +129,50 @@ case "$e" in
 esac
 rm -rf "$GATES" "$EMPTY"
 
+# ── a broken gate must not block the user ────────────────────────────────────
+# This hook runs on every Bash, Write and Edit call. A gate file that is corrupt
+# or half-written (interrupted install, full disk) used to make sourcing fail
+# under `set -e`, aborting the hook with exit 2 — which Claude Code reads as
+# "block the tool call". One bad file locked the user out of every command.
+suite "broken gate degrades safely"
+for kind in corrupt truncated empty; do
+  BG=$(mktemp -d)
+  for p in whetstone bonsai temper cairn; do
+    cp "$REPO/plugins/$p/hooks/enforce-$p.sh" "$BG/enforce-$p.sh"
+  done
+  case "$kind" in
+    corrupt)   printf 'gate_cairn() {\n  this is ( not valid bash\n' > "$BG/enforce-cairn.sh" ;;
+    truncated) head -40 "$REPO/plugins/cairn/hooks/enforce-cairn.sh" > "$BG/enforce-cairn.sh" ;;
+    empty)     : > "$BG/enforce-cairn.sh" ;;
+  esac
+
+  OUT=$(payload Bash 'git push origin main' | AETHER_GATE_DIR="$BG" bash "$SUITE_HOOK" 2>&1); e=$?
+  if [ "$e" -le 1 ]; then
+    pass "$kind gate: hook exits $e, never 2 (would block the tool call)"
+  else
+    fail "$kind gate: hook exits $e, never 2" "exit=$e output=${OUT:0:150}"
+  fi
+  case "$OUT" in
+    *"syntax error"*|*"unexpected"*) fail "$kind gate: no bash noise reaches the user" "output=${OUT:0:150}" ;;
+    *) pass "$kind gate: no bash noise reaches the user" ;;
+  esac
+  assert_contains "$OUT" "temper:" "$kind gate: the healthy gates still fire"
+  rm -rf "$BG"
+done
+
+# aether status is the one place a broken gate is reported, since the hook
+# itself has to stay silent.
+BG=$(mktemp -d)
+cp "$REPO/plugins/temper/hooks/enforce-temper.sh" "$BG/enforce-temper.sh"
+printf 'not ( valid\n' > "$BG/enforce-cairn.sh"
+H=$(mktemp -d)
+mkdir -p "$H/.claude"
+printf 'version=1.0.0\nscope=global\ngates=%s\n' "$BG" > "$H/.claude/aether.manifest"
+out=$(env HOME="$H" bash "$REPO/bin/aether" status 2>&1)
+assert_contains "$out" "failed to parse" "aether status reports the unparseable gate"
+assert_contains "$out" "enforce-cairn.sh" "aether status names the bad gate"
+rm -rf "$BG" "$H"
+
 # ── no gate logic left in the dispatcher ─────────────────────────────────────
 # Guards the Phase 5 invariant: if a rule reappears here, it has been duplicated
 # again and the two copies will drift.

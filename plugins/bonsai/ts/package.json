@@ -1,0 +1,31 @@
+{
+  "name": "bonsai-ts",
+  "version": "0.1.0",
+  "description": "Type-aware TypeScript/JavaScript refactoring tools for Claude Code MCP",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "bonsai-ts": "bin/bonsai-ts.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "ts-morph": "^23.0.0",
+    "diff": "^5.2.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "@types/diff": "^5.2.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

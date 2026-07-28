@@ -1,10 +1,11 @@
 #!/bin/bash
 set -e
 
-VERSION="0.1.0"
+VERSION="1.0.0"
 
 GLOBAL_HOOK_DIR="$HOME/.local/share/aether"
 GLOBAL_HOOK="$GLOBAL_HOOK_DIR/enforce-suite.sh"
+GLOBAL_GATES="$GLOBAL_HOOK_DIR/gates"
 GLOBAL_SETTINGS="$HOME/.claude/settings.json"
 GLOBAL_MANIFEST="$HOME/.claude/aether.manifest"
 LOCAL_MANIFEST=".claude/aether.manifest"
@@ -19,7 +20,8 @@ Usage:
   aether status                         Show install state for all plugins
   aether enable  [local|global]         Enable all plugins (default: local)
   aether disable [local|global]         Disable all plugins
-  aether update                         Update all plugins to their latest versions
+  aether update                         git pull the clone and re-run its installer
+  aether version                        Print the installed version
   aether uninstall [global] [--claude-md]  Remove suite hook, CLI, optional CLAUDE.md block
   aether help                           Show this message
 
@@ -99,6 +101,28 @@ cmd_status() {
     printf '  Suite hook: NOT registered — run install.sh to fix\n'
   fi
 
+  # The gates are what enforce-suite.sh actually sources, so an empty directory
+  # means the hook is registered but silent.
+  local gates_dir gate_count
+  gates_dir=$(_manifest_get "gates") || gates_dir=""
+  gates_dir="${gates_dir:-$GLOBAL_GATES}"
+  if [ -d "$gates_dir" ]; then
+    gate_count=$(ls "$gates_dir" 2>/dev/null | wc -l | tr -d ' ')
+    printf '  Gates:      %s loaded from %s\n' "$gate_count" "$gates_dir"
+  else
+    printf '  Gates:      none found at %s — run install.sh to fix\n' "$gates_dir"
+  fi
+
+  local repo
+  repo=$(_manifest_get "repo") || repo=""
+  if [ -n "$repo" ]; then
+    if [ -d "$repo/.git" ]; then
+      printf '  Clone:      %s\n' "$repo"
+    else
+      printf '  Clone:      %s (MISSING — aether update will not work)\n' "$repo"
+    fi
+  fi
+
   local manifest_version
   manifest_version=$(_manifest_get "version") || true
   [ -n "$manifest_version" ] && printf '  Installed version: %s\n' "$manifest_version"
@@ -134,41 +158,47 @@ cmd_disable() {
   done
 }
 
-PLUGIN_URLS=(
-  "cairn:https://raw.githubusercontent.com/ValentinFigue/cairn/main/install.sh"
-  "whetstone:https://raw.githubusercontent.com/ValentinFigue/whetstone/main/install.sh"
-  "temper:https://raw.githubusercontent.com/ValentinFigue/temper/main/install.sh"
-)
-
+# All four plugins now live in the aether clone, so updating is a git pull plus
+# a re-run of the local installer — no per-plugin downloads, and the four
+# plugins can never drift to different versions from each other.
 cmd_update() {
-  printf 'Updating aether suite plugins from GitHub...\n\n'
+  local repo scope scope_arg claude_md bonsai_arg
+  repo=$(_manifest_get "repo") || repo=""
 
-  local scope
-  scope=$(_manifest_get "scope") || scope=""
-  local scope_arg=""; [ "$scope" = "global" ] && scope_arg="global"
-
-  for entry in "${PLUGIN_URLS[@]}"; do
-    local plugin="${entry%%:*}"
-    local url="${entry#*:}"
-    printf '  Updating %s...\n' "$plugin"
-    curl -fsSL "$url" | bash -s -- $scope_arg 2>&1 | grep -E '(✓|could not|Note:)' || true
-  done
-
-  # bonsai: not on PyPI/npm yet — skip with a note
-  printf '  bonsai: skipped — not yet on PyPI/npm. Update manually from the repo.\n'
-  printf '          See: https://github.com/valentinfigue/bonsai\n'
-
-  # Re-install enforce-suite.sh from the aether repo to pick up any updates
-  local aether_hook_url="https://raw.githubusercontent.com/ValentinFigue/aether/main/hooks/enforce-suite.sh"
-  local hook_dest
-  hook_dest=$(_manifest_get "hook") || hook_dest=""
-  if [ -n "$hook_dest" ]; then
-    printf '  Updating enforce-suite.sh...\n'
-    curl -fsSL -o "$hook_dest" "$aether_hook_url" && chmod +x "$hook_dest"
-    printf '  ✓ enforce-suite.sh updated\n'
+  if [ -z "$repo" ]; then
+    printf 'Cannot locate the aether clone.\n'
+    printf '  The install manifest has no repo= entry, so it predates aether 1.0.0.\n'
+    printf '  Re-run install.sh from your clone once to record it.\n'
+    return 1
+  fi
+  if [ ! -d "$repo/.git" ]; then
+    printf 'The recorded clone is no longer there: %s\n' "$repo"
+    printf '  Re-clone aether and run its install.sh.\n'
+    return 1
   fi
 
-  printf '\nRestart Claude Code to activate updated hooks.\n'
+  scope=$(_manifest_get "scope") || scope=""
+  scope_arg=""; [ "$scope" = "global" ] && scope_arg="--global"
+  claude_md=$(_manifest_get "claude_md") || claude_md=""
+  [ "$claude_md" = "true" ] && claude_md="--claude-md" || claude_md=""
+  bonsai_arg=""; [ "$(_manifest_get "bonsai")" = "false" ] && bonsai_arg="--no-bonsai"
+
+  printf 'Updating aether from %s\n\n' "$repo"
+  if ! git -C "$repo" pull --ff-only; then
+    printf '\n  git pull failed. Resolve it in %s, then re-run aether update.\n' "$repo"
+    return 1
+  fi
+
+  printf '\nRe-running the installer...\n\n'
+  bash "$repo/install.sh" $scope_arg $claude_md $bonsai_arg
+}
+
+cmd_version() {
+  local installed
+  installed=$(_manifest_get "version") || installed=""
+  printf 'aether %s (CLI)\n' "$VERSION"
+  [ -n "$installed" ] && printf 'aether %s (installed)\n' "$installed"
+  return 0
 }
 
 cmd_uninstall() {
@@ -191,21 +221,23 @@ cmd_uninstall() {
     claude_file="./CLAUDE.md"
   fi
 
-  # Remove enforce-suite.sh hook from settings.json
+  # Remove the suite's own PreToolUse hook. The per-plugin PostToolUse hooks
+  # (post-cairn, post-bonsai) belong to plugins that stay installed for
+  # standalone use, so removing aether must not take them with it.
   if [ -f "$settings_file" ] && command -v python3 &>/dev/null; then
+    cp "$settings_file" "$settings_file.bak"
     python3 - "$settings_file" <<'PYEOF' > "$settings_file.tmp" && mv "$settings_file.tmp" "$settings_file"
 import json, sys
 f = sys.argv[1]
 with open(f) as fh: s = json.load(fh)
-STALE = ["enforce-suite", "enforce-cairn", "enforce-temper", "enforce-whetstone",
-         "enforce-bonsai", "post-cairn", "post-bonsai"]
-for phase in ("PreToolUse", "PostToolUse"):
-    entries = s.get("hooks", {}).get(phase, [])
-    for entry in entries:
-        entry["hooks"] = [
-            h for h in entry.get("hooks", [])
-            if not any(kw in h.get("command", "") for kw in STALE)
-        ]
+entries = s.get("hooks", {}).get("PreToolUse", [])
+for entry in entries:
+    entry["hooks"] = [
+        h for h in entry.get("hooks", [])
+        if "enforce-suite" not in h.get("command", "")
+    ]
+if "hooks" in s and "PreToolUse" in s["hooks"]:
+    s["hooks"]["PreToolUse"] = [e for e in entries if e.get("hooks")]
 print(json.dumps(s, indent=2))
 PYEOF
     printf '  ✓ Removed enforce-suite.sh hook from %s\n' "$settings_file"
@@ -217,10 +249,14 @@ PYEOF
     printf '  ✓ Removed ~/.local/bin/aether\n'
   fi
 
-  # Remove enforce-suite.sh from hook dir
+  # Remove enforce-suite.sh and the gates it sources
   if [ -f "$GLOBAL_HOOK" ]; then
     rm "$GLOBAL_HOOK"
     printf '  ✓ Removed %s\n' "$GLOBAL_HOOK"
+  fi
+  if [ -d "$GLOBAL_GATES" ]; then
+    rm -rf "$GLOBAL_GATES"
+    printf '  ✓ Removed %s\n' "$GLOBAL_GATES"
   fi
 
   # Remove CLAUDE.md block
@@ -250,6 +286,7 @@ case "$COMMAND" in
   enable)    cmd_enable "$@" ;;
   disable)   cmd_disable "$@" ;;
   update)    cmd_update ;;
+  version|--version|-V) cmd_version ;;
   uninstall) cmd_uninstall "$@" ;;
   help|--help|-h) usage ;;
   *) printf 'Unknown command: %s\n\n' "$COMMAND"; usage; exit 1 ;;

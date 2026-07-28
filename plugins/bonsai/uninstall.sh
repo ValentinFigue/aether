@@ -77,8 +77,11 @@ except json.JSONDecodeError:
 
 allow = settings.get("permissions", {}).get("allow", [])
 before = len(allow)
+# Both spellings: the hyphenated one that works, and the underscore one older
+# installs wrote before the mismatch was found.
 settings.setdefault("permissions", {})["allow"] = [
-    e for e in allow if e not in ("mcp__bonsai_py__*", "mcp__bonsai_ts__*")
+    e for e in allow if e not in ("mcp__bonsai-py__*", "mcp__bonsai-ts__*",
+                                  "mcp__bonsai_py__*", "mcp__bonsai_ts__*")
 ]
 removed_count = before - len(settings["permissions"]["allow"])
 

@@ -59,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/ValentinFigue/aether/main/install.s
 |---|---|
 | `enforce-suite.sh` | `~/.local/share/aether/enforce-suite.sh` (global) or `.claude/hooks/enforce-suite.sh` (local) |
 | Hook registration | `settings.json` — one `PreToolUse` entry, matcher `Bash\|Write\|Edit\|MultiEdit` |
-| Permissions | `settings.json` — `Bash`, `Read`, `Write`, `mcp__bonsai_py__*`, `mcp__bonsai_ts__*` |
+| Permissions | `settings.json` — `Bash`, `Read`, `Write`, `mcp__bonsai-py__*`, `mcp__bonsai-ts__*` |
 | `aether` CLI | `~/.local/bin/aether` |
 | CLAUDE.md block | injected with `--claude-md` flag |
 | Install manifest | `~/.claude/aether.manifest` |

@@ -142,10 +142,16 @@ if os.path.exists(settings_path):
 
 allow = settings.setdefault("permissions", {}).setdefault("allow", [])
 added = []
-for entry in ["mcp__bonsai_py__*", "mcp__bonsai_ts__*"]:
+# The servers register as bonsai-py / bonsai-ts, so their tools are named
+# mcp__bonsai-py__* with hyphens. The underscore spelling used here previously
+# matched no tool at all, so the permission was silently inert.
+for entry in ["mcp__bonsai-py__*", "mcp__bonsai-ts__*"]:
     if entry not in allow:
         allow.append(entry)
         added.append(entry)
+for dead in ("mcp__bonsai_py__*", "mcp__bonsai_ts__*"):
+    while dead in allow:
+        allow.remove(dead)
 
 os.makedirs(os.path.dirname(settings_path), exist_ok=True)
 tmp = settings_path + ".tmp"

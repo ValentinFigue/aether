@@ -42,7 +42,10 @@ def _install(command: str, settings_path: Path) -> None:
     tmp.write_text(json.dumps(claude_json, indent=2) + "\n")
     os.replace(tmp, claude_json_path)
 
-    # Write mcp__bonsai_py__* permission to ~/.claude/settings.json
+    # Write the mcp__bonsai-py__* permission to ~/.claude/settings.json.
+    # Hyphens, not underscores: the server registers as "bonsai-py", so its
+    # tools are named mcp__bonsai-py__pyrename and friends. The underscore
+    # spelling written previously matched nothing.
     settings: dict = {}
     if settings_path.exists():
         try:
@@ -51,8 +54,14 @@ def _install(command: str, settings_path: Path) -> None:
             logger.warning("could not parse %s, creating fresh config.", settings_path)
 
     allow = settings.setdefault("permissions", {}).setdefault("allow", [])
-    if "mcp__bonsai_py__*" not in allow:
-        allow.append("mcp__bonsai_py__*")
+    changed = False
+    if "mcp__bonsai-py__*" not in allow:
+        allow.append("mcp__bonsai-py__*")
+        changed = True
+    while "mcp__bonsai_py__*" in allow:
+        allow.remove("mcp__bonsai_py__*")
+        changed = True
+    if changed:
         tmp = settings_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(settings, indent=2) + "\n")
         os.replace(tmp, settings_path)
@@ -136,10 +145,17 @@ def _verify(settings_path: Path) -> None:
         except json.JSONDecodeError:
             settings = {}
         allow = settings.get("permissions", {}).get("allow", [])
-        if "mcp__bonsai_py__*" in allow:
+        if "mcp__bonsai-py__*" in allow:
             print(f"✓ Permissions granted in {settings_path}")
+        elif "mcp__bonsai_py__*" in allow:
+            print(
+                f"✗ {settings_path} has the old underscore spelling "
+                "'mcp__bonsai_py__*', which matches no tool — "
+                "run: python -m bonsai_python --install"
+            )
+            ok = False
         else:
-            print(f"✗ 'mcp__bonsai_py__*' not in {settings_path} — run: python -m bonsai_python --install")
+            print(f"✗ 'mcp__bonsai-py__*' not in {settings_path} — run: python -m bonsai_python --install")
             ok = False
 
     if ok:

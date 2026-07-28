@@ -74,9 +74,15 @@ if os.path.exists(settings_path):
         pass
 
 allow = settings.get("permissions", {}).get("allow", [])
-for perm in ["mcp__bonsai_py__*", "mcp__bonsai_ts__*"]:
+# Hyphens: the servers register as bonsai-py / bonsai-ts, so their tools are
+# mcp__bonsai-py__*. Flag the old underscore spelling explicitly rather than
+# just reporting it missing — it looks right at a glance but matches no tool.
+for perm in ["mcp__bonsai-py__*", "mcp__bonsai-ts__*"]:
+    legacy = perm.replace("bonsai-", "bonsai_")
     if perm in allow:
         ok(f"Permission granted: {perm}")
+    elif legacy in allow:
+        fail(f"Permission {legacy} matches no tool — re-run: bonsai install")
     else:
         fail(f"Permission missing: {perm}  (run: bonsai install)")
 

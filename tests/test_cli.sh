@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# tests/test_cli.sh — the aether CLI and the uninstall wrapper.
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+. "$REPO/tests/lib.sh"
+
+CLI="$REPO/bin/aether"
+
+FAKE_HOMES=()
+new_home() { local h; h=$(mktemp -d); FAKE_HOMES+=("$h"); printf '%s' "$h"; }
+cleanup() { for h in "${FAKE_HOMES[@]}"; do rm -rf "$h"; done; }
+trap cleanup EXIT
+
+jsonq() { python3 -c "$2" "$1" 2>/dev/null; }
+
+# ── basics ───────────────────────────────────────────────────────────────────
+suite "basics"
+out=$(bash "$CLI" version 2>&1); e=$?
+assert_exit 0 "$e" "aether version exits 0"
+assert_contains "$out" "1.0.0" "aether version reports 1.0.0"
+
+out=$(bash "$CLI" help 2>&1); e=$?
+assert_exit 0 "$e" "aether help exits 0"
+assert_contains "$out" "aether update" "help documents update"
+assert_contains "$out" "aether version" "help documents version"
+
+out=$(bash "$CLI" nonsense 2>&1); e=$?
+assert_exit 1 "$e" "unknown subcommand exits 1"
+
+# ── status against a real install ────────────────────────────────────────────
+suite "status"
+H=$(new_home)
+env HOME="$H" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+out=$(env HOME="$H" bash "$CLI" status 2>&1); e=$?
+assert_exit 0 "$e" "status exits 0"
+assert_contains "$out" "enforce-suite.sh registered" "status sees the registered hook"
+assert_contains "$out" "Gates:" "status reports the gates directory"
+assert_contains "$out" "3 loaded" "status counts the three installed gates"
+assert_contains "$out" "Clone:" "status reports the clone path"
+assert_contains "$out" "$REPO" "status resolves the clone to this checkout"
+assert_contains "$out" "Installed version: 1.0.0" "status reports the installed version"
+
+# ── enable / disable ─────────────────────────────────────────────────────────
+suite "enable / disable"
+env HOME="$H" bash "$CLI" disable global >/dev/null 2>&1
+out=$(env HOME="$H" bash "$CLI" status 2>&1)
+n=$(printf '%s' "$out" | grep -c 'disabled' || true)
+assert_eq "4" "$n" "disable global marks all four plugins disabled"
+
+# a disabled plugin's gate must actually stop firing
+FIX=$(mktemp -d); cd "$FIX" || exit 1
+git init -q .; git config user.email t@t; git config user.name t
+printf 'x\n' > f.txt; git add f.txt; git commit -qm init
+out=$(payload Bash 'git commit -m wip' | env HOME="$H" bash "$H/.local/share/aether/enforce-suite.sh" 2>&1); e=$?
+case "$out" in
+  *"Cairn nudge"*) fail "disabling cairn silences its gate at runtime" "cairn still fired" ;;
+  *) pass "disabling cairn silences its gate at runtime" ;;
+esac
+cd "$REPO" || exit 1; rm -rf "$FIX"
+
+env HOME="$H" bash "$CLI" enable global >/dev/null 2>&1
+out=$(env HOME="$H" bash "$CLI" status 2>&1)
+n=$(printf '%s' "$out" | grep -c 'enabled' || true)
+assert_eq "4" "$n" "enable global marks all four plugins enabled"
+
+# ── update error paths ───────────────────────────────────────────────────────
+# update is a git pull plus a re-run of the local installer, so it has to fail
+# clearly when the recorded clone is missing rather than half-updating.
+suite "update error paths"
+H2=$(new_home)
+mkdir -p "$H2/.claude"
+printf 'version=1.0.0\nscope=global\n' > "$H2/.claude/aether.manifest"
+out=$(env HOME="$H2" bash "$CLI" update 2>&1); e=$?
+assert_exit 1 "$e" "update fails when the manifest has no repo="
+assert_contains "$out" "predates aether 1.0.0" "update explains a pre-1.0.0 manifest"
+
+printf 'version=1.0.0\nscope=global\nrepo=/nonexistent/aether\n' > "$H2/.claude/aether.manifest"
+out=$(env HOME="$H2" bash "$CLI" update 2>&1); e=$?
+assert_exit 1 "$e" "update fails when the recorded clone is gone"
+assert_contains "$out" "no longer there" "update names the missing clone"
+
+# ── uninstall ────────────────────────────────────────────────────────────────
+suite "uninstall"
+H3=$(new_home)
+env HOME="$H3" bash "$REPO/install.sh" --global --claude-md --no-bonsai >/dev/null 2>&1
+S="$H3/.claude/settings.json"
+[ -f "$H3/.local/share/aether/gates/enforce-cairn.sh" ] \
+  && pass "gates present before uninstall" || fail "gates present before uninstall"
+
+env HOME="$H3" bash "$REPO/uninstall.sh" --global --claude-md >"$H3/un.log" 2>&1; e=$?
+assert_exit 0 "$e" "uninstall.sh wrapper exits 0"
+
+[ -e "$H3/.local/share/aether/enforce-suite.sh" ] \
+  && fail "uninstall removes enforce-suite.sh" || pass "uninstall removes enforce-suite.sh"
+[ -e "$H3/.local/share/aether/gates" ] \
+  && fail "uninstall removes the gates directory" || pass "uninstall removes the gates directory"
+[ -e "$H3/.local/bin/aether" ] \
+  && fail "uninstall removes the CLI" || pass "uninstall removes the CLI"
+[ -e "$H3/.claude/aether.manifest" ] \
+  && fail "uninstall removes the manifest" || pass "uninstall removes the manifest"
+
+pre=$(jsonq "$S" '
+import json,sys
+s=json.load(open(sys.argv[1]))
+print("\n".join(h.get("command","") for e in s.get("hooks",{}).get("PreToolUse",[]) for h in e.get("hooks",[])))')
+case "$pre" in
+  *enforce-suite*) fail "uninstall deregisters the PreToolUse hook" "still present" ;;
+  *) pass "uninstall deregisters the PreToolUse hook" ;;
+esac
+
+# The plugins stay installed for standalone use, so their PostToolUse hook and
+# their slash commands must survive an aether uninstall.
+post=$(jsonq "$S" '
+import json,sys
+s=json.load(open(sys.argv[1]))
+print("\n".join(h.get("command","") for e in s.get("hooks",{}).get("PostToolUse",[]) for h in e.get("hooks",[])))')
+assert_contains "$post" "post-cairn.sh" "uninstall leaves post-cairn.sh registered"
+[ -f "$H3/.claude/commands/cairn-commit.md" ] \
+  && pass "uninstall leaves plugin slash commands in place" \
+  || fail "uninstall leaves plugin slash commands in place"
+
+n=$(grep -c '<!-- aether:start -->' "$H3/.claude/CLAUDE.md" 2>/dev/null || true)
+assert_eq "0" "$n" "--claude-md strips the aether block"
+[ -f "$S.bak" ] && pass "uninstall backs up settings.json first" \
+                || fail "uninstall backs up settings.json first"
+
+summary

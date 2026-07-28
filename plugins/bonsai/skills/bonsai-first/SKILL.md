@@ -10,7 +10,7 @@ when_to_use: >
   change a function signature, detect dead code, or search for a pattern in
   .py, .ts, or .tsx files. Prefer bonsai AST tools over sed/awk/grep/find on
   these files — text tools miss imports, re-exports, and type references.
-allowed-tools: mcp__bonsai_py__pyrename, mcp__bonsai_py__pymove, mcp__bonsai_py__pymovesymbol, mcp__bonsai_py__pyfindrefs, mcp__bonsai_py__pycallers, mcp__bonsai_py__pyfindunused, mcp__bonsai_py__pysignature, mcp__bonsai_py__pygrep, mcp__bonsai_ts__tsrename, mcp__bonsai_ts__tsmove, mcp__bonsai_ts__tsmovesymbol, mcp__bonsai_ts__tsfindrefs, mcp__bonsai_ts__tssignature
+allowed-tools: mcp__bonsai-py__pyrename, mcp__bonsai-py__pymove, mcp__bonsai-py__pymovesymbol, mcp__bonsai-py__pyfindrefs, mcp__bonsai-py__pycallers, mcp__bonsai-py__pyfindunused, mcp__bonsai-py__pysignature, mcp__bonsai-py__pygrep, mcp__bonsai-ts__tsrename, mcp__bonsai-ts__tsmove, mcp__bonsai-ts__tsmovesymbol, mcp__bonsai-ts__tsfindrefs, mcp__bonsai-ts__tssignature
 ---
 
 # Bonsai-first: use AST tools, not text tools

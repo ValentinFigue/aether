@@ -1,0 +1,220 @@
+#!/bin/bash
+set -e
+
+GLOBAL_CONFIG="$HOME/.claude/whetstone.config"
+LOCAL_CONFIG="./whetstone.config"
+GLOBAL_COMMANDS="$HOME/.claude/commands"
+LOCAL_COMMANDS=".claude/commands"
+REMOTE_BASE="https://raw.githubusercontent.com/ValentinFigue/whetstone/main"
+
+usage() {
+  cat << 'EOF'
+whetstone — manage your /autocritic install
+
+Usage:
+  whetstone status                          Show install state and effective config
+  whetstone enable  [local|global]          Enable whetstone (default: local)
+  whetstone disable [local|global]          Disable whetstone
+  whetstone config set <flags> [--global]   Set default flags
+  whetstone config reset [local|global]     Remove config file
+  whetstone update                          Re-download latest autocritic.md
+  whetstone uninstall [local|global] [--claude-md]  Remove command + optionally CLAUDE.md section
+  whetstone help                            Show this message
+
+Config flags (for 'config set'):
+  --only=impl,arch,risk    Run only these critics
+  --skip=arch              Exclude these critics
+  --severity=red,yellow    Show only these severity levels
+  --global                 Write to global config (~/.claude/whetstone.config)
+
+Examples:
+  whetstone config set --only=risk
+  whetstone config set --severity=red --global
+  whetstone config reset local
+  whetstone uninstall global --claude-md
+EOF
+}
+
+# Read a key from a config file
+config_get() {
+  local file="$1" key="$2"
+  [ -f "$file" ] && grep "^$key:" "$file" | sed "s/^$key: *//" || true
+}
+
+# Set a key in a config file (create or update)
+config_set_key() {
+  local file="$1" key="$2" value="$3"
+  if [ -f "$file" ] && grep -q "^$key:" "$file"; then
+    awk -v k="$key" -v v="$value" '$0 ~ "^"k":" {print k": "v; next} {print}' \
+      "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+  else
+    echo "$key: $value" >> "$file"
+  fi
+}
+
+cmd_status() {
+  echo "Install:"
+  if [ -f "$GLOBAL_COMMANDS/autocritic.md" ]; then
+    echo "  ~/.claude/commands/autocritic.md    installed"
+  else
+    echo "  ~/.claude/commands/autocritic.md    not installed"
+  fi
+  if [ -f "$LOCAL_COMMANDS/autocritic.md" ]; then
+    echo "  .claude/commands/autocritic.md      installed"
+  else
+    echo "  .claude/commands/autocritic.md      not installed"
+  fi
+  echo ""
+
+  echo "Global config ($GLOBAL_CONFIG):"
+  if [ -f "$GLOBAL_CONFIG" ]; then
+    sed 's/^/  /' "$GLOBAL_CONFIG"
+  else
+    echo "  (none)"
+  fi
+  echo ""
+
+  echo "Local config ($LOCAL_CONFIG):"
+  if [ -f "$LOCAL_CONFIG" ]; then
+    sed 's/^/  /' "$LOCAL_CONFIG"
+  else
+    echo "  (none)"
+  fi
+  echo ""
+
+  # Merge: local overrides global
+  local enabled critics skip severity
+  enabled=$(config_get "$GLOBAL_CONFIG" "enabled"); enabled=$(config_get "$LOCAL_CONFIG" "enabled" || echo "$enabled")
+  critics=$(config_get "$GLOBAL_CONFIG" "critics"); local lc; lc=$(config_get "$LOCAL_CONFIG" "critics"); [ -n "$lc" ] && critics="$lc"
+  skip=$(config_get "$GLOBAL_CONFIG" "skip");       local ls; ls=$(config_get "$LOCAL_CONFIG" "skip");    [ -n "$ls" ] && skip="$ls"
+  severity=$(config_get "$GLOBAL_CONFIG" "severity"); local lsev; lsev=$(config_get "$LOCAL_CONFIG" "severity"); [ -n "$lsev" ] && severity="$lsev"
+
+  echo "Effective config:"
+  echo "  enabled:  ${enabled:-true}"
+  echo "  critics:  ${critics:-(all defaults: impl, arch, risk)}"
+  [ -n "$skip" ] && echo "  skip:     $skip"
+  echo "  severity: ${severity:-(all: red, yellow, green)}"
+}
+
+cmd_enable() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  config_set_key "$target" "enabled" "true"
+  echo "✓ whetstone enabled ($target)"
+}
+
+cmd_disable() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  config_set_key "$target" "enabled" "false"
+  echo "✓ whetstone disabled ($target)"
+}
+
+cmd_config_set() {
+  local target="$LOCAL_CONFIG"
+  local critics="" skip="" severity=""
+
+  for arg in "$@"; do
+    case "$arg" in
+      --global)      target="$GLOBAL_CONFIG" ;;
+      --only=*)      critics="${arg#--only=}" ;;
+      --skip=*)      skip="${arg#--skip=}" ;;
+      --severity=*)  severity="${arg#--severity=}" ;;
+    esac
+  done
+
+  if [ -z "$critics$skip$severity" ]; then
+    echo "No flags provided. Use --only=, --skip=, or --severity="
+    exit 1
+  fi
+
+  [ -n "$critics" ]  && config_set_key "$target" "critics"  "$critics"  && echo "✓ critics:  $critics"
+  [ -n "$skip" ]     && config_set_key "$target" "skip"     "$skip"     && echo "✓ skip:     $skip"
+  [ -n "$severity" ] && config_set_key "$target" "severity" "$severity" && echo "✓ severity: $severity"
+  echo "  Written to $target"
+}
+
+cmd_config_reset() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  if [ -f "$target" ]; then
+    rm "$target"
+    echo "✓ Removed $target"
+  else
+    echo "  $target not found — nothing to reset"
+  fi
+}
+
+cmd_update() {
+  local updated=0
+  for target in "$GLOBAL_COMMANDS/autocritic.md" "$LOCAL_COMMANDS/autocritic.md"; do
+    if [ -f "$target" ]; then
+      curl -fsSL -o "$target" "$REMOTE_BASE/.claude/commands/autocritic.md"
+      echo "✓ Updated $target"
+      updated=$((updated + 1))
+    fi
+  done
+  [ "$updated" -eq 0 ] && echo "No autocritic.md found. Run install.sh first." && exit 1
+  true
+}
+
+cmd_uninstall() {
+  local scope="local"
+  local clean_claude_md=false
+
+  for arg in "$@"; do
+    case "$arg" in
+      global)       scope="global" ;;
+      --claude-md)  clean_claude_md=true ;;
+    esac
+  done
+
+  local commands_dir claude_file
+  if [ "$scope" = "global" ]; then
+    commands_dir="$GLOBAL_COMMANDS"
+    claude_file="$HOME/.claude/CLAUDE.md"
+  else
+    commands_dir="$LOCAL_COMMANDS"
+    claude_file="./CLAUDE.md"
+  fi
+
+  if [ -f "$commands_dir/autocritic.md" ]; then
+    rm "$commands_dir/autocritic.md"
+    echo "✓ Removed $commands_dir/autocritic.md"
+  else
+    echo "  $commands_dir/autocritic.md not found"
+  fi
+
+  if [ "$clean_claude_md" = true ]; then
+    if [ -f "$claude_file" ] && grep -q "<!-- whetstone:start -->" "$claude_file"; then
+      awk '/<!-- whetstone:start -->/{skip=1} !skip{print} /<!-- whetstone:end -->/{skip=0}' \
+        "$claude_file" > "$claude_file.tmp" && mv "$claude_file.tmp" "$claude_file"
+      echo "✓ Removed whetstone section from $claude_file"
+    else
+      echo "  No whetstone section found in $claude_file"
+    fi
+  fi
+
+  echo ""
+  echo "Restart Claude Code to apply changes."
+}
+
+COMMAND="${1:-help}"
+shift || true
+
+case "$COMMAND" in
+  status)    cmd_status ;;
+  enable)    cmd_enable "$@" ;;
+  disable)   cmd_disable "$@" ;;
+  config)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      set)   cmd_config_set "$@" ;;
+      reset) cmd_config_reset "$@" ;;
+      *)     echo "Unknown subcommand: config $SUB"; echo ""; usage; exit 1 ;;
+    esac ;;
+  update)    cmd_update ;;
+  uninstall) cmd_uninstall "$@" ;;
+  help|--help|-h) usage ;;
+  *) echo "Unknown command: $COMMAND"; echo ""; usage; exit 1 ;;
+esac

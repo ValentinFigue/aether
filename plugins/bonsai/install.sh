@@ -4,11 +4,20 @@ set -e
 # ── options ────────────────────────────────────────────────────────────────────
 INJECT_CLAUDE_MD=false
 PUBLISHED=false        # set to true once bonsai-py is on PyPI and bonsai-ts is on npm
+SUITE=false            # set by aether's installer; skips the PreToolUse hook
 for arg in "$@"; do
   case "$arg" in
     --claude-md) INJECT_CLAUDE_MD=true ;;
     --published) PUBLISHED=true ;;
-    *) echo "Unknown option: $arg"; echo "Usage: $0 [--claude-md] [--published]"; exit 1 ;;
+    # Invoked by the aether suite installer: enforce-suite.sh sources this
+    # gate from ~/.local/share/aether/gates/, so skip the PreToolUse
+    # registration. The PostToolUse reference-drift hook still installs —
+    # the suite hook has no equivalent for it.
+    --suite)     SUITE=true ;;
+    # aether passes `global` through to the other three installers; accept and
+    # ignore it here so a shared invocation loop does not trip this parser.
+    global)      ;;
+    *) echo "Unknown option: $arg"; echo "Usage: $0 [--claude-md] [--published] [--suite]"; exit 1 ;;
   esac
 done
 
@@ -160,11 +169,12 @@ PRE_HOOK_SCRIPT="$REPO_ROOT/hooks/enforce-bonsai.sh"
 POST_HOOK_SCRIPT="$REPO_ROOT/hooks/post-bonsai.sh"
 chmod +x "$PRE_HOOK_SCRIPT" "$POST_HOOK_SCRIPT"
 
-python3 - "$PRE_HOOK_SCRIPT" "$POST_HOOK_SCRIPT" <<'PYEOF'
+python3 - "$PRE_HOOK_SCRIPT" "$POST_HOOK_SCRIPT" "$SUITE" <<'PYEOF'
 import json, os, sys
 
 pre_script  = sys.argv[1]
 post_script = sys.argv[2]
+suite       = sys.argv[3] == "true"
 settings_path = os.path.expanduser("~/.claude/settings.json")
 settings = {}
 if os.path.exists(settings_path):
@@ -188,7 +198,11 @@ pre[:] = [
         )
     )
 ]
-pre.append({"matcher": "Bash", "hooks": [{"type": "command", "command": pre_script}]})
+# Under --suite the stale-strip above still runs (clearing any hook left by a
+# previous standalone install) but nothing is re-added: enforce-suite.sh owns
+# the PreToolUse phase and sources this gate itself.
+if not suite:
+    pre.append({"matcher": "Bash", "hooks": [{"type": "command", "command": pre_script}]})
 
 # PostToolUse — reference-drift nudge hook
 post = settings.setdefault("hooks", {}).setdefault("PostToolUse", [])
@@ -210,7 +224,10 @@ with open(tmp, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")
 os.replace(tmp, settings_path)
-print("  ✓ PreToolUse Bash nudge hook registered (enforce-bonsai.sh)")
+if suite:
+    print("  ✓ PreToolUse Bash nudge gate deferred to enforce-suite.sh")
+else:
+    print("  ✓ PreToolUse Bash nudge hook registered (enforce-bonsai.sh)")
 print("  ✓ PostToolUse reference-drift hook registered (post-bonsai.sh)")
 PYEOF
 
@@ -240,7 +257,7 @@ if ! command -v bonsai &>/dev/null; then
 fi
 
 # ── CLAUDE.md injection ────────────────────────────────────────────────────────
-if [ "$INJECT_CLAUDE_MD" = true ]; then
+if [ "$INJECT_CLAUDE_MD" = true ] && [ "$SUITE" = false ]; then
   echo ""
   echo "==> Injecting bonsai guidance into ~/.claude/CLAUDE.md"
 
@@ -260,7 +277,7 @@ fi
 # ── done ───────────────────────────────────────────────────────────────────────
 echo ""
 echo "Done. Restart Claude Code to load the MCP servers."
-if [ "$INJECT_CLAUDE_MD" = false ]; then
+if [ "$INJECT_CLAUDE_MD" = false ] && [ "$SUITE" = false ]; then
   echo "Tip: run './install.sh --claude-md' to also add bonsai guidance to ~/.claude/CLAUDE.md"
 fi
 echo "Run 'bonsai status' to verify the installation."

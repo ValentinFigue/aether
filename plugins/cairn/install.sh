@@ -3,11 +3,20 @@ set -e
 
 MODE="local"
 WITH_CLAUDE_MD=false
+SUITE=false
+
+# Resolved from BASH_SOURCE rather than $0 so the script still finds its own
+# assets when invoked as `bash plugins/cairn/install.sh` from the repo root.
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 for arg in "$@"; do
   case "$arg" in
     global) MODE="global" ;;
     --claude-md) WITH_CLAUDE_MD=true ;;
+    # Invoked by the aether suite installer: enforce-suite.sh supersedes the
+    # PreToolUse hook and templates/CLAUDE.md supersedes the cairn block, so
+    # skip both. Commands, CLI and the PostToolUse hook still install.
+    --suite) SUITE=true ;;
   esac
 done
 
@@ -164,9 +173,7 @@ PYEOF
 # Install command files
 mkdir -p "$COMMANDS_DIR"
 for name in $ALL_COMMANDS; do
-  curl -fsSL \
-    -o "$COMMANDS_DIR/$name" \
-    "https://raw.githubusercontent.com/ValentinFigue/cairn/main/.claude/commands/$name"
+  cp "$REPO_DIR/.claude/commands/$name" "$COMMANDS_DIR/$name"
   cmd_name="${name%.md}"
   echo "✓ /$cmd_name installed to $COMMANDS_DIR"
 done
@@ -185,14 +192,13 @@ else
 fi
 
 # Optionally inject documentation rules into CLAUDE.md
-if [ "$WITH_CLAUDE_MD" = true ]; then
+if [ "$WITH_CLAUDE_MD" = true ] && [ "$SUITE" = false ]; then
   MARKER="<!-- cairn:start -->"
 
   if [ -f "$CLAUDE_FILE" ] && grep -q "$MARKER" "$CLAUDE_FILE"; then
     echo "✓ $CLAUDE_FILE already contains cairn section — skipped"
   else
-    TEMPLATE=$(curl -fsSL \
-      "https://raw.githubusercontent.com/ValentinFigue/cairn/main/templates/CLAUDE.md")
+    TEMPLATE=$(cat "$REPO_DIR/templates/CLAUDE.md")
     {
       printf "\n"
       echo "<!-- cairn:start -->"
@@ -207,9 +213,7 @@ fi
 if [ "$MODE" = "global" ]; then
   CLI_DIR="$HOME/.local/bin"
   mkdir -p "$CLI_DIR"
-  curl -fsSL \
-    -o "$CLI_DIR/cairn" \
-    "https://raw.githubusercontent.com/ValentinFigue/cairn/main/bin/cairn"
+  cp "$REPO_DIR/bin/cairn" "$CLI_DIR/cairn"
   chmod +x "$CLI_DIR/cairn"
   echo "✓ cairn CLI installed to $CLI_DIR/cairn"
 
@@ -217,41 +221,44 @@ if [ "$MODE" = "global" ]; then
     echo "  Note: add $CLI_DIR to your PATH to use the 'cairn' command"
   fi
 
-  # Install enforce-cairn hook (PreToolUse)
   HOOK_DIR="$HOME/.local/share/cairn"
   HOOK_FILE="$HOOK_DIR/enforce-cairn.sh"
   POST_HOOK_FILE="$HOOK_DIR/post-cairn.sh"
   mkdir -p "$HOOK_DIR"
-  curl -fsSL \
-    -o "$HOOK_FILE" \
-    "https://raw.githubusercontent.com/ValentinFigue/cairn/main/hooks/enforce-cairn.sh"
-  chmod +x "$HOOK_FILE"
-  echo "✓ enforce-cairn hook installed to $HOOK_FILE"
-
-  # Install post-cairn hook (PostToolUse)
-  curl -fsSL \
-    -o "$POST_HOOK_FILE" \
-    "https://raw.githubusercontent.com/ValentinFigue/cairn/main/hooks/post-cairn.sh"
-  chmod +x "$POST_HOOK_FILE"
-  echo "✓ post-cairn hook installed to $POST_HOOK_FILE"
 
   GLOBAL_SETTINGS="$HOME/.claude/settings.json"
-  if [ ! -f "$GLOBAL_SETTINGS" ]; then
-    printf '{\n  "hooks": {\n    "PreToolUse": [{\n      "matcher": "Bash",\n      "hooks": [{"type": "command", "command": "%s"}]\n    }],\n    "PostToolUse": [{\n      "matcher": "Bash|Write|Edit",\n      "hooks": [{"type": "command", "command": "%s"}]\n    }]\n  }\n}\n' "$HOOK_FILE" "$POST_HOOK_FILE" > "$GLOBAL_SETTINGS"
-    echo "✓ Hooks registered in $GLOBAL_SETTINGS"
-  else
+  mkdir -p "$(dirname "$GLOBAL_SETTINGS")"
+  [ -f "$GLOBAL_SETTINGS" ] || printf '{}\n' > "$GLOBAL_SETTINGS"
+
+  # PreToolUse — skipped under --suite: enforce-suite.sh sources this gate
+  # directly from ~/.local/share/aether/gates/, so a second registration would
+  # fire the same checks twice.
+  if [ "$SUITE" = false ]; then
+    cp "$REPO_DIR/hooks/enforce-cairn.sh" "$HOOK_FILE"
+    chmod +x "$HOOK_FILE"
+    echo "✓ enforce-cairn hook installed to $HOOK_FILE"
+
     if _json_add_hook "$GLOBAL_SETTINGS" "$HOOK_FILE" > "$GLOBAL_SETTINGS.tmp" && mv "$GLOBAL_SETTINGS.tmp" "$GLOBAL_SETTINGS"; then
       echo "✓ PreToolUse hook registered in $GLOBAL_SETTINGS"
     else
+      rm -f "$GLOBAL_SETTINGS.tmp"
       echo "  Could not register PreToolUse hook automatically (install python3, node, or jq)."
       echo "  Add a PreToolUse Bash hook pointing to $HOOK_FILE manually."
     fi
-    if _json_add_post_hook "$GLOBAL_SETTINGS" "$POST_HOOK_FILE" > "$GLOBAL_SETTINGS.tmp" && mv "$GLOBAL_SETTINGS.tmp" "$GLOBAL_SETTINGS"; then
-      echo "✓ PostToolUse hook registered in $GLOBAL_SETTINGS"
-    else
-      echo "  Could not register PostToolUse hook automatically (install python3, node, or jq)."
-      echo "  Add a PostToolUse Bash|Write|Edit hook pointing to $POST_HOOK_FILE manually."
-    fi
+  fi
+
+  # PostToolUse — always installed. The suite hook is PreToolUse-only and has
+  # no equivalent for the post-temper and version-bump nudges.
+  cp "$REPO_DIR/hooks/post-cairn.sh" "$POST_HOOK_FILE"
+  chmod +x "$POST_HOOK_FILE"
+  echo "✓ post-cairn hook installed to $POST_HOOK_FILE"
+
+  if _json_add_post_hook "$GLOBAL_SETTINGS" "$POST_HOOK_FILE" > "$GLOBAL_SETTINGS.tmp" && mv "$GLOBAL_SETTINGS.tmp" "$GLOBAL_SETTINGS"; then
+    echo "✓ PostToolUse hook registered in $GLOBAL_SETTINGS"
+  else
+    rm -f "$GLOBAL_SETTINGS.tmp"
+    echo "  Could not register PostToolUse hook automatically (install python3, node, or jq)."
+    echo "  Add a PostToolUse Bash|Write|Edit hook pointing to $POST_HOOK_FILE manually."
   fi
 fi
 

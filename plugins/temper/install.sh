@@ -4,12 +4,16 @@ set -e
 MODE="local"
 WITH_CLAUDE_MD=false
 WITH_PROACTIVE=true
+SUITE=false
 
 for arg in "$@"; do
   case "$arg" in
     global)              MODE="global" ;;
     --claude-md)         WITH_CLAUDE_MD=true ;;
     --no-proactive)      WITH_PROACTIVE=false ;;
+    # Invoked by the aether suite installer: enforce-suite.sh supersedes the
+    # PreToolUse hook and templates/CLAUDE.md supersedes the temper block.
+    --suite)             SUITE=true ;;
   esac
 done
 
@@ -23,8 +27,12 @@ else
   CLAUDE_FILE="./CLAUDE.md"
 fi
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+# BASH_SOURCE rather than $0 so the script resolves its own assets when invoked
+# as `bash plugins/temper/install.sh` from the repo root.
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
+# Adds permissions, and registers the PreToolUse hook unless hook_path is empty
+# (suite mode registers enforce-suite.sh instead).
 _json_add_perms_and_hook() {
   local file="$1"
   local hook_path="$2"
@@ -49,7 +57,7 @@ for p in ["Read", "Write", "Bash"]:
 hooks = s.setdefault("hooks", {})
 pre = hooks.setdefault("PreToolUse", [])
 existing = [h for h in pre if isinstance(h, dict) and "temper" in str(h.get("hooks", []))]
-if not existing:
+if hook_path and not existing:
     pre.insert(0, {
         "matcher": "Bash",
         "hooks": [{
@@ -71,7 +79,7 @@ for (const p of ["Read", "Write", "Bash"]) {
 s.hooks = s.hooks || {};
 s.hooks.PreToolUse = s.hooks.PreToolUse || [];
 const existing = s.hooks.PreToolUse.filter(h => h && JSON.stringify(h).includes("temper"));
-if (!existing.length) {
+if (hookPath && !existing.length) {
   s.hooks.PreToolUse.unshift({ matcher: "Bash", hooks: [{ type: "command", command: hookPath }] });
 }
 process.stdout.write(JSON.stringify(s, null, 2) + "\n");
@@ -79,7 +87,9 @@ JSEOF
     elif command -v jq &>/dev/null; then
       jq --arg hp "$hook_path" '
         .permissions.allow |= (. + ["Read","Write","Bash"] | unique) |
-        .hooks.PreToolUse |= (. // [] | if any(tostring | contains("temper")) then . else [{"matcher":"Bash","hooks":[{"type":"command","command":$hp}]}] + . end)
+        (if $hp == "" then .
+         else .hooks.PreToolUse |= (. // [] | if any(tostring | contains("temper")) then . else [{"matcher":"Bash","hooks":[{"type":"command","command":$hp}]}] + . end)
+         end)
       ' "$file"
     else
       return 1
@@ -93,13 +103,19 @@ mkdir -p "$COMMANDS_DIR"
 cp "$REPO_DIR/.claude/commands/temper.md" "$COMMANDS_DIR/temper.md"
 echo "✓ /temper installed to $COMMANDS_DIR"
 
-# Install hook
-HOOKS_DEST="$SETTINGS_DIR/hooks"
-mkdir -p "$HOOKS_DEST"
-cp "$REPO_DIR/hooks/enforce-temper.sh" "$HOOKS_DEST/enforce-temper.sh"
-chmod +x "$HOOKS_DEST/enforce-temper.sh"
-HOOK_PATH="$HOOKS_DEST/enforce-temper.sh"
-echo "✓ enforce-temper.sh installed to $HOOK_PATH"
+# Install hook. Skipped under --suite: enforce-suite.sh sources this gate
+# directly from ~/.local/share/aether/gates/, so registering it here too would
+# double-fire every temper check. An empty HOOK_PATH tells the JSON helper
+# below to add permissions only.
+HOOK_PATH=""
+if [ "$SUITE" = false ]; then
+  HOOKS_DEST="$SETTINGS_DIR/hooks"
+  mkdir -p "$HOOKS_DEST"
+  cp "$REPO_DIR/hooks/enforce-temper.sh" "$HOOKS_DEST/enforce-temper.sh"
+  chmod +x "$HOOKS_DEST/enforce-temper.sh"
+  HOOK_PATH="$HOOKS_DEST/enforce-temper.sh"
+  echo "✓ enforce-temper.sh installed to $HOOK_PATH"
+fi
 
 # Inject permissions + hook into settings.json
 SETTINGS_FILE="$SETTINGS_DIR/settings.json"
@@ -110,14 +126,19 @@ if [ ! -f "$SETTINGS_FILE" ]; then
 fi
 
 if _json_add_perms_and_hook "$SETTINGS_FILE" "$HOOK_PATH" > "$SETTINGS_FILE.tmp" && mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"; then
-  echo "✓ Permissions (Read, Write, Bash) and enforce-temper hook added to $SETTINGS_FILE"
+  if [ -n "$HOOK_PATH" ]; then
+    echo "✓ Permissions (Read, Write, Bash) and enforce-temper hook added to $SETTINGS_FILE"
+  else
+    echo "✓ Permissions (Read, Write, Bash) added to $SETTINGS_FILE"
+  fi
 else
+  rm -f "$SETTINGS_FILE.tmp"
   echo "  Could not update $SETTINGS_FILE automatically (install python3, node, or jq)."
-  echo "  Manually add permissions and register the hook at: $HOOK_PATH"
+  echo "  Manually add permissions${HOOK_PATH:+ and register the hook at: $HOOK_PATH}"
 fi
 
 # Optionally inject code review discipline into CLAUDE.md
-if [ "$WITH_CLAUDE_MD" = true ]; then
+if [ "$WITH_CLAUDE_MD" = true ] && [ "$SUITE" = false ]; then
   MARKER="<!-- temper:start -->"
 
   if [ "$WITH_PROACTIVE" = false ]; then
@@ -159,5 +180,5 @@ else
   echo "  With proactive CLAUDE.md rules:   bash install.sh --claude-md"
   echo "  Global + proactive rules:         bash install.sh global --claude-md"
   echo "  Disable proactive suggestions:    bash install.sh --claude-md --no-proactive"
-  echo "  One-liner (no clone needed):      curl -fsSL https://raw.githubusercontent.com/ValentinFigue/temper/main/install.sh | bash -s global"
+  echo "  Whole suite instead of just this: bash ../../install.sh --global --claude-md"
 fi

@@ -3,11 +3,19 @@ set -e
 
 MODE="local"
 WITH_CLAUDE_MD=false
+SUITE=false
+
+# Resolved from BASH_SOURCE rather than $0 so the script still finds its own
+# assets when invoked as `bash plugins/whetstone/install.sh` from the repo root.
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 for arg in "$@"; do
   case "$arg" in
     global) MODE="global" ;;
     --claude-md) WITH_CLAUDE_MD=true ;;
+    # Invoked by the aether suite installer: enforce-suite.sh supersedes the
+    # PreToolUse hook and templates/CLAUDE.md supersedes the whetstone block.
+    --suite) SUITE=true ;;
   esac
 done
 
@@ -100,9 +108,7 @@ JSEOF
 
 # Install command file
 mkdir -p "$COMMANDS_DIR"
-curl -fsSL \
-  -o "$COMMANDS_DIR/autocritic.md" \
-  "https://raw.githubusercontent.com/ValentinFigue/whetstone/main/.claude/commands/autocritic.md"
+cp "$REPO_DIR/.claude/commands/autocritic.md" "$COMMANDS_DIR/autocritic.md"
 echo "✓ /autocritic installed to $COMMANDS_DIR"
 
 # Inject Read + Write permissions into settings.json
@@ -118,42 +124,43 @@ else
   echo "  Add \"Read\" and \"Write\" to permissions.allow manually."
 fi
 
-# Install enforce-whetstone.sh hook
-HOOKS_DIR="$SETTINGS_DIR/hooks"
-if [ "$MODE" = "global" ]; then
-  HOOK_PATH="$HOME/.claude/hooks/enforce-whetstone.sh"
-else
-  HOOK_PATH=".claude/hooks/enforce-whetstone.sh"
-fi
-mkdir -p "$HOOKS_DIR"
-curl -fsSL \
-  -o "$HOOKS_DIR/enforce-whetstone.sh" \
-  "https://raw.githubusercontent.com/ValentinFigue/whetstone/main/hooks/enforce-whetstone.sh"
-chmod +x "$HOOKS_DIR/enforce-whetstone.sh"
-echo "✓ enforce-whetstone.sh installed to $HOOKS_DIR"
+# Install and register enforce-whetstone.sh hook.
+# Skipped under --suite: enforce-suite.sh sources this gate directly from
+# ~/.local/share/aether/gates/, so a second registration would double-fire it.
+if [ "$SUITE" = false ]; then
+  HOOKS_DIR="$SETTINGS_DIR/hooks"
+  if [ "$MODE" = "global" ]; then
+    HOOK_PATH="$HOME/.claude/hooks/enforce-whetstone.sh"
+  else
+    HOOK_PATH=".claude/hooks/enforce-whetstone.sh"
+  fi
+  mkdir -p "$HOOKS_DIR"
+  cp "$REPO_DIR/hooks/enforce-whetstone.sh" "$HOOKS_DIR/enforce-whetstone.sh"
+  chmod +x "$HOOKS_DIR/enforce-whetstone.sh"
+  echo "✓ enforce-whetstone.sh installed to $HOOKS_DIR"
 
-# Register hook in settings.json
-if _json_add_hook "$SETTINGS_FILE" "$HOOK_PATH" > "$SETTINGS_FILE.tmp" && mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"; then
-  echo "✓ PreToolUse hook registered in $SETTINGS_FILE"
-else
-  echo "  Could not register hook in $SETTINGS_FILE automatically (install python3, node, or jq)."
-  echo "  Add enforce-whetstone.sh to hooks.PreToolUse manually."
+  if _json_add_hook "$SETTINGS_FILE" "$HOOK_PATH" > "$SETTINGS_FILE.tmp" && mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"; then
+    echo "✓ PreToolUse hook registered in $SETTINGS_FILE"
+  else
+    rm -f "$SETTINGS_FILE.tmp"
+    echo "  Could not register hook in $SETTINGS_FILE automatically (install python3, node, or jq)."
+    echo "  Add enforce-whetstone.sh to hooks.PreToolUse manually."
+  fi
 fi
 
 # Optionally inject planning discipline into CLAUDE.md
-if [ "$WITH_CLAUDE_MD" = true ]; then
+if [ "$WITH_CLAUDE_MD" = true ] && [ "$SUITE" = false ]; then
   MARKER="<!-- whetstone:start -->"
 
   if [ -f "$CLAUDE_FILE" ] && grep -q "$MARKER" "$CLAUDE_FILE"; then
     echo "✓ $CLAUDE_FILE already contains whetstone section — skipped"
   else
-    TEMPLATE=$(curl -fsSL \
-      "https://raw.githubusercontent.com/ValentinFigue/whetstone/main/templates/CLAUDE.md")
+    # templates/CLAUDE.md already carries its own start/end sentinels on the
+    # first and last lines — echoing them here too produced a duplicated
+    # <!-- whetstone:start --> in the output file.
     {
       printf "\n"
-      echo "<!-- whetstone:start -->"
-      echo "$TEMPLATE"
-      echo "<!-- whetstone:end -->"
+      cat "$REPO_DIR/templates/CLAUDE.md"
     } >> "$CLAUDE_FILE"
     echo "✓ Planning discipline added to $CLAUDE_FILE"
   fi
@@ -163,9 +170,7 @@ fi
 if [ "$MODE" = "global" ]; then
   CLI_DIR="$HOME/.local/bin"
   mkdir -p "$CLI_DIR"
-  curl -fsSL \
-    -o "$CLI_DIR/whetstone" \
-    "https://raw.githubusercontent.com/ValentinFigue/whetstone/main/bin/whetstone"
+  cp "$REPO_DIR/bin/whetstone" "$CLI_DIR/whetstone"
   chmod +x "$CLI_DIR/whetstone"
   echo "✓ whetstone CLI installed to $CLI_DIR/whetstone"
 

@@ -9,27 +9,25 @@
 # Bash treats it as a comment and ignores it at runtime.
 # Exit 1 = allow the command but show the nudge as informational context.
 # Exit 0 = allow silently.
+#
+# Dual mode. Standalone, the entrypoint at the bottom reads stdin and exits.
+# Under the aether suite, enforce-suite.sh sources this file with SUITE_MODE=1
+# and calls gate_bonsai with $cmd_or_path already parsed.
 
-set -euo pipefail
+# ── Gate ─────────────────────────────────────────────────────────────────────
+# Reads: $cmd_or_path.  Returns: 1 to nudge, 0 to stay silent.
+gate_bonsai() {
+  local cmd="${cmd_or_path:-}"
+  [ -z "$cmd" ] && return 0
 
-input=$(cat)
+  # Bypass marker
+  if printf '%s' "$cmd" | grep -qE '# *(bonsai|suite):skip'; then
+    return 0
+  fi
 
-# If python3 fails for any reason (empty stdin, parse error), allow silently.
-cmd=$(printf '%s' "$input" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-print(data.get('tool_input', {}).get('command', ''))
-" 2>/dev/null) || exit 0
-
-[ -z "$cmd" ] && exit 0
-
-# Bypass marker
-if printf '%s' "$cmd" | grep -qE '# *(bonsai|suite):skip'; then
-  exit 0
-fi
-
-# Classify the command into one of three operation types
-result=$(python3 - "$cmd" <<'PYEOF'
+  # Classify the command into one of three operation types
+  local result
+  result=$(python3 - "$cmd" <<'PYEOF'
 import re, sys
 cmd = sys.argv[1]
 
@@ -58,21 +56,21 @@ elif SEARCH_RE.search(cmd) and has_src:
 else:
     print("none")
 PYEOF
-) || exit 0
+) || return 0
 
-case "$result" in
-  search)
-    cat <<'MSG'
+  case "$result" in
+    search)
+      cat <<'MSG'
 Bonsai nudge — searching source files:
   grep/rg on .py   →  pyfindrefs <symbol>  or  pygrep <pattern> (AST-aware, follows re-exports)
   grep/rg on .ts   →  tsfindrefs <symbol>  (catches type references grep misses)
   looking for dead code?  →  pyfindunused
 Append  # bonsai:skip  if you need raw text search.
 MSG
-    exit 1
-    ;;
-  mutate)
-    cat <<'MSG'
+      return 1
+      ;;
+    mutate)
+      cat <<'MSG'
 Bonsai nudge — mutating source files with a text tool:
   sed/perl rename  →  pyrename <old> <new>  or  tsrename (safe: updates imports, types, re-exports)
   sed signature    →  pysignature / tssignature (propagates call-site changes)
@@ -80,10 +78,10 @@ Bonsai nudge — mutating source files with a text tool:
   Always dry-run first: pyrename --dry-run <old> <new>
 Append  # bonsai:skip  if bonsai has no equivalent for your operation.
 MSG
-    exit 1
-    ;;
-  move)
-    cat <<'MSG'
+      return 1
+      ;;
+    move)
+      cat <<'MSG'
 Bonsai nudge — moving or copying a source file:
   mv / git mv .py  →  pymove <src> <dst>   (rewrites all import paths automatically)
   mv / git mv .ts  →  tsmove <src> <dst>
@@ -91,9 +89,29 @@ Bonsai nudge — moving or copying a source file:
   Always dry-run first: pymove --dry-run <src> <dst>
 Append  # bonsai:skip  if this is a new/untracked file with no importers.
 MSG
-    exit 1
-    ;;
-  *)
-    exit 0
-    ;;
-esac
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+# ── Standalone entrypoint ────────────────────────────────────────────────────
+# Skipped when sourced by enforce-suite.sh. `set -e` lives here rather than at
+# file scope so sourcing cannot change the caller's shell options.
+if [ -z "${SUITE_MODE:-}" ]; then
+  set -euo pipefail
+
+  input=$(cat)
+
+  # If python3 fails for any reason (empty stdin, parse error), allow silently.
+  cmd_or_path=$(printf '%s' "$input" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(data.get('tool_input', {}).get('command', ''))
+" 2>/dev/null) || exit 0
+
+  gate_bonsai
+  exit $?
+fi

@@ -9,26 +9,25 @@
 # Bypass: append  # cairn:skip  or  # suite:skip  to silence.
 # Exit 1 = show nudge (non-blocking).
 # Exit 0 = allow silently.
+#
+# Dual mode. Standalone, the entrypoint at the bottom reads stdin and exits.
+# Under the aether suite, enforce-suite.sh sources this file with SUITE_MODE=1
+# and calls gate_cairn with $cmd_or_path already parsed — so the gate below is
+# the single definition of cairn's rules, not a copy the suite has to mirror.
 
-set -euo pipefail
+# ── Gate ─────────────────────────────────────────────────────────────────────
+# Reads: $cmd_or_path.  Returns: 1 to nudge, 0 to stay silent.
+gate_cairn() {
+  local cmd="${cmd_or_path:-}"
+  [ -z "$cmd" ] && return 0
 
-input=$(cat)
+  # Bypass markers
+  if printf '%s' "$cmd" | grep -qE '# *(cairn|suite):skip'; then
+    return 0
+  fi
 
-cmd=$(printf '%s' "$input" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-print(data.get('tool_input', {}).get('command', ''))
-" 2>/dev/null) || exit 0
-
-[ -z "$cmd" ] && exit 0
-
-# Bypass markers
-if printf '%s' "$cmd" | grep -qE '# *(cairn|suite):skip'; then
-  exit 0
-fi
-
-# ── Classify the command ────────────────────────────────────────────────────
-result=$(python3 - "$cmd" <<'PYEOF'
+  local result
+  result=$(python3 - "$cmd" <<'PYEOF'
 import re, sys
 cmd = sys.argv[1]
 
@@ -49,8 +48,12 @@ if IS_COMMIT:
     if not has_inline_msg:
         print("commit_no_message"); sys.exit()
 
-    # Extract the inline message
-    m = re.search(r'(?:-m|--message)\s*(?:"([^"]+)"|\'([^\']+)\'|(\S+))', cmd)
+    # Extract the inline message.
+    # Apostrophes are written \x27 rather than \' on purpose: bash tracks quote
+    # state through a heredoc body when scanning $( ... ) for its closing paren,
+    # so an odd number of single quotes here breaks the whole command
+    # substitution with "syntax error near unexpected token )".
+    m = re.search(r"(?:-m|--message)\s*(?:\"([^\"]+)\"|\x27([^\x27]+)\x27|(\S+))", cmd)
     if not m:
         print("commit_no_message"); sys.exit()
     msg = (m.group(1) or m.group(2) or m.group(3) or "").strip()
@@ -90,38 +93,58 @@ if IS_COMMIT:
 
 print("none")
 PYEOF
-) || exit 0
+) || return 0
 
-case "$result" in
-  commit_weak)
-    printf '%s\n' \
-      'Cairn nudge: the commit message looks weak — /cairn-commit writes a better one.' \
-      '  Stage your changes, then:  /cairn-commit' \
-      '  It generates a Conventional Commits message from the actual diff.' \
-      '  Paste the result into:  git commit -m "<cairn output>"' \
-      '' \
-      '  Append  # cairn:skip  to commit with this message anyway.'
-    exit 1
-    ;;
-  commit_no_message)
-    printf '%s\n' \
-      'Cairn nudge: no inline message — /cairn-commit generates one from your staged diff.' \
-      '  /cairn-commit' \
-      '  Then:  git commit -m "<cairn output>"' \
-      '' \
-      '  Append  # cairn:skip  to open your editor instead.'
-    exit 1
-    ;;
-  push)
-    printf '%s\n' \
-      'Cairn nudge: about to push — /cairn-pr writes the PR title and description.' \
-      '  /cairn-pr              (auto-detects base branch)' \
-      '  /cairn-pr --base=develop' \
-      '' \
-      '  Append  # cairn:skip  to push without a PR description.'
-    exit 1
-    ;;
-  *)
-    exit 0
-    ;;
-esac
+  case "$result" in
+    commit_weak)
+      printf '%s\n' \
+        'Cairn nudge: the commit message looks weak — /cairn-commit writes a better one.' \
+        '  Stage your changes, then:  /cairn-commit' \
+        '  It generates a Conventional Commits message from the actual diff.' \
+        '  Paste the result into:  git commit -m "<cairn output>"' \
+        '' \
+        '  Append  # cairn:skip  to commit with this message anyway.'
+      return 1
+      ;;
+    commit_no_message)
+      printf '%s\n' \
+        'Cairn nudge: no inline message — /cairn-commit generates one from your staged diff.' \
+        '  /cairn-commit' \
+        '  Then:  git commit -m "<cairn output>"' \
+        '' \
+        '  Append  # cairn:skip  to open your editor instead.'
+      return 1
+      ;;
+    push)
+      printf '%s\n' \
+        'Cairn nudge: about to push — /cairn-pr writes the PR title and description.' \
+        '  /cairn-pr              (auto-detects base branch)' \
+        '  /cairn-pr --base=develop' \
+        '' \
+        '  Append  # cairn:skip  to push without a PR description.'
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+# ── Standalone entrypoint ────────────────────────────────────────────────────
+# Skipped when sourced by enforce-suite.sh, which owns stdin parsing and the
+# exit code. `set -e` lives here rather than at file scope so sourcing cannot
+# change the caller's shell options.
+if [ -z "${SUITE_MODE:-}" ]; then
+  set -euo pipefail
+
+  input=$(cat)
+
+  cmd_or_path=$(printf '%s' "$input" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(data.get('tool_input', {}).get('command', ''))
+" 2>/dev/null) || exit 0
+
+  gate_cairn
+  exit $?
+fi

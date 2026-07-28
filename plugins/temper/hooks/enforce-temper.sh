@@ -14,29 +14,17 @@
 # Bypass: append  # temper:skip  (or  # suite:skip  to silence all suite hooks) to any command.
 # Exit 1 = block the command and show the message.
 # Exit 0 = allow silently.
-
-set -euo pipefail
+#
+# Dual mode. Standalone, the entrypoint at the bottom reads stdin and exits.
+# Under the aether suite, enforce-suite.sh sources this file with SUITE_MODE=1
+# and calls gate_temper with $cmd_or_path already parsed.
 
 GLOBAL_CONFIG="$HOME/.claude/temper.config"
 LOCAL_CONFIG="./temper.config"
 
-input=$(cat)
-
-cmd=$(printf '%s' "$input" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-print(data.get('tool_input', {}).get('command', ''))
-" 2>/dev/null) || exit 0
-
-[ -z "$cmd" ] && exit 0
-
-# Bypass marker — accepts # temper:skip or # suite:skip (silences all suite hooks)
-if printf '%s' "$cmd" | grep -qE '# *(temper|suite):skip'; then
-  exit 0
-fi
-
-# Check enabled state from config
-_config_get() {
+# Namespaced: several plugin hooks are sourced into one shell under the suite,
+# so a bare _config_get would collide.
+_temper_config_get() {
   local key="$1"
   local val=""
   [ -f "$GLOBAL_CONFIG" ] && val=$(grep "^$key:" "$GLOBAL_CONFIG" | sed "s/^$key: *//" | head -1) || true
@@ -44,19 +32,37 @@ _config_get() {
   printf '%s' "$val"
 }
 
-enabled=$(_config_get "enabled")
-[ "$enabled" = "false" ] && exit 0
+# ── Gate ─────────────────────────────────────────────────────────────────────
+# Reads: $cmd_or_path.  Returns: 1 to nudge, 0 to stay silent.
+gate_temper() {
+  local cmd="${cmd_or_path:-}"
+  [ -z "$cmd" ] && return 0
 
-auto_nudge_lines=$(_config_get "auto_nudge_lines")
-auto_nudge_lines=${auto_nudge_lines:-200}
-auto_nudge_files=$(_config_get "auto_nudge_files")
-auto_nudge_files=${auto_nudge_files:-10}
-critical_paths=$(_config_get "critical_paths")
-critical_paths=${critical_paths:-"*auth*|*permission*|*token*|migrations/|*alembic*|\\.sql|*schema*|*secret*|*credential*|\\.env"}
+  # Bypass marker — accepts # temper:skip or # suite:skip (silences all suite hooks)
+  if printf '%s' "$cmd" | grep -qE '# *(temper|suite):skip'; then
+    return 0
+  fi
 
-# Write the main logic to a temp file to avoid heredoc/quoting issues
-_tmppy=$(mktemp /tmp/temper_check.XXXXXX.py)
-cat > "$_tmppy" << 'PYEOF'
+  local enabled auto_nudge_lines auto_nudge_files critical_paths result
+  enabled=$(_temper_config_get "enabled")
+  if [ "$enabled" = "false" ]; then
+    return 0
+  fi
+
+  auto_nudge_lines=$(_temper_config_get "auto_nudge_lines")
+  auto_nudge_lines=${auto_nudge_lines:-200}
+  auto_nudge_files=$(_temper_config_get "auto_nudge_files")
+  auto_nudge_files=${auto_nudge_files:-10}
+  critical_paths=$(_temper_config_get "critical_paths")
+  critical_paths=${critical_paths:-"*auth*|*permission*|*token*|migrations/|*alembic*|\\.sql|*schema*|*secret*|*credential*|\\.env"}
+
+  # Inlined rather than written to a mktemp file. The original comment here said
+  # the temp file avoided "heredoc/quoting issues" — the real cause was bash
+  # tracking quote state through a heredoc body while scanning $( ... ) for its
+  # closing paren, which only breaks when the body has an odd number of single
+  # quotes. This body is balanced, so inlining is safe and keeps a hook that
+  # fires on every Bash call off the filesystem.
+  result=$(python3 - "$cmd" "$auto_nudge_lines" "$auto_nudge_files" "$critical_paths" <<'PYEOF'
 import re, subprocess, sys, os
 
 cmd = sys.argv[1]
@@ -160,58 +166,75 @@ if re.match(r'\bgit\b\s+stash\b.*\bpop\b', cmd):
 
 print("none")
 PYEOF
+) || return 0
 
-result=$(python3 "$_tmppy" "$cmd" "$auto_nudge_lines" "$auto_nudge_files" "$critical_paths" 2>/dev/null) || { rm -f "$_tmppy"; exit 0; }
-rm -f "$_tmppy"
-
-case "$result" in
-  push)
-    cat <<'MSG'
+  case "$result" in
+    push)
+      cat <<'MSG'
 temper: about to push — have you run /temper to review your changes?
   Run /temper first, then push.
   Append  # temper:skip  (or  # suite:skip) to your push command to bypass this check.
 MSG
-    exit 1
-    ;;
-  commit_large)
-    cat <<'MSG'
+      return 1
+      ;;
+    commit_large)
+      cat <<'MSG'
 temper: large commit detected — consider running /temper first.
   Your staged diff exceeds the size threshold (lines or files).
   Append  # temper:skip  (or  # suite:skip) to your commit command to bypass this check.
 MSG
-    exit 1
-    ;;
-  commit_critical)
-    cat <<'MSG'
+      return 1
+      ;;
+    commit_critical)
+      cat <<'MSG'
 temper: critical path file detected in staged changes — run /temper first.
   One or more staged files matches a critical path pattern (auth, schema, migrations, credentials).
   Append  # temper:skip  (or  # suite:skip) to your commit command to bypass this check.
 MSG
-    exit 1
-    ;;
-  merge_primary)
-    cat <<'MSG'
+      return 1
+      ;;
+    merge_primary)
+      cat <<'MSG'
 temper: merging into a primary branch — consider running /temper --diff=all first.
   Merges into main/master/develop/trunk have high surface area.
   Append  # temper:skip  (or  # suite:skip) to your merge command to bypass this check.
 MSG
-    exit 1
-    ;;
-  rebase_large)
-    cat <<'MSG'
+      return 1
+      ;;
+    rebase_large)
+      cat <<'MSG'
 temper: interactive rebase touching many commits — consider /temper --diff=all after.
   Append  # temper:skip  (or  # suite:skip) to your rebase command to bypass this check.
 MSG
-    exit 1
-    ;;
-  stash_large)
-    cat <<'MSG'
+      return 1
+      ;;
+    stash_large)
+      cat <<'MSG'
 temper: large stash detected — consider running /temper before committing.
   Your stash exceeds the size threshold. Apply it, then run /temper before committing.
   Append  # temper:skip  (or  # suite:skip) to your stash pop command to bypass this check.
 MSG
-    exit 1
-    ;;
-esac
+      return 1
+      ;;
+  esac
 
-exit 0
+  return 0
+}
+
+# ── Standalone entrypoint ────────────────────────────────────────────────────
+# Skipped when sourced by enforce-suite.sh. `set -e` lives here rather than at
+# file scope so sourcing cannot change the caller's shell options.
+if [ -z "${SUITE_MODE:-}" ]; then
+  set -euo pipefail
+
+  input=$(cat)
+
+  cmd_or_path=$(printf '%s' "$input" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(data.get('tool_input', {}).get('command', ''))
+" 2>/dev/null) || exit 0
+
+  gate_temper
+  exit $?
+fi

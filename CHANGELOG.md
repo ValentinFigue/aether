@@ -21,10 +21,14 @@ version, one installer, no network access at install time.
   CLAUDE.md block, both superseded by the suite
 - `--no-bonsai` flag on `install.sh` for a shell-only install
 - `aether version` subcommand
-- `tests/` — 164 assertions run by `bash tests/run.sh`, covering dual-mode gate
-  equivalence, bypass markers, fail-open behaviour, install idempotence,
-  migration from a standalone install, and uninstall. Plain bash, no
-  dependencies, so it runs anywhere the suite does
+- `tests/` — 186 assertions run by `bash tests/run.sh`, covering dual-mode gate
+  equivalence, bypass markers, fail-open behaviour (including corrupt, truncated
+  and empty gate files), JSON-backend equivalence across python3/node/jq,
+  install idempotence, migration from a standalone install, and uninstall.
+  Plain bash, no dependencies, so it runs anywhere the suite does
+- `AETHER_JSON_BACKEND` — pins the interpreter that rewrites `settings.json`, so
+  the node and jq fallbacks can be tested rather than only ever running on
+  machines without python3
 - `.github/workflows/tests.yml` — CI for the suite
 - Install manifest records `repo=`, `gates=`, `claude_md=`, `bonsai=` and
   `plugins=`

@@ -1,0 +1,238 @@
+#!/bin/bash
+set -e
+
+GLOBAL_CONFIG="$HOME/.claude/temper.config"
+LOCAL_CONFIG="./temper.config"
+GLOBAL_COMMANDS="$HOME/.claude/commands"
+LOCAL_COMMANDS=".claude/commands"
+REMOTE_BASE="https://raw.githubusercontent.com/ValentinFigue/temper/main"
+
+usage() {
+  cat << 'EOF'
+temper — manage your /temper install
+
+Usage:
+  temper status                          Show install state and effective config
+  temper enable  [local|global]          Enable temper (default: local)
+  temper disable [local|global]          Disable temper
+  temper config set <key=value> [--global]   Set a config value
+  temper config get                      Print resolved effective config
+  temper config reset [local|global]     Remove config file
+  temper update                          Re-download latest temper.md
+  temper uninstall [local|global] [--claude-md]  Remove command + optionally CLAUDE.md section
+  temper help                            Show this message
+
+Config keys (for 'config set'):
+  auto_nudge_lines=200     Commit line threshold for hook
+  auto_nudge_files=10      Commit file threshold for hook
+  critics=correctness,risk Run only these critics by default
+  skip=coverage            Skip these critics by default
+  severity=red,yellow      Show only these severity levels
+  diff=staged              Default diff target
+  --global                 Write to global config (~/.claude/temper.config)
+
+Examples:
+  temper config set auto_nudge_lines=300
+  temper config set critics=correctness,risk --global
+  temper config set severity=red --global
+  temper config reset local
+  temper uninstall global --claude-md
+EOF
+}
+
+# Read a key from a config file
+config_get() {
+  local file="$1" key="$2"
+  [ -f "$file" ] && grep "^$key:" "$file" | sed "s/^$key: *//" | head -1 || true
+}
+
+# Set a key in a config file (create or update)
+config_set_key() {
+  local file="$1" key="$2" value="$3"
+  if [ -f "$file" ] && grep -q "^$key:" "$file"; then
+    awk -v k="$key" -v v="$value" '$0 ~ "^"k":" {print k": "v; next} {print}' \
+      "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+  else
+    echo "$key: $value" >> "$file"
+  fi
+}
+
+cmd_status() {
+  echo "Install:"
+  if [ -f "$GLOBAL_COMMANDS/temper.md" ]; then
+    echo "  ~/.claude/commands/temper.md    installed"
+  else
+    echo "  ~/.claude/commands/temper.md    not installed"
+  fi
+  if [ -f "$LOCAL_COMMANDS/temper.md" ]; then
+    echo "  .claude/commands/temper.md      installed"
+  else
+    echo "  .claude/commands/temper.md      not installed"
+  fi
+  echo ""
+
+  echo "Global config ($GLOBAL_CONFIG):"
+  if [ -f "$GLOBAL_CONFIG" ]; then
+    sed 's/^/  /' "$GLOBAL_CONFIG"
+  else
+    echo "  (none)"
+  fi
+  echo ""
+
+  echo "Local config ($LOCAL_CONFIG):"
+  if [ -f "$LOCAL_CONFIG" ]; then
+    sed 's/^/  /' "$LOCAL_CONFIG"
+  else
+    echo "  (none)"
+  fi
+  echo ""
+
+  # Effective config: local overrides global
+  local enabled critics skip severity diff auto_nudge_lines auto_nudge_files
+  enabled=$(config_get "$GLOBAL_CONFIG" "enabled"); local le; le=$(config_get "$LOCAL_CONFIG" "enabled"); [ -n "$le" ] && enabled="$le"
+  critics=$(config_get "$GLOBAL_CONFIG" "critics"); local lc; lc=$(config_get "$LOCAL_CONFIG" "critics"); [ -n "$lc" ] && critics="$lc"
+  skip=$(config_get "$GLOBAL_CONFIG" "skip"); local ls; ls=$(config_get "$LOCAL_CONFIG" "skip"); [ -n "$ls" ] && skip="$ls"
+  severity=$(config_get "$GLOBAL_CONFIG" "severity"); local lsev; lsev=$(config_get "$LOCAL_CONFIG" "severity"); [ -n "$lsev" ] && severity="$lsev"
+  diff=$(config_get "$GLOBAL_CONFIG" "diff"); local ld; ld=$(config_get "$LOCAL_CONFIG" "diff"); [ -n "$ld" ] && diff="$ld"
+  auto_nudge_lines=$(config_get "$GLOBAL_CONFIG" "auto_nudge_lines"); local lnl; lnl=$(config_get "$LOCAL_CONFIG" "auto_nudge_lines"); [ -n "$lnl" ] && auto_nudge_lines="$lnl"
+  auto_nudge_files=$(config_get "$GLOBAL_CONFIG" "auto_nudge_files"); local lnf; lnf=$(config_get "$LOCAL_CONFIG" "auto_nudge_files"); [ -n "$lnf" ] && auto_nudge_files="$lnf"
+
+  echo "Effective config:"
+  echo "  enabled:          ${enabled:-true}"
+  echo "  critics:          ${critics:-(all defaults: correctness, design, risk, coverage)}"
+  [ -n "$skip" ] && echo "  skip:             $skip"
+  echo "  severity:         ${severity:-(all: red, yellow, green)}"
+  echo "  diff:             ${diff:-staged}"
+  echo "  auto_nudge_lines: ${auto_nudge_lines:-200}"
+  echo "  auto_nudge_files: ${auto_nudge_files:-10}"
+}
+
+cmd_enable() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  config_set_key "$target" "enabled" "true"
+  echo "✓ temper enabled ($target)"
+}
+
+cmd_disable() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  config_set_key "$target" "enabled" "false"
+  echo "✓ temper disabled ($target)"
+}
+
+cmd_config_set() {
+  local target="$LOCAL_CONFIG"
+  local -a pairs=()
+
+  for arg in "$@"; do
+    case "$arg" in
+      --global) target="$GLOBAL_CONFIG" ;;
+      *=*)      pairs+=("$arg") ;;
+    esac
+  done
+
+  if [ "${#pairs[@]}" -eq 0 ]; then
+    echo "No key=value pairs provided."
+    echo "Examples: temper config set auto_nudge_lines=300"
+    exit 1
+  fi
+
+  for pair in "${pairs[@]}"; do
+    local key="${pair%%=*}"
+    local value="${pair#*=}"
+    config_set_key "$target" "$key" "$value"
+    echo "✓ $key: $value"
+  done
+  echo "  Written to $target"
+}
+
+cmd_config_get() {
+  cmd_status
+}
+
+cmd_config_reset() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  if [ -f "$target" ]; then
+    rm "$target"
+    echo "✓ Removed $target"
+  else
+    echo "  $target not found — nothing to reset"
+  fi
+}
+
+cmd_update() {
+  local updated=0
+  for target in "$GLOBAL_COMMANDS/temper.md" "$LOCAL_COMMANDS/temper.md"; do
+    if [ -f "$target" ]; then
+      curl -fsSL -o "$target" "$REMOTE_BASE/.claude/commands/temper.md"
+      echo "✓ Updated $target"
+      updated=$((updated + 1))
+    fi
+  done
+  [ "$updated" -eq 0 ] && echo "No temper.md found. Run install.sh first." && exit 1
+  true
+}
+
+cmd_uninstall() {
+  local scope="local"
+  local clean_claude_md=false
+
+  for arg in "$@"; do
+    case "$arg" in
+      global)       scope="global" ;;
+      --claude-md)  clean_claude_md=true ;;
+    esac
+  done
+
+  local commands_dir claude_file
+  if [ "$scope" = "global" ]; then
+    commands_dir="$GLOBAL_COMMANDS"
+    claude_file="$HOME/.claude/CLAUDE.md"
+  else
+    commands_dir="$LOCAL_COMMANDS"
+    claude_file="./CLAUDE.md"
+  fi
+
+  if [ -f "$commands_dir/temper.md" ]; then
+    rm "$commands_dir/temper.md"
+    echo "✓ Removed $commands_dir/temper.md"
+  else
+    echo "  $commands_dir/temper.md not found"
+  fi
+
+  if [ "$clean_claude_md" = true ]; then
+    if [ -f "$claude_file" ] && grep -q "<!-- temper:start -->" "$claude_file"; then
+      awk '/<!-- temper:start -->/{skip=1} !skip{print} /<!-- temper:end -->/{skip=0}' \
+        "$claude_file" > "$claude_file.tmp" && mv "$claude_file.tmp" "$claude_file"
+      echo "✓ Removed temper section from $claude_file"
+    else
+      echo "  No temper section found in $claude_file"
+    fi
+  fi
+
+  echo ""
+  echo "Restart Claude Code to apply changes."
+}
+
+COMMAND="${1:-help}"
+shift || true
+
+case "$COMMAND" in
+  status)    cmd_status ;;
+  enable)    cmd_enable "$@" ;;
+  disable)   cmd_disable "$@" ;;
+  config)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      set)   cmd_config_set "$@" ;;
+      get)   cmd_config_get ;;
+      reset) cmd_config_reset "$@" ;;
+      *)     echo "Unknown subcommand: config $SUB"; echo ""; usage; exit 1 ;;
+    esac ;;
+  update)    cmd_update ;;
+  uninstall) cmd_uninstall "$@" ;;
+  help|--help|-h) usage ;;
+  *) echo "Unknown command: $COMMAND"; echo ""; usage; exit 1 ;;
+esac

@@ -22,6 +22,8 @@ hook.2: PostToolUse | Write\|Edit\|MultiEdit   | hooks/post-bonsai.sh
 # Escape hatch 1 — symlinked, not copied, so the CLI tracks the clone.
 cli: bonsai
 cli.strategy: link
+# Hooks are registered by repo path too, for the same reason as the CLI.
+hooks.strategy: link
 cli.scopes: global
 
 permissions: mcp__bonsai-py__* mcp__bonsai-ts__*

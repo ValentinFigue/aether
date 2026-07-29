@@ -202,6 +202,103 @@ _op_unsplice() {
   printf '  ✓ removed %s block from %s\n' "$marker" "$file"
 }
 
+# ── Hook registration ────────────────────────────────────────────────────────
+# Generalised from _json_register_suite_hook: any phase, any matcher. The old
+# installers each had their own variant with the phase and matcher hardcoded,
+# which is how cairn ended up with a python3-only _json_add_post_hook that
+# silently never fired on a node-or-jq-only machine.
+_json_register_hook() {
+  local file="$1" phase="$2" matcher="$3" path="$4" prepend="${5:-}"
+  command -v python3 >/dev/null 2>&1 || { command -v node >/dev/null 2>&1 || return 1; }
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$file" "$phase" "$matcher" "$path" "$prepend" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+import json, sys
+f, phase, matcher, path, prepend = sys.argv[1:6]
+with open(f) as fh: s = json.load(fh)
+lst = s.setdefault("hooks", {}).setdefault(phase, [])
+# Drop any previous registration of this exact script, whatever its matcher —
+# a plugin that changes its matcher must not leave the old entry behind.
+for e in lst:
+    e["hooks"] = [h for h in e.get("hooks", []) if h.get("command") != path]
+lst[:] = [e for e in lst if e.get("hooks")]
+entry = next((e for e in lst if e.get("matcher") == matcher), None)
+if entry is None:
+    entry = {"matcher": matcher, "hooks": []}
+    lst.insert(0, entry) if prepend else lst.append(entry)
+entry["hooks"].append({"type": "command", "command": path})
+print(json.dumps(s, indent=2))
+PYEOF
+  else
+    node - "$file" "$phase" "$matcher" "$path" "$prepend" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+const [f, phase, matcher, path, prepend] = process.argv.slice(2);
+const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
+s.hooks = s.hooks || {}; const lst = s.hooks[phase] = s.hooks[phase] || [];
+for (const e of lst) e.hooks = (e.hooks || []).filter(h => h.command !== path);
+s.hooks[phase] = lst.filter(e => e.hooks.length);
+let entry = s.hooks[phase].find(e => e.matcher === matcher);
+if (!entry) { entry = { matcher, hooks: [] }; prepend ? s.hooks[phase].unshift(entry) : s.hooks[phase].push(entry); }
+entry.hooks.push({ type: "command", command: path });
+process.stdout.write(JSON.stringify(s, null, 2) + "\n");
+JSEOF
+  fi
+}
+
+_json_deregister_hook() {
+  local file="$1" needle="$2"
+  [ -f "$file" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$file" "$needle" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+import json, sys
+f, needle = sys.argv[1], sys.argv[2]
+with open(f) as fh: s = json.load(fh)
+for phase in ("PreToolUse", "PostToolUse"):
+    lst = s.get("hooks", {}).get(phase, [])
+    for e in lst:
+        e["hooks"] = [h for h in e.get("hooks", []) if needle not in h.get("command", "")]
+    if phase in s.get("hooks", {}):
+        s["hooks"][phase] = [e for e in lst if e.get("hooks")]
+print(json.dumps(s, indent=2))
+PYEOF
+}
+
+# Install and register every hook a manifest declares.
+# A suite_owned hook is skipped under the suite: enforce-suite.sh sources that
+# gate instead, so registering it too would double-fire every check.
+_engine_hooks() {
+  local plugin="$1" scope="$2" suite_mode="$3" proot="$4"
+  local settings; settings=$(_settings "$scope")
+  local hookdir;  hookdir="$(_root "$scope")/plugin-hooks"
+  local strategy; strategy=$(_mf "$plugin" hooks.strategy); strategy="${strategy:-copy}"
+  local n line
+  for n in 1 2 3 4; do
+    line=$(_mf "$plugin" "hook.$n") || true
+    [ -n "$line" ] || continue
+    # Split on " | ". The separator is a bracket expression, not \| — BSD awk
+    # reads a backslash-escaped pipe in -F as alternation and returns five
+    # fields instead of three. Spacing is variable in the manifests, so the
+    # separator requires at least one space on each side: a matcher's escaped
+    # pipes (Bash\|Write) have none, so they survive. The matcher keeps them until
+    # the sed below unescapes them.
+    local phase matcher script flags _fs=' +[|] +'
+    phase=$(printf   '%s' "$line" | awk -v FS="$_fs" '{print $1}')
+    matcher=$(printf '%s' "$line" | awk -v FS="$_fs" '{print $2}' | sed 's/\\|/|/g')
+    script=$(printf  '%s' "$line" | awk -v FS="$_fs" '{print $3}')
+    flags=$(printf   '%s' "$line" | awk -v FS="$_fs" '{print $4}')
+    case " $flags " in *" suite_owned "*) [ "$suite_mode" = 1 ] && continue ;; esac
+    local target
+    if [ "$strategy" = link ]; then
+      target="$proot/$script"
+      chmod +x "$target" 2>/dev/null || true
+    else
+      target="$hookdir/$(basename "$script")"
+      _op_copy "$proot/$script" "$target" || continue
+    fi
+    local prepend=""; case " $flags " in *" prepend "*) prepend=1 ;; esac
+    _json_register_hook "$settings" "$phase" "$matcher" "$target" "$prepend" \
+      && printf '  ✓ %s %s hook registered\n' "$plugin" "$phase"
+  done
+}
+
 # ── Per-plugin install ───────────────────────────────────────────────────────
 # suite_mode=1 means enforce-suite.sh will source this plugin's gate, so its own
 # PreToolUse registration and its own CLAUDE.md block are both skipped.
@@ -278,6 +375,8 @@ _engine_install() {
     fi
   fi
 
+  _engine_hooks "$plugin" "$scope" "$suite_mode" "$proot"
+
   printf '  ✓ %s installed\n' "$plugin"
   return 0
 }
@@ -298,6 +397,11 @@ _engine_uninstall() {
   done
   local cli; cli=$(_mf "$plugin" cli)
   [ -n "$cli" ] && _op_rm "$(_cli_dir "$scope")/$cli"
+  _json_deregister_hook "$(_settings "$scope")" "enforce-$plugin.sh" 2>/dev/null || true
+  _json_deregister_hook "$(_settings "$scope")" "post-$plugin.sh" 2>/dev/null || true
+  _op_rm "$(_root "$scope")/plugin-hooks/enforce-$plugin.sh" >/dev/null 2>&1 || true
+  _op_rm "$(_root "$scope")/plugin-hooks/post-$plugin.sh" >/dev/null 2>&1 || true
+
   local sentinel; sentinel=$(_mf "$plugin" template.sentinel)
   [ -n "$sentinel" ] && _op_unsplice "$(_claude_md "$scope")" "$sentinel"
   for sentinel in $(_mf "$plugin" template.legacy_sentinels); do

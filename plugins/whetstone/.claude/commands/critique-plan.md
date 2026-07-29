@@ -7,8 +7,15 @@ Critique a plan before implementation — surfaces blockers while they are still
 Resolve settings in three steps, lowest to highest priority:
 
 **Step 1 — Read config files:**
-- Check `~/.claude/whetstone.config` (global defaults)
-- Check `./whetstone.config` (local overrides; wins over global)
+Run:
+
+```bash
+aether config show whetstone --raw 2>/dev/null || true
+```
+
+Each line is `key: value`, already resolved — `~/.aether/config`, then the
+project's `.aether/config`, per key, with declared defaults filled in. If it
+prints nothing, use the defaults documented below and continue.
 
 Each file is key-value, one entry per line:
 ```
@@ -43,9 +50,19 @@ Before critiquing, collect available project context. Read the following if they
 
 1. `package.json` or `pyproject.toml` — dependency landscape and versions
 2. `ARCHITECTURE.md` or any `.md` files in an `ADR/` directory — existing architectural decisions
-3. `whetstone.config.md` — project-specific critic instructions (prose; e.g. "this project uses event sourcing — flag anything that bypasses the event log")
+3. Project prose for the critics. Global first, then the project — prose
+   **concatenates** rather than overriding, so house style survives a repo
+   adding one line:
 
-Use this context to ground findings: flag dependency version conflicts, note contradictions with existing ADRs, apply any project-specific instructions from `whetstone.config.md`.
+   ```bash
+   { cat "$HOME/.aether/rules.md" 2>/dev/null; printf '\n'; cat .aether/rules.md 2>/dev/null; }
+   ```
+
+   Use the `[all]` and `[critique-plan]` sections; ignore sections named for
+   other commands. Pre-1.1 installs kept this in `./whetstone.config.md`, which
+   is still read if `.aether/rules.md` is absent.
+
+Use this context to ground findings: flag dependency version conflicts, note contradictions with existing ADRs, apply any project-specific instructions from `rules.md`.
 
 ---
 
@@ -187,10 +204,15 @@ Do not revise the plan. Surface findings only. The user will decide what to act 
 
 ## Persist output
 
-After printing the report, determine the target `.claude/plans/` directory:
-- If `.claude/plans/` exists in the project root → write to `.claude/plans/CRITIQUE.md`
-- Else if `~/.claude/plans/` exists → write to `~/.claude/plans/CRITIQUE.md`
-- Otherwise create `.claude/plans/` in the project root and write there
+After printing the report, determine where to write it:
+- If the project has a `.aether/` directory → write to `.aether/out/CRITIQUE.md`
+- Otherwise → write to `~/.aether/out/CRITIQUE.md`
+
+Create the directory if it does not exist. `enforce-whetstone.sh` looks for the
+file at exactly this path to decide whether a plan has been critiqued, so writing
+it elsewhere leaves the gate nudging forever. Pre-1.1 installs used
+`.claude/plans/CRITIQUE.md`; the gate still honours that path when it exists, and
+`aether migrate` moves it.
 
 Prepend a header: `# Critique — <source file name> — <current date>`
 

@@ -7,6 +7,91 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
+## [Unreleased]
+
+### Added
+
+- **One sectioned config file per scope.** `~/.aether/config` and
+  `.aether/config` replace four `<plugin>.config` files per scope, with an
+  `[<section>]` per plugin and every key name unchanged. Resolution stays
+  **per key**, so a project that sets one key does not discard the global value
+  of its neighbours.
+- **Two new sections that describe the repository rather than a plugin**, split
+  on a clear line — `[project]` is things to run (`test`, `lint`, `typecheck`,
+  `build`, `coverage`), `[git]` is things to write (`scopes`, `types`, `ticket`,
+  `trailers`, `base`). Both are declared in the manifest of the plugin that
+  consumes them, so there is no suite-wide schema file to install.
+- **`.aether/rules.md`** — prose for the critics, one section per command,
+  replacing whetstone's auto-discovered `whetstone.config.md` and cairn's
+  `pr.rules_file` pointer. Prose *concatenates* global-then-project rather than
+  overriding: losing your global writing rules because a repo added one line
+  would be the wrong default.
+- **`aether config`** — `show`, `explain`, `doctor`, `path`, `edit`, `get`,
+  `set`, `unset`. `show` prints each value with the layer, file and line that
+  supplied it, what the key does, and which command reads it. `doctor` catches
+  unknown keys with a suggestion, and `[project]` commands whose binary is not
+  on `PATH`. `--raw` emits bare `key: value` lines, which is what the slash
+  commands now read instead of merging two files themselves.
+- **`aether migrate`**, also run automatically by `aether install`. Idempotent,
+  and where both old and new exist the **new** value wins. Every old file is
+  copied to `.bak` before removal.
+- **`hooks/aether-config.sh`** — one config parser, sourced by both the CLI and
+  every gate. There were six independent readers of this format; two of the four
+  plugin copies were missing `head -1`, so a duplicated key resolved to a
+  multi-line value in half the suite.
+- `tests/test_config.sh` — 52 assertions on per-key merge, schema completeness,
+  `doctor`, comment-preserving writes, pre-migration fallback, and migration
+  including its idempotence.
+
+### Changed
+
+- **`~/.aether/` and `.aether/` are now the roots**, with the same name and the
+  same shape in both scopes. `.claude/` holds what Claude Code itself reads
+  (commands, `settings.json`, skills, `CLAUDE.md`, plan mode's `plans/`);
+  `.aether/` holds what aether owns. `$AETHER_HOME` overrides the global root.
+- **`~/.local/share/aether/` is retired.** It held the global hook while the
+  local one sat in `.claude/hooks/` — different parents for the same artefact.
+  Hook scripts move to `<root>/hooks/`, which `settings.json` can reference by
+  absolute path from anywhere.
+- Generated output moves to `<root>/out/`: `CRITIQUE.md`, `TEMPER.md`, and
+  whetstone's nudge sentinel. Plan files stay in `.claude/plans/`, which is plan
+  mode's own directory.
+- The install manifest moves from `~/.claude/aether.manifest` to
+  `<root>/manifest`.
+- `aether enable`/`disable` write one sectioned file instead of four.
+
+### Fixed
+
+- **`aether enable` and `aether disable` wrote the verb, not the value.**
+  Collapsing the two into one variable during the refactor produced
+  `enabled: disable`, which is not `false` — so nothing was disabled and
+  `aether status` still reported every plugin as on. Caught by the existing
+  suite.
+- **whetstone's once-per-project nudge briefly became once-per-machine.** The
+  sentinel moved to `.aether/out/` and was resolved through the same helper as
+  `CRITIQUE.md`, which falls back to `~/.aether/out/` for a project with no
+  `.aether/` — so the first project to be nudged silenced every other one. It is
+  now pinned to the project, with a test for exactly that.
+- Migration no longer copies a *global* `pr.rules_file` into every project it
+  touches: `[draft-pr]` prose is imported from the scope that set it.
+- `_mf` matched manifest keys by regex, so `config.pr.base.doc` could match a
+  line where the dots were any character. Now a literal prefix match.
+- **`--dry-run` ran bonsai's build for real** — `uv sync` and `npm run build`,
+  writing to `~/.cache` and `~/.npm`. The five primitives are guarded centrally,
+  but `build` is the one escape hatch that runs arbitrary commands and was never
+  covered. `--dry-run` also created `~/.claude.json` via the MCP sync, and left
+  empty `.aether/hooks/gates/` directories behind. It is now verifiably inert,
+  with a test asserting the *whole* home directory is byte-identical afterwards.
+- The gate count printed after install used `ls`; it now uses a glob, so the
+  message is right on a machine stripped down to bash and coreutils.
+- `aether uninstall` left `aether-config.sh` orphaned in the hook directory.
+
+### Notes
+
+Until you migrate, the pre-1.0 `<plugin>.config` files in either scope are still
+*read* when the new file has no value for a key. Writes only ever go to the new
+location, so the two cannot diverge.
+
 ## [1.0.0] — 2026-07-28
 
 bonsai, cairn, whetstone and temper now live in this repository. One clone, one

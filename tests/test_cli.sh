@@ -51,7 +51,7 @@ assert_eq "4" "$n" "disable global marks all four plugins disabled"
 FIX=$(mktemp -d); cd "$FIX" || exit 1
 git init -q .; git config user.email t@t; git config user.name t
 printf 'x\n' > f.txt; git add f.txt; git commit -qm init
-out=$(payload Bash 'git commit -m wip' | env HOME="$H" bash "$H/.local/share/aether/enforce-suite.sh" 2>&1); e=$?
+out=$(payload Bash 'git commit -m wip' | env HOME="$H" bash "$H/.aether/hooks/enforce-suite.sh" 2>&1); e=$?
 case "$out" in
   *"Cairn nudge"*) fail "disabling cairn silences its gate at runtime" "cairn still fired" ;;
   *) pass "disabling cairn silences its gate at runtime" ;;
@@ -69,12 +69,14 @@ assert_eq "4" "$n" "enable global marks all four plugins enabled"
 suite "update error paths"
 H2=$(new_home)
 mkdir -p "$H2/.claude"
-printf 'version=1.0.0\nscope=global\n' > "$H2/.claude/aether.manifest"
+mkdir -p "$H2/.aether"
+printf 'version=1.0.0\nscope=global\n' > "$H2/.aether/manifest"
 out=$(env HOME="$H2" bash "$CLI" update 2>&1); e=$?
 assert_exit 1 "$e" "update fails when the manifest has no repo="
 assert_contains "$out" "predates aether 1.0.0" "update explains a pre-1.0.0 manifest"
 
-printf 'version=1.0.0\nscope=global\nrepo=/nonexistent/aether\n' > "$H2/.claude/aether.manifest"
+mkdir -p "$H2/.aether"
+printf 'version=1.0.0\nscope=global\nrepo=/nonexistent/aether\n' > "$H2/.aether/manifest"
 out=$(env HOME="$H2" bash "$CLI" update 2>&1); e=$?
 assert_exit 1 "$e" "update fails when the recorded clone is gone"
 assert_contains "$out" "no longer there" "update names the missing clone"
@@ -108,19 +110,19 @@ suite "uninstall"
 H3=$(new_home)
 env HOME="$H3" bash "$REPO/install.sh" --global --claude-md --no-bonsai >/dev/null 2>&1
 S="$H3/.claude/settings.json"
-[ -f "$H3/.local/share/aether/gates/enforce-cairn.sh" ] \
+[ -f "$H3/.aether/hooks/gates/enforce-cairn.sh" ] \
   && pass "gates present before uninstall" || fail "gates present before uninstall"
 
 env HOME="$H3" bash "$REPO/uninstall.sh" --global --claude-md >"$H3/un.log" 2>&1; e=$?
 assert_exit 0 "$e" "uninstall.sh wrapper exits 0"
 
-[ -e "$H3/.local/share/aether/enforce-suite.sh" ] \
+[ -e "$H3/.aether/hooks/enforce-suite.sh" ] \
   && fail "uninstall removes enforce-suite.sh" || pass "uninstall removes enforce-suite.sh"
-[ -e "$H3/.local/share/aether/gates" ] \
+[ -e "$H3/.aether/hooks/gates" ] \
   && fail "uninstall removes the gates directory" || pass "uninstall removes the gates directory"
 [ -e "$H3/.local/bin/aether" ] \
   && fail "uninstall removes the CLI" || pass "uninstall removes the CLI"
-[ -e "$H3/.claude/aether.manifest" ] \
+[ -e "$H3/.aether/manifest" ] \
   && fail "uninstall removes the manifest" || pass "uninstall removes the manifest"
 
 pre=$(jsonq "$S" '
@@ -159,35 +161,36 @@ PROJ=$(mktemp -d)
 cd "$PROJ" || exit 1
 env HOME="$H4" bash "$REPO/install.sh" --no-bonsai --claude-md >/dev/null 2>&1
 
-for p in .claude/hooks/enforce-suite.sh .claude/hooks/gates .bin/aether .claude/aether.manifest; do
+for p in .aether/hooks/enforce-suite.sh .aether/hooks/gates .bin/aether .aether/manifest; do
   [ -e "$p" ] && pass "local install created $p" || fail "local install created $p"
 done
 
 # A global install that must be left completely alone.
 mkdir -p "$H4/.claude"
-printf 'version=1.0.0\nscope=global\nrepo=/elsewhere/aether\n' > "$H4/.claude/aether.manifest"
+mkdir -p "$H4/.aether"
+printf 'version=1.0.0\nscope=global\nrepo=/elsewhere/aether\n' > "$H4/.aether/manifest"
 
 env HOME="$H4" bash "$REPO/uninstall.sh" --claude-md >/dev/null 2>&1
 e=$?
 assert_exit 0 "$e" "local uninstall exits 0"
 
-for p in .claude/hooks/enforce-suite.sh .claude/hooks/gates .bin/aether .claude/aether.manifest; do
+for p in .aether/hooks/enforce-suite.sh .aether/hooks/gates .bin/aether .aether/manifest; do
   [ -e "$p" ] && fail "local uninstall removed $p" || pass "local uninstall removed $p"
 done
-# .claude/hooks/ is NOT expected to vanish. `aether uninstall` removes the suite
+# .aether/hooks/ is NOT expected to vanish. `aether uninstall` removes the suite
 # layer and deliberately leaves the plugins installed, so cairn's PostToolUse
 # hook is still registered and its file must survive under plugin-hooks/. What
 # must be gone is everything the suite itself owned.
-[ -e .claude/hooks/enforce-suite.sh ] && fail "suite hook removed from .claude/hooks/" \
-                                      || pass "suite hook removed from .claude/hooks/"
-[ -e .claude/hooks/gates ] && fail "gates/ removed from .claude/hooks/" \
-                           || pass "gates/ removed from .claude/hooks/"
-[ -f .claude/hooks/plugin-hooks/post-cairn.sh ] \
+[ -e .aether/hooks/enforce-suite.sh ] && fail "suite hook removed from .aether/hooks/" \
+                                      || pass "suite hook removed from .aether/hooks/"
+[ -e .aether/hooks/gates ] && fail "gates/ removed from .aether/hooks/" \
+                           || pass "gates/ removed from .aether/hooks/"
+[ -f .aether/hooks/plugin-hooks/post-cairn.sh ] \
   && pass "cairn's PostToolUse hook survives a suite uninstall" \
   || fail "cairn's PostToolUse hook survives a suite uninstall"
 [ -d .bin ]          && fail "empty .bin/ is tidied away"          || pass "empty .bin/ is tidied away"
 
-[ -f "$H4/.claude/aether.manifest" ] \
+[ -f "$H4/.aether/manifest" ] \
   && pass "a local uninstall leaves the global manifest alone" \
   || fail "a local uninstall leaves the global manifest alone"
 
@@ -215,13 +218,13 @@ cd "$PROJ2" || exit 1
 env HOME="$H5" bash "$REPO/install.sh" --no-bonsai >/dev/null 2>&1          # local
 env HOME="$H5" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1 # and global
 env HOME="$H5" bash "$REPO/uninstall.sh" --global >/dev/null 2>&1
-[ -f .claude/hooks/enforce-suite.sh ] \
+[ -f .aether/hooks/enforce-suite.sh ] \
   && pass "global uninstall leaves the project's local hook alone" \
   || fail "global uninstall leaves the project's local hook alone"
-[ -f .claude/aether.manifest ] \
+[ -f .aether/manifest ] \
   && pass "global uninstall leaves the project's local manifest alone" \
   || fail "global uninstall leaves the project's local manifest alone"
-[ -e "$H5/.local/share/aether/enforce-suite.sh" ] \
+[ -e "$H5/.aether/hooks/enforce-suite.sh" ] \
   && fail "global uninstall removed the global hook" \
   || pass "global uninstall removed the global hook"
 cd "$REPO" || exit 1

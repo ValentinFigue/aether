@@ -93,3 +93,35 @@ config.summary.format.used_by: /draft-summary
 config.summary.window.default: 1 day ago
 config.summary.window.doc: How far back to look when no --from is given
 config.summary.window.used_by: /draft-summary
+
+# ── [git] — how this project writes commits and PRs ─────────────────────────
+# No commands, nothing executed: these are house rules the drafting commands
+# follow and /critique-pr checks against. Named [git] rather than [conventions]
+# because every key in it is about a git artefact, and "conventions" turned out
+# not to tell anyone what belonged here.
+
+config.scopes.section: git
+config.scopes.default:
+config.scopes.doc: Comma-separated Conventional Commits scopes — /draft-commit picks from your real ones instead of inventing one
+config.scopes.used_by: /draft-commit /critique-pr
+
+config.types.section: git
+config.types.default:
+config.types.doc: Comma-separated commit types allowed, e.g. feat, fix, docs, chore
+config.types.used_by: /draft-commit /critique-pr
+
+config.ticket.section: git
+config.ticket.default:
+config.ticket.type: regex
+config.ticket.doc: Regex matching a ticket ID, e.g. TK-[0-9]+ — pulled from the branch name into the subject, and /critique-pr flags a PR without one
+config.ticket.used_by: /draft-commit /draft-pr /critique-pr
+
+config.trailers.section: git
+config.trailers.default:
+config.trailers.doc: Trailers every commit message must carry, e.g. Co-Authored-By
+config.trailers.used_by: /draft-commit
+
+config.base.section: git
+config.base.default:
+config.base.doc: Base branch for PRs — set it to stop /draft-pr auto-detecting
+config.base.used_by: /draft-pr /critique-pr

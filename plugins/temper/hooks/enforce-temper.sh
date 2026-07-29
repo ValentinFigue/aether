@@ -19,18 +19,28 @@
 # Under the aether suite, enforce-suite.sh sources this file with SUITE_MODE=1
 # and calls gate_temper with $cmd_or_path already parsed.
 
-GLOBAL_CONFIG="$HOME/.claude/temper.config"
-LOCAL_CONFIG="./temper.config"
+# ── Config reader ────────────────────────────────────────────────────────────
+# One parser, shared with bin/aether. Under the suite it is already sourced by
+# enforce-suite.sh; standalone this finds it. A gate that cannot find it must
+# still run — every config key has a default, so the gate degrades to those
+# rather than going silent.
+if ! command -v aether_cfg_get >/dev/null 2>&1; then
+  _ac_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  for _ac in "$_ac_here/../aether-config.sh" "$_ac_here/aether-config.sh" \
+             "$_ac_here/../../../hooks/aether-config.sh" \
+             "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh"; do
+    [ -f "$_ac" ] && { . "$_ac"; break; }
+  done
+  unset _ac _ac_here
+  if ! command -v aether_cfg_get >/dev/null 2>&1; then
+    aether_cfg_get() { :; }
+    aether_out_dir() { [ -d .aether ] && printf '.aether/out' || printf '%s/out' "${AETHER_HOME:-$HOME/.aether}"; }
+  fi
+fi
 
 # Namespaced: several plugin hooks are sourced into one shell under the suite,
 # so a bare _config_get would collide.
-_temper_config_get() {
-  local key="$1"
-  local val=""
-  [ -f "$GLOBAL_CONFIG" ] && val=$(grep "^$key:" "$GLOBAL_CONFIG" | sed "s/^$key: *//" | head -1) || true
-  [ -f "$LOCAL_CONFIG"  ] && { local lv; lv=$(grep "^$key:" "$LOCAL_CONFIG" | sed "s/^$key: *//" | head -1 2>/dev/null) && [ -n "$lv" ] && val="$lv"; } || true
-  printf '%s' "$val"
-}
+_temper_config_get() { aether_cfg_get temper "$1"; }
 
 # ── Gate ─────────────────────────────────────────────────────────────────────
 # Reads: $cmd_or_path.  Returns: 1 to nudge, 0 to stay silent.

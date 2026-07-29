@@ -53,17 +53,19 @@ plan file as known risks to revisit during temper review.
 
 ### Plan file conventions
 
-Store plans and critiques in `.claude/plans/`:
+Plans stay in `.claude/plans/`, which is plan mode's own directory. Generated
+review output lives under `.aether/out/`, which aether owns:
 
 ```
-.claude/plans/
-├── <plan-name>.md   # the current plan (one file per plan)
-└── CRITIQUE.md      # the latest /critique-plan output (append with date headers)
+.claude/plans/<plan-name>.md   # the plan (one file per plan) — yours
+.aether/out/CRITIQUE.md        # the latest /critique-plan output, appended
+.aether/out/TEMPER.md          # the latest /critique-diff output, appended
 ```
 
-The hook (`enforce-whetstone.sh`) detects stale critiques by comparing the
-modification time of the newest plan file against `CRITIQUE.md`. Always write
-critiques to `.claude/plans/CRITIQUE.md` so the hook can find them.
+The hook (`enforce-suite.sh`) detects a stale critique by comparing the newest
+plan file's modification time against `CRITIQUE.md`. Always write critiques to
+`.aether/out/CRITIQUE.md` so the hook can find them; a project without a
+`.aether/` directory falls back to `~/.aether/out/`.
 
 ### Severity handoff to the rest of the suite
 

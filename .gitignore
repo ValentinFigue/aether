@@ -4,13 +4,18 @@
 # slash commands — the same trap that hid temper's own command file for months
 # (a bare `TEMPER.md` pattern matched .claude/commands/temper.md at depth).
 
-# Plan and review output.
+# Review output and local install state.
 #
-# The suite's own tools write here: /critique-plan writes CRITIQUE.md,
-# /critique-diff appends TEMPER.md, and enforce-whetstone.sh drops a
-# .whetstone-nudged sentinel. It is per-developer, per-session scratch
-# and means nothing in someone else's checkout — the convention itself is
-# documented in templates/CLAUDE.md, which is versioned.
+# The suite's own tools write to .aether/out/: /critique-plan writes CRITIQUE.md,
+# /critique-diff appends TEMPER.md, and enforce-whetstone.sh drops a .nudged
+# sentinel. Per-developer, per-session scratch that means nothing in someone
+# else's checkout. .aether/config and .aether/rules.md are NOT ignored — those
+# are project settings worth committing.
+/.aether/out/
+/.aether/manifest
+/.aether/hooks/
+
+# Plan files themselves stay in plan mode's own directory.
 /.claude/plans/
 
 # Artifacts of a local install.

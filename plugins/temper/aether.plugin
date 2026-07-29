@@ -60,3 +60,50 @@ config.auto_nudge_files.used_by: enforce-temper.sh
 config.critical_paths.default: *auth*|*permission*|*token*|migrations/|*alembic*|\.sql|*schema*|*secret*|*credential*|\.env
 config.critical_paths.doc: Pipe-separated patterns that always trigger a review nudge, whatever the diff size
 config.critical_paths.used_by: enforce-temper.sh
+
+# ── [project] — commands the critics execute ────────────────────────────────
+# Declared here rather than in a suite-wide schema file because temper's critics
+# are what run them. `section:` puts the key in [project] instead of [temper].
+# Nothing here runs until the project is trusted.
+
+config.test.section: project
+config.test.default:
+config.test.type: command
+config.test.doc: Shell command that runs the test suite — lets Coverage report real failures instead of inferring from the diff
+config.test.used_by: /critique-diff /critique-pr
+
+config.lint.section: project
+config.lint.default:
+config.lint.type: command
+config.lint.doc: Linter command — lets Correctness report actual violations rather than eyeballing style
+config.lint.used_by: /critique-diff /critique-pr
+
+config.format.section: project
+config.format.default:
+config.format.type: command
+config.format.doc: Formatter check command, e.g. `ruff format --check`
+config.format.used_by: /critique-diff /critique-pr
+
+config.typecheck.section: project
+config.typecheck.default:
+config.typecheck.type: command
+config.typecheck.doc: Type checker command, run against the changed files
+config.typecheck.used_by: /critique-diff /critique-pr
+
+config.build.section: project
+config.build.default:
+config.build.type: command
+config.build.doc: Build command — lets /critique-pr confirm the branch still builds
+config.build.used_by: /critique-pr
+
+config.coverage.section: project
+config.coverage.default:
+config.coverage.type: command
+config.coverage.doc: Command printing a coverage percentage
+config.coverage.used_by: /critique-diff /critique-pr
+
+config.coverage_min.section: project
+config.coverage_min.default:
+config.coverage_min.type: int
+config.coverage_min.doc: Fail Coverage below this percentage, instead of leaving it to judgement
+config.coverage_min.used_by: /critique-diff /critique-pr

@@ -40,15 +40,17 @@ grep -r "TODO" ./src   # bonsai:skip
 ## Turning a plugin off for good
 
 Bypass markers are per-command. To silence a gate persistently, set `enabled: false`
-in its config instead — `~/.claude/<plugin>.config` for every project, or
-`./<plugin>.config` in one repository, which overrides the global value:
+in its config instead — `~/.aether/config` for every project, or `.aether/config`
+in one repository, which overrides the global value for that key alone:
 
 ```bash
-aether disable global          # all four
-printf 'enabled: false\n' > cairn.config   # just cairn, just here
+aether disable global                        # all four, everywhere
+aether config set cairn.enabled false        # just cairn, just here
 ```
 
-`aether status` shows the resolved state for each plugin.
+Both write an `[<plugin>]` section in the one config file for that scope, so the
+setting is visible beside every other. `aether status` shows the resolved state
+for each plugin, and `aether config show cairn` shows where the value came from.
 
 ## Notes
 

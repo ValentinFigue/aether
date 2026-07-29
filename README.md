@@ -108,12 +108,18 @@ plugin's gate from `gates/` and calls the `gate_<plugin>` function it defines,
 so a rule lives in exactly one file whether the plugin runs standalone or under
 the suite.
 
+It also sources `aether-config.sh`, the single config parser, which the CLI
+shares. There were six independent parsers of the same format before it, and two
+of the four plugin copies were missing `head -1` — so a duplicated key resolved
+to a multi-line value in half the suite.
+
 ```
 manifests  ──▶  bin/aether (engine)  ──▶  ~/.claude/commands/
                      │                    ~/.claude/settings.json
                      │                    ~/.claude.json  (MCP)
-                     └──────────────────▶ <hookdir>/enforce-suite.sh
-                                          <hookdir>/gates/enforce-*.sh
+                     └──────────────────▶ <root>/hooks/enforce-suite.sh
+                                          <root>/hooks/gates/enforce-*.sh
+                                          <root>/hooks/aether-config.sh
 ```
 
 ### Adding a plugin
@@ -126,23 +132,236 @@ alone, and the plugin appears in `aether status` because it exists.
 
 ## What changes in your environment
 
+Two directories, and the split between them is the rule: **`.claude/` is what
+Claude Code reads; `.aether/` is what aether owns.**
+
+Both scopes use the same directory name and the same shape — `~/.aether/`
+globally, `.aether/` in a project. Referred to below as `<root>`.
+
+```
+<root>/
+  config          your settings, one [section] per plugin
+  rules.md        prose for the critics, one section per command
+  templates/      optional file templates (e.g. pr.md)
+  hooks/          enforce-suite.sh · gates/ · aether-config.sh
+  out/            CRITIQUE.md · TEMPER.md · .nudged
+  manifest        what the installer put on this machine
+```
+
 | What | Where |
 |---|---|
-| `enforce-suite.sh` | `~/.local/share/aether/enforce-suite.sh` (global) or `.claude/hooks/enforce-suite.sh` (local) |
-| Plugin gates | `<hook dir>/gates/enforce-<plugin>.sh` — sourced by the suite hook |
-| Plugin hooks | `<hook dir>/plugin-hooks/` — PostToolUse scripts the suite has no equivalent for |
+| Config | `<root>/config` — sectioned, resolved per key |
+| Prose rules | `<root>/rules.md` — concatenated, global then project |
+| `enforce-suite.sh` | `<root>/hooks/enforce-suite.sh` |
+| Plugin gates | `<root>/hooks/gates/enforce-<plugin>.sh` — sourced by the suite hook |
+| Plugin hooks | `<root>/hooks/plugin-hooks/` — PostToolUse scripts the suite has no equivalent for |
+| Config reader | `<root>/hooks/aether-config.sh` — the one parser, shared with the CLI |
+| Generated output | `<root>/out/` — CRITIQUE.md, TEMPER.md |
+| Install manifest | `<root>/manifest` |
 | Hook registration | `settings.json` — one `PreToolUse` entry, matcher `Bash\|Write\|Edit\|MultiEdit` |
 | Permissions | `settings.json` — `Bash`, `Read`, `Write`, plus each installed plugin's own (bonsai adds `mcp__bonsai-*__*`) |
-| `aether` CLI | `~/.local/bin/aether` |
 | Slash commands | `~/.claude/commands/` — `critique-*.md`, `draft-*.md` |
 | CLAUDE.md block | injected with `--claude-md` flag |
-| Install manifest | `~/.claude/aether.manifest` |
+| `aether` CLI | `~/.local/bin/aether` — a binary belongs on PATH |
+
+`$AETHER_HOME` overrides the global root if you would rather it lived at
+`~/.config/aether`. One variable, read in one place.
+
+Hook *scripts* live under `<root>/hooks/` because `settings.json` references them
+by absolute path, so they can live anywhere. That also retires
+`~/.local/share/aether/`, which used to hold the global hook while the local one
+sat in `.claude/hooks/` — different parents for the same artefact.
 
 Per-plugin `PreToolUse` hooks are removed during install, since `enforce-suite.sh` supersedes them. `settings.json` and `CLAUDE.md` are copied to `.bak` before the first change.
+
+### Upgrading from 1.0.0
+
+`aether install` migrates the old layout on the way past — four `<plugin>.config`
+files per scope become one sectioned `config`, `whetstone.config.md` and any
+`pr.rules_file` become `rules.md`, and `.claude/plans/{CRITIQUE,TEMPER}.md` move
+to `out/`. Every old file is copied to `.bak` before being removed, the pass is
+idempotent, and where both old and new exist the **new** value wins.
+
+`aether migrate` runs it on its own. Until you migrate, the old
+`<plugin>.config` files are still *read* when the new file has no value for a
+key, so nothing breaks in the meantime.
 
 ### PreToolUse is unified; PostToolUse is not
 
 The suite hook covers the `PreToolUse` phase only. cairn and bonsai also register `PostToolUse` hooks — `post-cairn.sh` (suggests `/draft-commit` after a clean review, `/draft-changelog` after a version bump) and `post-bonsai.sh` (reference-drift check after a rename-shaped edit). These have no equivalent in the suite hook, so they are left registered per-plugin rather than removed.
+
+---
+
+## Configuration
+
+One file per scope, sectioned. Plain text — open it and edit it; nothing caches.
+
+```
+# ~/.aether/config — your defaults, everywhere
+enabled: true
+
+[project]
+test:      uv run pytest
+lint:      uvx ruff check
+typecheck: npx tsc --noEmit
+
+[git]
+scopes: api, web, infra
+ticket: TK-[0-9]+
+
+[temper]
+auto_nudge_lines: 200
+critical_paths:   *auth* *token* migrations/ *.sql
+
+[cairn]
+style: conventional
+
+[whetstone]
+critics: impl, risk
+```
+
+Keys outside any section are suite-wide. The four sections named after plugins
+carry that plugin's settings, with every key name unchanged from the pre-1.0
+`<plugin>.config` files. Two sections describe the repository rather than a
+plugin, and they split on a clear line: **`[project]` is things to run,
+`[git]` is things to write.**
+
+### `[project]` — commands the critics execute
+
+Shell commands. This is what upgrades Coverage from *inferring* that tests exist
+to actually running them.
+
+| Key | What changes if you set it |
+|---|---|
+| `test` | `/critique-diff` and `/critique-pr` Coverage runs the suite and reports real failures |
+| `lint` / `format` | Correctness reports actual violations instead of eyeballing style |
+| `typecheck` | Correctness runs it against the changed files |
+| `build` | `/critique-pr` can confirm the branch still builds |
+| `coverage` / `coverage_min` | Coverage compares against a threshold instead of a judgement call |
+
+### `[git]` — how this project writes commits and PRs
+
+No commands, nothing executed. House rules that `/draft-commit` and `/draft-pr`
+follow and `/critique-pr` checks against.
+
+| Key | Example | What changes if you set it |
+|---|---|---|
+| `scopes` | `api, web, infra` | `/draft-commit` picks from your real scopes instead of inventing one |
+| `types` | `feat, fix, docs, chore` | restricts the Conventional Commits type it may use |
+| `ticket` | `TK-[0-9]+` | `/draft-commit` pulls the ticket from the branch name into the subject; `/critique-pr` flags a PR with none |
+| `trailers` | `Co-Authored-By` | `/draft-commit` always emits them |
+| `base` | `main` | `/draft-pr` stops auto-detecting the base branch |
+
+### How the layers override
+
+Three layers, resolved **per key** — not per file, and not per section:
+
+| Layer | Source | Beats |
+|---|---|---|
+| 1 | `~/.aether/config` | — |
+| 2 | `<project>/.aether/config` | global |
+| 3 | flags, e.g. `/critique-diff --severity=red` | both |
+
+A project file overrides only the keys it names. Set `severity` globally and
+`auto_nudge_lines` in one repo, and both apply:
+
+```
+global   [temper] auto_nudge_lines: 200
+                  severity: red, yellow
+project  [temper] auto_nudge_lines: 400
+                                              ↓
+resolved [temper] auto_nudge_lines: 400   (project)
+                  severity: red, yellow   (global)
+```
+
+### Knowing what to change
+
+The question a config file has to answer is "if I change this, what happens?"
+The schema lives in each plugin's manifest, beside the assets it already
+declares, so a key is documented by being declared — and `aether config show`
+answers the question inline:
+
+```
+$ aether config show temper
+
+[temper]
+  auto_nudge_lines     400                    project · .aether/config:14
+      Nudge before a commit whose staged diff exceeds this many lines
+      used by: enforce-temper.sh
+  auto_nudge_files     10                     default
+      Same, for number of files changed
+      used by: enforce-temper.sh
+  severity             red, yellow            global · ~/.aether/config:6
+      Which severities get reported
+      used by: /critique-diff /critique-pr
+```
+
+Value, which layer supplied it, the file and line to edit, what it does, and
+what consumes it. `--values` drops the prose once you know the file; `--raw`
+emits bare `key: value` lines, which is what the slash commands read.
+
+`aether config doctor` catches what hand-editing actually produces:
+
+```
+$ aether config doctor
+  ✗ [temper] auto_nudge_line — unknown key  (.aether/config:14)
+      did you mean auto_nudge_lines?
+  ! [project] typecheck: npx tsc --noEmit
+      npx is not on PATH — that step will be skipped
+  ✓ 14 key(s) resolved
+```
+
+An unknown key is the one worth catching most: a typo is silently ignored, the
+default applies, and the setting simply appears to have no effect.
+
+`aether config explain <section>.<key>` prints one key in full — default, type,
+every layer that sets it, and which commands read it.
+
+**The file explains itself.** Anything that writes a config — `config set`, or
+the installer seeding a first one — emits the doc line as a comment above each
+key, so "what can I put here?" is answered by the file you already have open.
+
+```
+[temper]
+# Nudge before a commit whose staged diff exceeds this many lines
+auto_nudge_lines: 400
+```
+
+### `rules.md` — prose for the critics
+
+Free text, one section per command, replacing the two mechanisms that existed
+before it: whetstone's auto-discovered `whetstone.config.md` and cairn's
+`pr.rules_file` pointer.
+
+```markdown
+[all]
+This is a bash project. Prefer POSIX-compatible constructs.
+
+[critique-diff]
+We use event sourcing — flag anything that bypasses the event log.
+
+[draft-pr]
+Always mention the ticket ID in the first line.
+```
+
+Prose **concatenates** rather than overriding: global first, then project.
+That differs from `config` deliberately — losing your global writing rules
+because a repo added one line would be the wrong default.
+
+### Editing by hand
+
+```bash
+aether config path [global]                     # print the file path
+aether config edit [global]                     # open it in $EDITOR
+aether config show [<section>]                  # resolved values + what each does
+aether config explain temper.auto_nudge_lines   # one key, in full
+aether config doctor                            # validate
+aether config set   temper.auto_nudge_lines 400 [global]
+aether config unset temper.auto_nudge_lines
+```
+
+`config set` rewrites only the line it targets, preserving your comments and
+ordering, and creates the section if it is missing.
 
 ---
 
@@ -179,7 +398,7 @@ git commit / git push / Write source file
 
 Each gate is defined once, in its own plugin's `hooks/enforce-<plugin>.sh`, and runs either standalone or sourced by the suite. Gates run top to bottom and their messages accumulate, so a single `git push` can surface both a temper and a cairn nudge.
 
-`enforce-suite.sh` skips any plugin whose `<plugin>.config` says `enabled: false`, and any gate that is not installed. All gates are non-blocking nudges, except temper which blocks high-risk operations (push without review, critical-path commit).
+`enforce-suite.sh` skips any plugin whose config says `enabled: false`, and any gate that is not installed. All gates are non-blocking nudges, except temper which blocks high-risk operations (push without review, critical-path commit).
 
 ---
 
@@ -191,6 +410,13 @@ aether install [plugin...] [global] [--claude-md] [--no-bonsai] [--dry-run]
 aether uninstall [plugin...] [global] [--claude-md]
                                          Remove a plugin, or the suite layer itself
 aether status                            Plugin state, gates, clone path, version
+aether config show [section] [--values|--raw]
+                                         Resolved values, where each came from
+aether config explain <section>.<key>    One key in full
+aether config doctor                     Validate: unknown keys, dead paths
+aether config set|unset <section>.<key> [value] [global]
+aether config path|edit [global]         Print or open the config file
+aether migrate                           Move a pre-1.0 layout into ~/.aether/
 aether enable  [local|global]            Enable all plugins
 aether disable [local|global]            Disable all plugins
 aether hook enable|disable <plugin>      Stop a gate being invoked at all
@@ -218,7 +444,7 @@ aether v1.0.0
   cairn        enabled
 
   Suite hook: enforce-suite.sh registered (global)
-  Gates:      4 loaded from /Users/you/.local/share/aether/gates
+  Gates:      4 loaded from /Users/you/.aether/hooks/gates
   Clone:      /Users/you/Code/aether
   Installed version: 1.0.0
 ```

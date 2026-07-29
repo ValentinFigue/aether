@@ -7,8 +7,15 @@ Critique a diff before commit or push — four critics, severity-rated (temper).
 Resolve settings in three steps, lowest to highest priority:
 
 **Step 1 — Read config files:**
-- Check `~/.claude/temper.config` (global defaults)
-- Check `./temper.config` (local overrides; wins over global)
+Run:
+
+```bash
+aether config show temper --raw 2>/dev/null || true
+```
+
+Each line is `key: value`, already resolved — `~/.aether/config`, then the
+project's `.aether/config`, per key, with declared defaults filled in. If it
+prints nothing, use the defaults documented below and continue.
 
 Each file is key-value, one entry per line:
 ```
@@ -179,9 +186,12 @@ After the report:
 ## Persist output
 
 After printing the report, determine the target directory:
-- If `.claude/plans/` exists in the project root → write to `.claude/plans/TEMPER.md`
-- Else if `~/.claude/plans/` exists → write to `~/.claude/plans/TEMPER.md`
-- Otherwise create `.claude/plans/` in the project root and write there
+- If the project has a `.aether/` directory → write to `.aether/out/TEMPER.md`
+- Otherwise → write to `~/.aether/out/TEMPER.md`
+
+Create the directory if it does not exist. Pre-1.1 installs wrote to
+`.claude/plans/TEMPER.md`; if that file exists and `.aether/out/` does not, keep
+appending there rather than starting a second history — `aether migrate` moves it.
 
 Prepend a header: `# Review — <diff target description> — <current date>`
 

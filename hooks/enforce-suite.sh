@@ -75,22 +75,30 @@ printf '%s' "$cmd_or_path" | grep -qE '#[[:space:]]*cairn:skip'              && 
 
 $bypass_all && exit 0
 
+# ── Config reader ────────────────────────────────────────────────────────────
+# One parser, shared with bin/aether. Under the suite it is already sourced by
+# enforce-suite.sh; standalone this finds it. A gate that cannot find it must
+# still run — every config key has a default, so the gate degrades to those
+# rather than going silent.
+if ! command -v aether_cfg_get >/dev/null 2>&1; then
+  _ac_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  for _ac in "$_ac_here/../aether-config.sh" "$_ac_here/aether-config.sh" \
+             "$_ac_here/../../../hooks/aether-config.sh" \
+             "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh"; do
+    [ -f "$_ac" ] && { . "$_ac"; break; }
+  done
+  unset _ac _ac_here
+  if ! command -v aether_cfg_get >/dev/null 2>&1; then
+    aether_cfg_get() { :; }
+    aether_out_dir() { [ -d .aether ] && printf '.aether/out' || printf '%s/out' "${AETHER_HOME:-$HOME/.aether}"; }
+  fi
+fi
+
 # ── Plugin enabled check ─────────────────────────────────────────────────────
+# Sourcing the reader here also means the gates get it for free.
 
 _plugin_enabled() {
-  local plugin="$1"
-  local global_cfg="$HOME/.claude/${plugin}.config"
-  local local_cfg="./${plugin}.config"
-  local val=""
-
-  [ -f "$global_cfg" ] && val=$(grep "^enabled:" "$global_cfg" | sed "s/^enabled: *//" | head -1) || true
-  [ -f "$local_cfg"  ] && {
-    local lv
-    lv=$(grep "^enabled:" "$local_cfg" | sed "s/^enabled: *//" | head -1 2>/dev/null) || true
-    [ -n "$lv" ] && val="$lv"
-  } || true
-
-  [ "$val" = "false" ] && return 1
+  [ "$(aether_cfg_get "$1" enabled)" = "false" ] && return 1
   return 0
 }
 

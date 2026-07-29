@@ -20,7 +20,7 @@ truth about the diff.
 
 ## Configuration
 
-Identical to `/critique-diff`: read `~/.claude/temper.config` then `./temper.config`
+Identical to `/critique-diff`: run `aether config show temper --raw`
 (local wins), honour `enabled: false` by stopping immediately, and let flags in
 $ARGUMENTS override both.
 
@@ -146,8 +146,8 @@ by hand, so choosing to merge anyway is already an explicit act.
 
 ## Persist output
 
-Append to `.claude/plans/TEMPER.md` (or `~/.claude/plans/` if the project has no
-`.claude/plans/`), with the header:
+Append to `.aether/out/TEMPER.md` (or `~/.aether/out/TEMPER.md` if the project
+has no `.aether/`), with the header:
 
 `# Review — PR #<n> <title> — <current date>`
 

@@ -40,17 +40,17 @@ for c in autocritic.md temper.md cairn-commit.md cairn-pr.md cairn-changelog.md 
   [ -f "$H/.claude/commands/$c" ] && fail "old command absent: $c" || pass "old command absent: $c"
 done
 
-[ -x "$H/.local/share/aether/enforce-suite.sh" ] \
+[ -x "$H/.aether/hooks/enforce-suite.sh" ] \
   && pass "enforce-suite.sh installed and executable" \
   || fail "enforce-suite.sh installed and executable"
 
 for g in cairn whetstone temper; do
-  [ -f "$H/.local/share/aether/gates/enforce-$g.sh" ] \
+  [ -f "$H/.aether/hooks/gates/enforce-$g.sh" ] \
     && pass "gate installed: enforce-$g.sh" || fail "gate installed: enforce-$g.sh"
 done
 # bonsai was skipped, so its gate must not be there — the suite should never
 # advise MCP tools the user has not installed.
-[ -f "$H/.local/share/aether/gates/enforce-bonsai.sh" ] \
+[ -f "$H/.aether/hooks/gates/enforce-bonsai.sh" ] \
   && fail "no bonsai gate when bonsai is skipped" \
   || pass "no bonsai gate when bonsai is skipped"
 
@@ -107,7 +107,7 @@ done
 
 # ── manifest ─────────────────────────────────────────────────────────────────
 suite "manifest"
-M="$H/.claude/aether.manifest"
+M="$H/.aether/manifest"
 assert_contains "$(cat "$M")" "version=1.0.0" "manifest records the version"
 assert_contains "$(cat "$M")" "repo=$REPO"    "manifest records the clone path"
 assert_contains "$(cat "$M")" "gates="        "manifest records the gates directory"
@@ -226,16 +226,17 @@ HG=$(new_home)
 mkdir -p "$HG/.claude/commands"
 printf 'old\n' > "$HG/.claude/commands/cairn-commit.md"
 chmod 000 "$HG/.claude/commands/cairn-commit.md"
-printf 'version=0.1.0\nscope=global\n' > "$HG/.claude/aether.manifest"
+mkdir -p "$HG/.aether"
+printf 'version=0.1.0\nscope=global\n' > "$HG/.aether/manifest"
 env HOME="$HG" bash "$REPO/install.sh" --global --no-bonsai >"$HG/out.log" 2>&1
 e=$?
 chmod 644 "$HG/.claude/commands/cairn-commit.md" 2>/dev/null || true
 assert_exit 0 "$e" "an unremovable superseded command does not fail the install"
 assert_contains "$(cat "$HG/out.log")" "Could not remove superseded" "the failure is reported, not swallowed"
-grep -q '^commands=' "$HG/.claude/aether.manifest" \
+grep -q '^commands=' "$HG/.aether/manifest" \
   && pass "the manifest is still written after a prune failure" \
   || fail "the manifest is still written after a prune failure"
-[ -x "$HG/.local/share/aether/enforce-suite.sh" ] \
+[ -x "$HG/.aether/hooks/enforce-suite.sh" ] \
   && pass "the hook is still installed after a prune failure" \
   || fail "the hook is still installed after a prune failure"
 
@@ -339,11 +340,72 @@ else
   fail "running every plugin's update leaves no pre-rename command behind" "found:$resurrected"
 fi
 
+# ── --dry-run ────────────────────────────────────────────────────────────────
+# A documented flag that has now regressed twice: once when the installers
+# became wrappers, and once when the config seeding and migration were added.
+# "Creates nothing" includes empty directories, since a stray .aether/ changes
+# where output lands.
+suite "--dry-run writes nothing"
+HD=$(new_home)
+mkdir -p "$HD/.claude"
+printf 'auto_nudge_lines: 999\n' > "$HD/.claude/temper.config"   # something to migrate
+snapshot() { ( cd "$HD" && find . | sort ); }
+before=$(snapshot)
+out=$(env HOME="$HD" bash "$REPO/install.sh" --global --claude-md --dry-run 2>&1); e=$?
+assert_exit 0 "$e" "--dry-run exits 0"
+assert_contains "$out" "dry-run" "--dry-run says so"
+assert_eq "$before" "$(snapshot)" "--dry-run creates no files and no directories"
+[ -f "$HD/.claude/temper.config" ] \
+  && pass "--dry-run does not migrate the old config" \
+  || fail "--dry-run does not migrate the old config"
+
+# ── upgrading from the pre-1.0 layout ────────────────────────────────────────
+# The old layout put the global hook in ~/.local/share/aether/. Moving it means
+# settings.json has to stop pointing at the old path — in BOTH phases. The
+# stale-hook cleanup only ever handled PreToolUse, so an upgrade left a
+# PostToolUse entry aimed at a directory that no longer exists, which Claude Code
+# would then try to run on every Bash, Write and Edit call.
+suite "upgrade deregisters the retired hook directory"
+for backend in python3 node jq; do
+  command -v "$backend" >/dev/null 2>&1 || continue
+  HL=$(new_home)
+  mkdir -p "$HL/.claude" "$HL/.local/share/aether/gates" "$HL/.local/share/aether/plugin-hooks"
+  printf 'exit 0\n' > "$HL/.local/share/aether/enforce-suite.sh"
+  printf 'exit 0\n' > "$HL/.local/share/aether/plugin-hooks/post-cairn.sh"
+  python3 - "$HL" <<'PYEOF'
+import json, sys
+h = sys.argv[1]
+old = h + "/.local/share/aether"
+json.dump({"hooks": {
+    "PreToolUse":  [{"matcher": "Bash|Write|Edit|MultiEdit",
+                     "hooks": [{"type": "command", "command": old + "/enforce-suite.sh"}]}],
+    "PostToolUse": [{"matcher": "Bash|Write|Edit",
+                     "hooks": [{"type": "command", "command": old + "/plugin-hooks/post-cairn.sh"}]}],
+}}, open(h + "/.claude/settings.json", "w"), indent=2)
+PYEOF
+  env HOME="$HL" AETHER_JSON_BACKEND="$backend" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+  dangling=$(python3 - "$HL" <<'PYEOF'
+import json, os, sys
+h = sys.argv[1]
+d = json.load(open(h + "/.claude/settings.json"))
+bad = [p + ":" + hk["command"]
+       for p in ("PreToolUse", "PostToolUse")
+       for e in d.get("hooks", {}).get(p, [])
+       for hk in e.get("hooks", [])
+       if not os.path.exists(hk["command"])]
+print(" ".join(bad))
+PYEOF
+)
+  [ -z "$dangling" ]     && pass "$backend: upgrade leaves no hook pointing at a missing script"     || fail "$backend: upgrade leaves no hook pointing at a missing script" "$dangling"
+  [ -e "$HL/.local/share/aether" ]     && fail "$backend: the retired directory is gone"     || pass "$backend: the retired directory is gone"
+  [ -f "$HL/.local/share/aether.bak/enforce-suite.sh" ]     && pass "$backend: …and backed up first"     || fail "$backend: …and backed up first"
+done
+
 suite "MCP tool-name spelling"
 offenders=$(grep -rln 'mcp__bonsai_py__\|mcp__bonsai_ts__' "$REPO" 2>/dev/null \
   | grep -v '/\.git/' \
   | grep -vE '/(__pycache__|node_modules|\.venv|dist)/' \
-  | grep -vE '/(tests|\.claude/plans)/' \
+  | grep -vE '/(tests|\.claude/plans|\.aether/out)/' \
   | grep -vE '/(install|uninstall)\.sh$' \
   | grep -vE '/bin/(bonsai|aether)$' \
   | grep -vE '/__main__\.py$' \
@@ -379,7 +441,8 @@ OLD_NAMES="autocritic.md temper.md cairn-commit.md cairn-pr.md cairn-changelog.m
 for c in $OLD_NAMES; do printf 'stale copy of %s\n' "$c" > "$HU/.claude/commands/$c"; done
 # A 0.1.0 manifest has no commands= line, so the installer must fall back to the
 # known pre-rename set rather than finding nothing to prune.
-printf 'version=0.1.0\nscope=global\n' > "$HU/.claude/aether.manifest"
+mkdir -p "$HU/.aether"
+printf 'version=0.1.0\nscope=global\n' > "$HU/.aether/manifest"
 
 env HOME="$HU" bash "$REPO/install.sh" --global --no-bonsai >"$HU/out.log" 2>&1
 e=$?
@@ -390,7 +453,7 @@ done
 for c in critique-plan.md critique-diff.md draft-commit.md; do
   [ -f "$HU/.claude/commands/$c" ] && pass "installed $c" || fail "installed $c"
 done
-assert_contains "$(cat "$HU/.claude/aether.manifest")" "commands=" \
+assert_contains "$(cat "$HU/.aether/manifest")" "commands=" \
   "the manifest now records what it shipped"
 
 # A hand-edited command must not vanish silently.
@@ -399,7 +462,8 @@ HE=$(new_home)
 mkdir -p "$HE/.claude/commands"
 printf 'MY OWN HEAVILY EDITED VERSION\n' > "$HE/.claude/commands/cairn-commit.md"
 cp "$REPO/plugins/cairn/.claude/commands/draft-pr.md" "$HE/.claude/commands/cairn-pr.md" 2>/dev/null || true
-printf 'version=0.1.0\nscope=global\n' > "$HE/.claude/aether.manifest"
+mkdir -p "$HE/.aether"
+printf 'version=0.1.0\nscope=global\n' > "$HE/.aether/manifest"
 env HOME="$HE" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
 [ -f "$HE/.claude/commands/cairn-commit.md.bak" ] \
   && pass "an edited command is backed up before removal" \

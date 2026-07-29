@@ -342,12 +342,20 @@ offenders=$(grep -rln 'mcp__bonsai_py__\|mcp__bonsai_ts__' "$REPO" 2>/dev/null \
   | grep -vE '/(install|uninstall)\.sh$' \
   | grep -vE '/bin/(bonsai|aether)$' \
   | grep -vE '/__main__\.py$' \
-  | grep -vE '/CHANGELOG\.md$' || true)
+  | grep -vE '/CHANGELOG\.md$' \
+  | grep -vE '/aether\.plugin$' || true)
 if [ -z "$offenders" ]; then
   pass "no underscore MCP spellings outside cleanup paths"
 else
   fail "no underscore MCP spellings outside cleanup paths" $offenders
 fi
+
+# A manifest may name the old spelling only under legacy_permissions, which is the
+# declaration that it should be *removed*. Anywhere else in a manifest is a bug.
+for m in "$REPO"/plugins/*/aether.plugin; do
+  bad=$(grep -n 'mcp__bonsai_py__\|mcp__bonsai_ts__' "$m" 2>/dev/null | grep -vc '^[0-9]*:legacy_permissions:' || true)
+  assert_eq "0" "$bad" "$(basename "$(dirname "$m")")/aether.plugin names the old spelling only as legacy_permissions"
+done
 
 # Files that legitimately mention the old spelling must only remove it, never add it.
 for f in "$REPO/install.sh" "$REPO/plugins/bonsai/install.sh"; do

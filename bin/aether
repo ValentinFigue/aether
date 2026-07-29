@@ -10,6 +10,8 @@ GLOBAL_SETTINGS="$HOME/.claude/settings.json"
 GLOBAL_MANIFEST="$HOME/.claude/aether.manifest"
 LOCAL_MANIFEST=".claude/aether.manifest"
 
+# Fallback only. The live list comes from _plugins_available(), which reads the
+# manifests, so a new plugin appears in `aether status` by existing.
 PLUGINS="bonsai whetstone temper cairn"
 
 usage() {
@@ -17,6 +19,8 @@ usage() {
 aether — manage your aether suite install
 
 Usage:
+  aether install [plugin...] [global] [--claude-md] [--no-bonsai]
+                                        Install the suite, or named plugins
   aether status                         Show install state for all plugins
   aether enable  [local|global]         Enable all plugins (default: local)
   aether disable [local|global]         Disable all plugins
@@ -60,6 +64,423 @@ _manifest_get() {
   [ -f "$LOCAL_MANIFEST"  ] && manifest="$LOCAL_MANIFEST"
   [ -z "$manifest" ] && return 0
   grep "^$key=" "$manifest" | sed "s/^$key=//" | head -1 || true
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ENGINE
+#
+# One implementation of install and uninstall, driven by plugins/<name>/
+# aether.plugin. Replaces five installers and five uninstallers that expressed
+# the same five operations — copy a file, copy a tree, symlink, upsert a JSON
+# key, splice a sentinel block — over per-plugin data.
+#
+# Uninstall reads the same manifest in reverse, which is what makes the
+# install/uninstall asymmetries structurally impossible rather than merely
+# fixed. Four had drifted: temper's uninstaller never removed its commands,
+# cairn's never removed its permissions.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Where the clone is ───────────────────────────────────────────────────────
+# Running from the clone (install.sh execs us) the repo is two levels up.
+# Running installed, the manifest recorded it.
+_repo_root() {
+  local here
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  if [ -d "$here/../plugins" ]; then
+    (cd "$here/.." && pwd -P); return 0
+  fi
+  local recorded; recorded=$(_manifest_get "repo") || recorded=""
+  [ -n "$recorded" ] && [ -d "$recorded/plugins" ] && { printf '%s' "$recorded"; return 0; }
+  return 1
+}
+
+# ── Manifest reader ──────────────────────────────────────────────────────────
+# Plain grep/sed, deliberately: no python3, node or jq is needed to work out
+# what to install. Only the settings.json steps need an interpreter, which is
+# the same degradation the hand-written installers had.
+_mf() {
+  local plugin="$1" key="$2" repo
+  repo=$(_repo_root) || return 1
+  local f="$repo/plugins/$plugin/aether.plugin"
+  [ -f "$f" ] || return 1
+  grep "^$key:" "$f" | head -1 | sed "s/^$key: *//" || true
+}
+
+# Every plugin with a manifest in the clone. Replaces the hardcoded
+# PLUGINS="bonsai whetstone temper cairn", so a new plugin appears in
+# `aether status` by existing.
+_plugins_available() {
+  local repo; repo=$(_repo_root) || return 0
+  local d
+  for d in "$repo"/plugins/*/aether.plugin; do
+    [ -f "$d" ] || continue
+    basename "$(dirname "$d")"
+  done
+}
+
+# ── Scope resolver ───────────────────────────────────────────────────────────
+# The single place a scope becomes a path. Scope handling was got wrong twice
+# in the previous release — `aether uninstall` and all three plugin `update`s —
+# because every call site re-derived these by hand.
+_root()         { [ "$1" = global ] && printf '%s' "${AETHER_HOME:-$HOME/.local/share/aether}" || printf '.claude/hooks'; }
+_claude_dir()   { [ "$1" = global ] && printf '%s' "$HOME/.claude"        || printf '.claude'; }
+_commands_dir() { printf '%s/commands' "$(_claude_dir "$1")"; }
+_settings()     { printf '%s/settings.json' "$(_claude_dir "$1")"; }
+_claude_md()    { [ "$1" = global ] && printf '%s' "$HOME/.claude/CLAUDE.md" || printf './CLAUDE.md'; }
+_cli_dir()      { [ "$1" = global ] && printf '%s' "$HOME/.local/bin"     || printf '.bin'; }
+_manifest_for() { [ "$1" = global ] && printf '%s' "$GLOBAL_MANIFEST"     || printf '%s' "$LOCAL_MANIFEST"; }
+_gates_dir()    { printf '%s/gates' "$(_root "$1")"; }
+
+# ── Primitives ───────────────────────────────────────────────────────────────
+# Non-fatal by design. These run under `set -e`, partway through an install; a
+# single unwritable file must not abort and leave a half-configured machine.
+
+_op_copy() {
+  local src="$1" dst="$2"
+  mkdir -p "$(dirname "$dst")" 2>/dev/null || true
+  if cp "$src" "$dst" 2>/dev/null; then
+    [ -x "$src" ] && chmod +x "$dst" 2>/dev/null || true
+    return 0
+  fi
+  printf '  ! could not write %s\n' "$dst"; return 1
+}
+
+_op_copy_tree() {
+  local src="$1" dst="$2"
+  mkdir -p "$dst" 2>/dev/null || true
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -r "$src/" "$dst/" 2>/dev/null && return 0
+  else
+    cp -R "$src/." "$dst/" 2>/dev/null && return 0
+  fi
+  printf '  ! could not copy tree to %s\n' "$dst"; return 1
+}
+
+_op_link() {
+  local src="$1" dst="$2"
+  mkdir -p "$(dirname "$dst")" 2>/dev/null || true
+  ln -sf "$src" "$dst" 2>/dev/null && return 0
+  printf '  ! could not link %s\n' "$dst"; return 1
+}
+
+_op_rm() {
+  local target="$1"
+  [ -e "$target" ] || return 0
+  rm -rf "$target" 2>/dev/null && { printf '  ✓ removed %s\n' "$target"; return 0; }
+  printf '  ! could not remove %s\n' "$target"; return 1
+}
+
+# Splice a sentinel-delimited block into a markdown file, replacing any existing
+# one. Replacing rather than skipping is what lets a template change reach an
+# existing install — skipping froze the block at whatever version wrote it first.
+_op_splice() {
+  local file="$1" marker="$2" content_file="$3" wrap="$4"
+  mkdir -p "$(dirname "$file")" 2>/dev/null || true
+  [ -f "$file" ] || : > "$file"
+  if grep -q "<!-- ${marker}:start -->" "$file" 2>/dev/null; then
+    awk "/<!-- ${marker}:start -->/{skip=1} !skip{print} /<!-- ${marker}:end -->/{skip=0}" \
+      "$file" > "$file.tmp" 2>/dev/null && mv "$file.tmp" "$file"
+  fi
+  {
+    printf '\n'
+    if [ "$wrap" = wrap ]; then
+      printf '<!-- %s:start -->\n' "$marker"
+      cat "$content_file"
+      printf '<!-- %s:end -->\n' "$marker"
+    else
+      cat "$content_file"
+    fi
+  } >> "$file"
+}
+
+_op_unsplice() {
+  local file="$1" marker="$2"
+  [ -f "$file" ] || return 0
+  grep -q "<!-- ${marker}:start -->" "$file" 2>/dev/null || return 0
+  awk "/<!-- ${marker}:start -->/{skip=1} !skip{print} /<!-- ${marker}:end -->/{skip=0}" \
+    "$file" > "$file.tmp" 2>/dev/null && mv "$file.tmp" "$file"
+  printf '  ✓ removed %s block from %s\n' "$marker" "$file"
+}
+
+# ── Per-plugin install ───────────────────────────────────────────────────────
+# suite_mode=1 means enforce-suite.sh will source this plugin's gate, so its own
+# PreToolUse registration and its own CLAUDE.md block are both skipped.
+_engine_install() {
+  local plugin="$1" scope="$2" suite_mode="${3:-0}" repo
+  repo=$(_repo_root) || { printf '  ✗ cannot locate the aether clone\n'; return 1; }
+  local proot="$repo/plugins/$plugin"
+
+  # Scope support — bonsai is global-only; every path it writes is $HOME-rooted.
+  local scopes; scopes=$(_mf "$plugin" scopes)
+  case " $scopes " in *" $scope "*) ;; *)
+    printf '  %s: skipped — no %s scope\n' "$plugin" "$scope"; return 0 ;;
+  esac
+
+  # Prerequisites, before anything is written.
+  local req; req=$(_mf "$plugin" requires)
+  local missing=""
+  for r in $req; do command -v "$r" >/dev/null 2>&1 || missing="$missing $r"; done
+  if [ -n "$missing" ]; then
+    printf '  %s: skipped — needs%s\n' "$plugin" "$missing"
+    printf '          install them, then: aether install %s\n' "$plugin"
+    return 2
+  fi
+
+  # Build.
+  local build; build=$(_mf "$plugin" build)
+  if [ -n "$build" ] && [ -f "$proot/$build" ]; then
+    printf '  %s: building, this takes a minute...\n' "$plugin"
+    bash "$proot/$build" >/dev/null 2>&1 || { printf '  ✗ %s build failed\n' "$plugin"; return 1; }
+  fi
+
+  local cdir; cdir=$(_commands_dir "$scope")
+
+  # Commands, and the ones this plugin used to ship. An orphaned command file is
+  # not inert: it stays in the palette and still runs the stale copy.
+  local c
+  for c in $(_mf "$plugin" legacy_commands); do
+    [ -f "$cdir/$c" ] || continue
+    cp "$cdir/$c" "$cdir/$c.bak" 2>/dev/null && _op_rm "$cdir/$c" >/dev/null \
+      && printf '  ✓ removed superseded %s (kept a .bak)\n' "$cdir/$c" \
+      || printf '  ! could not remove superseded %s\n' "$cdir/$c"
+  done
+  for c in $(_mf "$plugin" commands); do
+    _op_copy "$proot/.claude/commands/$c" "$cdir/$c" || true
+  done
+
+  # Skills.
+  local s
+  for s in $(_mf "$plugin" skills); do
+    _op_copy_tree "$proot/skills/$s" "$(_claude_dir "$scope")/skills/$s" || true
+  done
+
+  # CLI.
+  local cli; cli=$(_mf "$plugin" cli)
+  if [ -n "$cli" ]; then
+    local cli_scopes; cli_scopes=$(_mf "$plugin" cli.scopes); cli_scopes="${cli_scopes:-local global}"
+    case " $cli_scopes " in *" $scope "*)
+      if [ "$(_mf "$plugin" cli.strategy)" = link ]; then
+        _op_link "$proot/bin/$cli" "$(_cli_dir "$scope")/$cli" || true
+      else
+        _op_copy "$proot/bin/$cli" "$(_cli_dir "$scope")/$cli" || true
+      fi ;;
+    esac
+  fi
+
+  # CLAUDE.md — skipped under the suite, whose unified block supersedes it.
+  if [ "$suite_mode" = 0 ] && [ "${WITH_CLAUDE_MD:-false}" = true ]; then
+    local tpl; tpl=$(_mf "$plugin" template)
+    if [ -n "$tpl" ] && [ -f "$proot/$tpl" ]; then
+      local wrap=nowrap
+      [ "$(_mf "$plugin" template.has_own_sentinels)" = false ] && wrap=wrap
+      _op_splice "$(_claude_md "$scope")" "$(_mf "$plugin" template.sentinel)" "$proot/$tpl" "$wrap"
+      printf '  ✓ %s CLAUDE.md block written\n' "$plugin"
+    fi
+  fi
+
+  printf '  ✓ %s installed\n' "$plugin"
+  return 0
+}
+
+# ── Per-plugin uninstall ─────────────────────────────────────────────────────
+# Same manifest, read in reverse.
+_engine_uninstall() {
+  local plugin="$1" scope="$2" repo
+  repo=$(_repo_root) || return 1
+  local cdir; cdir=$(_commands_dir "$scope")
+  local c
+
+  for c in $(_mf "$plugin" commands) $(_mf "$plugin" legacy_commands); do
+    _op_rm "$cdir/$c" >/dev/null 2>&1 && printf '  ✓ removed %s\n' "$cdir/$c"
+  done
+  for s in $(_mf "$plugin" skills); do
+    _op_rm "$(_claude_dir "$scope")/skills/$s"
+  done
+  local cli; cli=$(_mf "$plugin" cli)
+  [ -n "$cli" ] && _op_rm "$(_cli_dir "$scope")/$cli"
+  local sentinel; sentinel=$(_mf "$plugin" template.sentinel)
+  [ -n "$sentinel" ] && _op_unsplice "$(_claude_md "$scope")" "$sentinel"
+  for sentinel in $(_mf "$plugin" template.legacy_sentinels); do
+    _op_unsplice "$(_claude_md "$scope")" "$sentinel"
+  done
+  return 0
+}
+
+# ── settings.json helpers ────────────────────────────────────────────────────
+# Ported verbatim from install.sh. _json_backend / AETHER_JSON_BACKEND is the
+# only 3-interpreter chain in the suite with test coverage — the per-plugin
+# installers each had their own, and cairn's was python3-only, so its
+# PostToolUse hook silently never registered on a node-or-jq-only machine.
+
+_backup() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  cp "$file" "$file.bak"
+}
+
+_json_backend() {
+  if [ -n "${AETHER_JSON_BACKEND:-}" ]; then printf '%s' "$AETHER_JSON_BACKEND"; return 0; fi
+  if   command -v python3 &>/dev/null; then printf 'python3'
+  elif command -v node    &>/dev/null; then printf 'node'
+  elif command -v jq      &>/dev/null; then printf 'jq'
+  else printf 'none'; fi
+}
+
+_json_remove_stale_hooks() {
+  local file="$1"
+  case "$(_json_backend)" in
+   python3)
+    python3 - "$file" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+import json, sys
+f = sys.argv[1]
+with open(f) as fh: s = json.load(fh)
+STALE = ["enforce-cairn", "enforce-temper", "enforce-whetstone",
+         "enforce-bonsai", "enforce-suite"]
+entries = s.get("hooks", {}).get("PreToolUse", [])
+for entry in entries:
+    entry["hooks"] = [
+        h for h in entry.get("hooks", [])
+        if not any(kw in h.get("command", "") for kw in STALE)
+    ]
+if "hooks" in s and "PreToolUse" in s["hooks"]:
+    s["hooks"]["PreToolUse"] = [e for e in entries if e.get("hooks")]
+print(json.dumps(s, indent=2))
+PYEOF
+    ;;
+   node)
+    node - "$file" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+const f = process.argv[2];
+const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
+const STALE = ["enforce-cairn", "enforce-temper", "enforce-whetstone",
+               "enforce-bonsai", "enforce-suite"];
+if (s.hooks && s.hooks.PreToolUse) {
+  s.hooks.PreToolUse = s.hooks.PreToolUse
+    .map(e => ({ ...e, hooks: (e.hooks || []).filter(
+      h => !STALE.some(kw => (h.command || "").includes(kw))) }))
+    .filter(e => e.hooks.length);
+}
+process.stdout.write(JSON.stringify(s, null, 2) + "\n");
+JSEOF
+    ;;
+   jq)
+    jq '
+      def stale: ["enforce-cairn","enforce-temper","enforce-whetstone","enforce-bonsai","enforce-suite"];
+      if (.hooks.PreToolUse | type) == "array" then
+        .hooks.PreToolUse |= (
+          map(.hooks |= (map(select(.command as $c | (stale | any(. as $k | $c | contains($k))) | not))))
+          | map(select((.hooks | length) > 0))
+        )
+      else . end
+    ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+    ;;
+   *)
+    printf '  Could not clean stale hooks (install python3, node, or jq).\n'
+    return 1
+    ;;
+  esac
+}
+
+_json_register_suite_hook() {
+  local file="$1" hook_path="$2"
+  local matcher="Bash|Write|Edit|MultiEdit"
+  case "$(_json_backend)" in
+   python3)
+    python3 - "$file" "$hook_path" "$matcher" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+import json, sys
+f, hook_path, matcher = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(f) as fh: s = json.load(fh)
+hooks = s.setdefault("hooks", {})
+pre = hooks.setdefault("PreToolUse", [])
+entry = next((e for e in pre if e.get("matcher") == matcher), None)
+if entry is None:
+    entry = {"matcher": matcher, "hooks": []}
+    pre.append(entry)
+if not any(h.get("command") == hook_path for h in entry["hooks"]):
+    entry["hooks"].append({"type": "command", "command": hook_path})
+print(json.dumps(s, indent=2))
+PYEOF
+    ;;
+   node)
+    node - "$file" "$hook_path" "$matcher" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+const [f, hookPath, matcher] = process.argv.slice(2);
+const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
+s.hooks = s.hooks || {};
+s.hooks.PreToolUse = s.hooks.PreToolUse || [];
+let entry = s.hooks.PreToolUse.find(e => e.matcher === matcher);
+if (!entry) { entry = { matcher, hooks: [] }; s.hooks.PreToolUse.push(entry); }
+entry.hooks = entry.hooks || [];
+if (!entry.hooks.some(h => h.command === hookPath)) {
+    entry.hooks.push({ type: "command", command: hookPath });
+}
+process.stdout.write(JSON.stringify(s, null, 2) + "\n");
+JSEOF
+    ;;
+   jq)
+    jq --arg p "$hook_path" --arg m "$matcher" '
+      .hooks.PreToolUse |= (
+        if . == null then [{"matcher":$m,"hooks":[{"type":"command","command":$p}]}]
+        else
+          if any(.[]; .matcher == $m) then
+            map(if .matcher == $m then
+              .hooks |= if any(.[]; .command == $p) then . else . + [{"type":"command","command":$p}] end
+            else . end)
+          else . + [{"matcher":$m,"hooks":[{"type":"command","command":$p}]}]
+          end
+        end
+      )' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+    ;;
+   *)
+    printf '  Could not register hook (install python3, node, or jq).\n'
+    printf '  Add a PreToolUse hook pointing to %s manually.\n' "$hook_path"
+    return 1
+    ;;
+  esac
+}
+
+# Permissions, aggregated from the manifests of the plugins actually installed,
+# plus the suite's own. legacy_permissions are removed — bonsai's underscore
+# spelling matched no tool, so the permission it granted was inert.
+_json_sync_perms() {
+  local file="$1" add="$2" drop="$3"
+  case "$(_json_backend)" in
+   python3)
+    python3 - "$file" "$add" "$drop" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+import json, sys
+f, add, drop = sys.argv[1], sys.argv[2].split(), sys.argv[3].split()
+with open(f) as fh: s = json.load(fh)
+allow = s.setdefault("permissions", {}).setdefault("allow", [])
+for p in add:
+    if p not in allow: allow.append(p)
+for d in drop:
+    while d in allow: allow.remove(d)
+print(json.dumps(s, indent=2))
+PYEOF
+    ;;
+   node)
+    node - "$file" "$add" "$drop" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+const [f, add, drop] = process.argv.slice(2);
+const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
+s.permissions = s.permissions || {};
+s.permissions.allow = s.permissions.allow || [];
+for (const p of add.split(/\s+/).filter(Boolean))
+  if (!s.permissions.allow.includes(p)) s.permissions.allow.push(p);
+const dead = new Set(drop.split(/\s+/).filter(Boolean));
+s.permissions.allow = s.permissions.allow.filter(p => !dead.has(p));
+process.stdout.write(JSON.stringify(s, null, 2) + "\n");
+JSEOF
+    ;;
+   jq)
+    jq --arg a "$add" --arg d "$drop" '
+      .permissions.allow = (
+        ((.permissions.allow // []) + ($a | split(" ") | map(select(. != ""))))
+        | map(select(. as $p | ($d | split(" ") | index($p)) | not))
+        | reduce .[] as $x ([]; if index($x) then . else . + [$x] end)
+      )' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+    ;;
+   *)
+    printf '  Could not update permissions (install python3, node, or jq).\n'
+    return 1 ;;
+  esac
 }
 
 cmd_status() {
@@ -322,10 +743,144 @@ PYEOF
   printf 'Restart Claude Code to apply changes.\n'
 }
 
+# MCP servers go in ~/.claude.json, not settings.json. Declared flat in the
+# manifest as mcp.<name>.command / .args, with ${PLUGIN_ROOT} expanded here —
+# which is why moving the clone breaks bonsai and nothing else.
+_json_mcp_sync() {
+  local plugin="$1" proot="$2" action="$3"
+  command -v python3 >/dev/null 2>&1 || { printf '  ! MCP registration needs python3\n'; return 1; }
+  local names spec=""
+  names=$(grep -oE '^mcp\.[a-z-]+\.command:' "$proot/aether.plugin" 2>/dev/null \
+          | sed 's/^mcp\.//;s/\.command:$//' | sort -u)
+  [ -n "$names" ] || return 0
+  local n
+  for n in $names; do
+    spec="$spec$n"$'\t'"$(_mf "$plugin" "mcp.$n.command")"$'\t'"$(_mf "$plugin" "mcp.$n.args" | sed "s|\${PLUGIN_ROOT}|$proot|g")"$'\n'
+  done
+  printf '%s' "$spec" | python3 - "$action" <<'PYEOF'
+import json, os, sys
+action = sys.argv[1]
+path = os.path.expanduser("~/.claude.json")
+data = {}
+if os.path.exists(path):
+    try:
+        with open(path) as f: data = json.load(f)
+    except json.JSONDecodeError:
+        pass
+servers = data.setdefault("mcpServers", {})
+for line in sys.stdin.read().splitlines():
+    if not line.strip(): continue
+    name, cmd, args = line.split("\t", 2)
+    if action == "remove":
+        servers.pop(name, None)
+    else:
+        servers[name] = {"type": "stdio", "command": cmd, "args": args.split()}
+os.makedirs(os.path.dirname(path), exist_ok=True)
+tmp = path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(data, f, indent=2); f.write("\n")
+os.replace(tmp, path)
+PYEOF
+}
+
+# ── aether install ───────────────────────────────────────────────────────────
+cmd_install() {
+  local scope="local" want=""
+  WITH_CLAUDE_MD=false
+  local no_bonsai=false
+  for arg in "$@"; do
+    case "$arg" in
+      global|--global) scope="global" ;;
+      --claude-md)     WITH_CLAUDE_MD=true ;;
+      --no-bonsai)     no_bonsai=true ;;
+      -*)              printf 'Unknown option: %s\n' "$arg"; return 1 ;;
+      *)               want="$want $arg" ;;
+    esac
+  done
+
+  local repo; repo=$(_repo_root) || { printf 'Cannot locate the aether clone.\n'; return 1; }
+  local targets; targets=$(_plugins_available)
+  [ -n "$want" ] && targets="$want"
+
+  local settings; settings=$(_settings "$scope")
+  mkdir -p "$(dirname "$settings")"
+  [ -f "$settings" ] || printf '{}\n' > "$settings"
+  _backup "$settings"
+
+  # Per-plugin PreToolUse hooks are superseded by enforce-suite.sh.
+  _json_remove_stale_hooks "$settings" || true
+
+  printf '\nInstalling from %s ...\n' "$repo"
+  local installed="" failed=0 p
+  for p in $targets; do
+    [ "$p" = bonsai ] && [ "$no_bonsai" = true ] && { printf '  bonsai: skipped (--no-bonsai)\n'; continue; }
+    if _engine_install "$p" "$scope" 1; then
+      installed="$installed $p"
+      [ -n "$(_mf "$p" mcp.bonsai-py.command)" ] && _json_mcp_sync "$p" "$repo/plugins/$p" add || true
+    else
+      [ $? -eq 2 ] || failed=1
+    fi
+  done
+  _json_remove_stale_hooks "$settings" || true
+
+  # Suite hook and the gates it sources.
+  printf '\nInstalling suite hook...\n'
+  local hookdir; hookdir=$(_root "$scope")
+  local gates;   gates=$(_gates_dir "$scope")
+  mkdir -p "$hookdir" "$gates"
+  _op_copy "$repo/hooks/enforce-suite.sh" "$hookdir/enforce-suite.sh"
+  rm -f "$gates"/enforce-*.sh 2>/dev/null || true
+  for p in $installed; do
+    local g="$repo/plugins/$p/hooks/enforce-$p.sh"
+    [ -f "$g" ] && _op_copy "$g" "$gates/enforce-$p.sh"
+  done
+  printf '  ✓ %s gates installed\n' "$(ls "$gates" 2>/dev/null | wc -l | tr -d ' ')"
+  _json_register_suite_hook "$settings" "$hookdir/enforce-suite.sh" \
+    && printf '  ✓ PreToolUse hook registered\n'
+
+  # Permissions, aggregated from the manifests of what actually installed.
+  local add="Bash Read Write" drop=""
+  for p in $installed; do
+    add="$add $(_mf "$p" permissions)"
+    drop="$drop $(_mf "$p" legacy_permissions)"
+  done
+  _json_sync_perms "$settings" "$add" "$drop" && printf '  ✓ permissions synced\n'
+
+  _op_copy "$repo/bin/aether" "$(_cli_dir "$scope")/aether"
+  printf '  ✓ aether CLI installed\n'
+
+  if [ "$WITH_CLAUDE_MD" = true ]; then
+    _backup "$(_claude_md "$scope")"
+    for p in $(_plugins_available); do
+      _op_unsplice "$(_claude_md "$scope")" "$(_mf "$p" template.sentinel)" >/dev/null 2>&1 || true
+    done
+    _op_splice "$(_claude_md "$scope")" aether "$repo/templates/CLAUDE.md" nowrap
+    printf '  ✓ aether CLAUDE.md block written\n'
+  fi
+
+  local shipped=""
+  for p in $installed; do shipped="$shipped $(_mf "$p" commands)"; done
+  local mf; mf=$(_manifest_for "$scope"); mkdir -p "$(dirname "$mf")"
+  cat > "$mf" <<MEOF
+version=$VERSION
+scope=$scope
+hook=$hookdir/enforce-suite.sh
+gates=$gates
+repo=$repo
+claude_md=$WITH_CLAUDE_MD
+plugins=$(echo $installed)
+commands=$(echo $shipped)
+MEOF
+  printf '\n  ✓ manifest written to %s\n' "$mf"
+  [ "$failed" -eq 0 ] || { printf '\naether installed with errors.\n'; return 1; }
+  printf '\naether v%s installed (%s). Restart Claude Code to activate.\n' "$VERSION" "$scope"
+}
+
 COMMAND="${1:-help}"
 shift || true
 
 case "$COMMAND" in
+  install)   cmd_install "$@" ;;
   status)    cmd_status ;;
   enable)    cmd_enable "$@" ;;
   disable)   cmd_disable "$@" ;;

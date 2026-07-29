@@ -440,6 +440,45 @@ for l in sys.stdin:
     || fail "bonsai-ts answers a handshake" "got: ${n:-no response}"
 fi
 
+# ── a relocated hook is registered once ──────────────────────────────────────
+# cairn used to install standalone into ~/.local/share/cairn/. A machine that had
+# done that ended up with post-cairn.sh registered twice — the old path and the
+# new one — so it fired twice on every Bash, Write and Edit. Keying the dedupe on
+# the script's basename covers every past and future location without a list.
+suite "hook registration is idempotent across a move"
+HR=$(new_home)
+mkdir -p "$HR/.claude" "$HR/.local/share/cairn"
+printf 'exit 0\n' > "$HR/.local/share/cairn/post-cairn.sh"
+python3 - "$HR" <<'PYEOF'
+import json, sys
+h = sys.argv[1]
+json.dump({"hooks": {"PostToolUse": [{"matcher": "Bash|Write|Edit", "hooks": [
+    {"type": "command", "command": h + "/.local/share/cairn/post-cairn.sh"}]}]}},
+    open(h + "/.claude/settings.json", "w"), indent=2)
+PYEOF
+env HOME="$HR" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+n=$(python3 - "$HR/.claude/settings.json" <<'PYEOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(sum(1 for e in d.get("hooks", {}).get("PostToolUse", [])
+            for h in e.get("hooks", [])
+            if h.get("command", "").endswith("post-cairn.sh")))
+PYEOF
+)
+assert_eq "1" "$n" "post-cairn.sh is registered exactly once after a relocation"
+
+# Installing twice must not add a second copy either.
+env HOME="$HR" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+n=$(python3 - "$HR/.claude/settings.json" <<'PYEOF'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(sum(1 for e in d.get("hooks", {}).get("PostToolUse", [])
+            for h in e.get("hooks", [])
+            if h.get("command", "").endswith("post-cairn.sh")))
+PYEOF
+)
+assert_eq "1" "$n" "…and still once after a second install"
+
 # ── a plugin is a manifest plus assets ───────────────────────────────────────
 # trellis exists to prove this: it ships no install.sh and no uninstall.sh, so if
 # the engine needs one, trellis cannot be installed at all.
@@ -489,6 +528,13 @@ out=$(env HOME="$HD" bash "$REPO/install.sh" --global --claude-md --dry-run 2>&1
 assert_exit 0 "$e" "--dry-run exits 0"
 assert_contains "$out" "dry-run" "--dry-run says so"
 assert_eq "$before" "$(snapshot)" "--dry-run creates no files and no directories"
+# …and does not claim it did. "✓ hook registered" in a dry run is untrue, and the
+# earlier dry-run bugs were the same failure one level down: doing the work.
+case "$out" in
+  *"✓"*) fail "--dry-run never prints a ✓" "output contains a completed-step mark" ;;
+  *) pass "--dry-run never prints a ✓" ;;
+esac
+assert_contains "$out" "not applied" "--dry-run marks each step as not applied"
 [ -f "$HD/.claude/temper.config" ] \
   && pass "--dry-run does not migrate the old config" \
   || fail "--dry-run does not migrate the old config"

@@ -122,6 +122,21 @@ number. Their individual histories are preserved under
   stale-hook cleanup silently did not happen. All three backends now produce
   byte-identical output, and a phase aether does not manage (`SessionStart`) is
   preserved.
+- **`printf: write error: Broken pipe` on Linux.** `_schema_all | awk '… exit'`
+  closed the pipe while the writer was still going. macOS dies from SIGPIPE
+  silently, so it passed locally and failed on CI; the tests capture with `2>&1`,
+  so the message became part of the value and four assertions broke. Both readers
+  now consume their input, and eleven assertions check directly that no
+  subcommand writes to stderr.
+- **A relocated hook was registered twice.** cairn used to install standalone into
+  `~/.local/share/cairn/`, and a machine that had done that ran `post-cairn.sh`
+  twice on every Bash, Write and Edit. Registration now deduplicates on the
+  script's basename, which covers every past and future location without keeping
+  a list of them.
+- **`--dry-run` printed `✓ … registered` for work it had not done.** The same
+  failure as the earlier dry-run bugs, one level up in the output. Completed steps
+  now route through one helper that marks them `· … — not applied` under
+  `--dry-run`, asserted by a test that forbids a `✓` in dry-run output entirely.
 - **bonsai's MCP servers were never registered by the engine.** The spec was
   piped to `python3 -`, which reads its *program* from stdin — so the heredoc
   carrying the program claimed stdin, `sys.stdin.read()` returned nothing, and

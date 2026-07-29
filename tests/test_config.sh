@@ -298,6 +298,27 @@ printf '[temper]\nseverity: red\n' > "$PT2/.aether/config"
 out=$( cd "$PT2" && env HOME="$HT2" bash "$CLI" trust 2>&1 )
 assert_contains "$out" "Nothing executable" "trust says so when there is nothing to run"
 
+# ── nothing chatters on stderr ───────────────────────────────────────────────
+# `_schema_all | awk '... exit'` closed the pipe mid-write, and bash on Linux
+# reports the EPIPE as `printf: write error: Broken pipe`. The tests capture with
+# 2>&1, so the message became part of the value and four assertions failed — on
+# CI only, because macOS dies from SIGPIPE silently. Assert the absence directly
+# rather than relying on a value comparison to notice it.
+suite "no stray stderr"
+HE=$(mk); PE=$(mk); mkdir -p "$HE/.aether" "$PE/.aether"
+printf '[temper]\nauto_nudge_line: 400\nseverity: red\n\n[project]\ntest: true\n' > "$PE/.aether/config"
+printf 'Some prose.\n' > "$PE/.aether/rules.md"
+for c in "config show" "config show temper" "config show temper --raw" \
+         "config get temper.auto_nudge_lines" "config explain temper.severity" \
+         "config doctor" "config set temper.severity green" "config unset temper.severity" \
+         "trust status" "rules" "status"; do
+  # shellcheck disable=SC2086
+  err=$( cd "$PE" && env HOME="$HE" bash "$CLI" $c 2>&1 >/dev/null )
+  [ -z "$err" ] \
+    && pass "aether $c writes nothing to stderr" \
+    || fail "aether $c writes nothing to stderr" "$err"
+done
+
 # ── one reader, not six ──────────────────────────────────────────────────────
 # The gates and the CLI must not carry separate parsers again.
 suite "single config reader"

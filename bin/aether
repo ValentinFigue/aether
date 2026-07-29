@@ -265,6 +265,13 @@ _cfg_unset() {
 # covers the engine.
 _dry() { [ "${DRY_RUN:-false}" = true ]; }
 
+# Announce a completed step. Under --dry-run the same message is marked as not
+# applied, because "✓ hook registered" in a dry run is simply untrue.
+_ok() {
+  if _dry; then printf '  · %s — not applied\n' "$*"
+  else printf '  ✓ %s\n' "$*"; fi
+}
+
 _op_copy() {
   local src="$1" dst="$2"
   _dry && { printf '  [dry-run] copy %s\n' "$dst"; return 0; }
@@ -346,6 +353,13 @@ _op_unsplice() {
 _json_register_hook() {
   local file="$1" phase="$2" matcher="$3" path="$4" prepend="${5:-}"
   _dry && return 0
+  # Deregister any other registration of a script with this basename first.
+  # A hook that moved leaves its old entry behind, and both then fire: a machine
+  # that once had cairn installed standalone ended up running post-cairn.sh
+  # twice, from ~/.local/share/cairn/ and from the new location. Keying on the
+  # basename makes registration idempotent across every relocation, rather than
+  # needing a list of the places a script has ever lived.
+  _json_drop_hooks_matching "$file" "/$(basename "$path")" 2>/dev/null || true
   command -v python3 >/dev/null 2>&1 || { command -v node >/dev/null 2>&1 || return 1; }
   if command -v python3 >/dev/null 2>&1; then
     python3 - "$file" "$phase" "$matcher" "$path" "$prepend" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
@@ -433,7 +447,7 @@ _engine_hooks() {
     fi
     local prepend=""; case " $flags " in *" prepend "*) prepend=1 ;; esac
     _json_register_hook "$settings" "$phase" "$matcher" "$target" "$prepend" \
-      && printf '  ✓ %s %s hook registered\n' "$plugin" "$phase"
+      && _ok "$(printf '%s %s hook registered' "$plugin" "$phase")"
   done
 }
 
@@ -519,7 +533,7 @@ _engine_install() {
       local wrap=nowrap
       [ "$(_mf "$plugin" template.has_own_sentinels)" = false ] && wrap=wrap
       _op_splice "$(_claude_md "$scope")" "$(_mf "$plugin" template.sentinel)" "$proot/$tpl" "$wrap"
-      printf '  ✓ %s CLAUDE.md block written\n' "$plugin"
+      _ok "$(printf '%s CLAUDE.md block written' "$plugin")"
     fi
   fi
 
@@ -532,7 +546,7 @@ _engine_install() {
     printf '  ✗ %s failed to install — an asset could not be written\n' "$plugin"
     return 1
   fi
-  printf '  ✓ %s installed\n' "$plugin"
+  _ok "$(printf '%s installed' "$plugin")"
   return 0
 }
 
@@ -1180,8 +1194,13 @@ EOSCHEMA
   done
 }
 
+# No `exit` in the awk: it would close the pipe while _schema_all is still
+# writing, and bash on Linux reports the resulting EPIPE as
+# `printf: write error: Broken pipe` on stderr — which then lands in whatever the
+# caller captured. macOS dies from SIGPIPE silently, so this passed locally and
+# failed in CI on both platforms' terms.
 _schema_plugin_for() {   # section|key -> owning plugin
-  _schema_all | awk -F'|' -v s="$1" -v k="$2" '$1 == s && $2 == k { print $3; exit }'
+  _schema_all | awk -F'|' -v s="$1" -v k="$2" '$1 == s && $2 == k && !f { print $3; f = 1 }'
 }
 
 # Which layer supplied the live value: "layer|file|line", or "default||".
@@ -1305,7 +1324,8 @@ cmd_config_doctor() {
     [ -f "$f" ] || continue
     while IFS='|' read -r section key; do
       [ -n "$key" ] || continue
-      known=$(printf '%s\n' "$schema" | awk -F'|' -v s="$section" -v k="$key" '$1 == s && $2 == k { print 1; exit }')
+      # Reads to EOF for the same reason as _schema_plugin_for.
+      known=$(printf '%s\n' "$schema" | awk -F'|' -v s="$section" -v k="$key" '$1 == s && $2 == k && !f { print 1; f = 1 }')
       if [ -n "$known" ]; then
         resolved=$((resolved + 1))
       else
@@ -1757,9 +1777,9 @@ cmd_install() {
   done
   local _n=0 _g
   for _g in "$gates"/enforce-*.sh; do [ -f "$_g" ] && _n=$((_n + 1)); done
-  printf '  ✓ %s gates installed\n' "$_n"
+  _ok "$(printf '%s gates installed' "$_n")"
   _json_register_suite_hook "$settings" "$hookdir/enforce-suite.sh" \
-    && printf '  ✓ PreToolUse hook registered\n'
+    && _ok 'PreToolUse hook registered'
   # Now, and only now, is it safe to delete the hook the old layout was using.
   _retire_legacy_hooks "$scope"
   # …and to deregister anything still pointing at it, in either phase.
@@ -1780,10 +1800,10 @@ cmd_install() {
   # Cleanup is unconditional: a stale permission outlives the plugin that wrote
   # it, so scoping this to what installed *this run* would strand it forever.
   for p in $(_plugins_available); do drop="$drop $(_mf "$p" legacy_permissions)"; done
-  _json_sync_perms "$settings" "$add" "$drop" && printf '  ✓ permissions synced\n'
+  _json_sync_perms "$settings" "$add" "$drop" && _ok 'permissions synced'
 
   _op_copy "$repo/bin/aether" "$(_cli_dir "$scope")/aether"
-  printf '  ✓ aether CLI installed\n'
+  _ok 'aether CLI installed'
 
   # A first config with every key present but commented out at its default, so
   # "what can I put here?" is answered by the file itself. Never overwrites one.
@@ -1798,7 +1818,7 @@ cmd_install() {
       _op_unsplice "$(_claude_md "$scope")" "$(_mf "$p" template.sentinel)" >/dev/null 2>&1 || true
     done
     _op_splice "$(_claude_md "$scope")" aether "$repo/templates/CLAUDE.md" nowrap
-    printf '  ✓ aether CLAUDE.md block written\n'
+    _ok 'aether CLAUDE.md block written'
   fi
 
   local shipped=""

@@ -218,18 +218,42 @@ cmd_uninstall() {
 
   for arg in "$@"; do
     case "$arg" in
-      global)       scope="global" ;;
-      --claude-md)  clean_claude_md=true ;;
+      global|--global) scope="global" ;;
+      --claude-md)     clean_claude_md=true ;;
     esac
   done
 
-  local settings_file claude_file
+  # Every path below is derived from the scope. The hook, gates, CLI and
+  # manifest paths used to be hardcoded to the global locations regardless of
+  # it, so a local uninstall removed nothing it had installed — leaving
+  # .claude/hooks/enforce-suite.sh, .claude/hooks/gates/ and .bin/aether behind
+  # — while deleting the *global* manifest and breaking `aether update` for a
+  # global install that had nothing to do with it.
+  local settings_file claude_file manifest hook_file gates_dir cli_file
   if [ "$scope" = "global" ]; then
     settings_file="$GLOBAL_SETTINGS"
     claude_file="$HOME/.claude/CLAUDE.md"
+    manifest="$GLOBAL_MANIFEST"
+    hook_file="$GLOBAL_HOOK"
+    gates_dir="$GLOBAL_GATES"
+    cli_file="$HOME/.local/bin/aether"
   else
     settings_file=".claude/settings.json"
     claude_file="./CLAUDE.md"
+    manifest="$LOCAL_MANIFEST"
+    hook_file=".claude/hooks/enforce-suite.sh"
+    gates_dir=".claude/hooks/gates"
+    cli_file=".bin/aether"
+  fi
+
+  # The manifest records where the install actually put things, which beats
+  # inferring it if a future install.sh changes its layout.
+  if [ -f "$manifest" ]; then
+    local recorded
+    recorded=$(grep '^hook=' "$manifest" | sed 's/^hook=//' | head -1) || recorded=""
+    [ -n "$recorded" ] && hook_file="$recorded"
+    recorded=$(grep '^gates=' "$manifest" | sed 's/^gates=//' | head -1) || recorded=""
+    [ -n "$recorded" ] && gates_dir="$recorded"
   fi
 
   # Remove the suite's own PreToolUse hook. The per-plugin PostToolUse hooks
@@ -255,20 +279,25 @@ PYEOF
   fi
 
   # Remove aether CLI
-  if [ -f "$HOME/.local/bin/aether" ]; then
-    rm "$HOME/.local/bin/aether"
-    printf '  ✓ Removed ~/.local/bin/aether\n'
+  if [ -f "$cli_file" ]; then
+    rm "$cli_file"
+    printf '  ✓ Removed %s\n' "$cli_file"
   fi
 
   # Remove enforce-suite.sh and the gates it sources
-  if [ -f "$GLOBAL_HOOK" ]; then
-    rm "$GLOBAL_HOOK"
-    printf '  ✓ Removed %s\n' "$GLOBAL_HOOK"
+  if [ -d "$gates_dir" ]; then
+    rm -rf "$gates_dir"
+    printf '  ✓ Removed %s\n' "$gates_dir"
   fi
-  if [ -d "$GLOBAL_GATES" ]; then
-    rm -rf "$GLOBAL_GATES"
-    printf '  ✓ Removed %s\n' "$GLOBAL_GATES"
+  if [ -f "$hook_file" ]; then
+    rm "$hook_file"
+    printf '  ✓ Removed %s\n' "$hook_file"
   fi
+
+  # Tidy up directories the install created, but only if nothing else is in
+  # them — a local install shares .claude/hooks/ with anything the user put there.
+  rmdir "$(dirname "$hook_file")" 2>/dev/null || true
+  [ "$scope" = "global" ] || rmdir .bin 2>/dev/null || true
 
   # Remove CLAUDE.md block
   if [ "$clean_claude_md" = true ] && [ -f "$claude_file" ]; then
@@ -281,9 +310,13 @@ PYEOF
     done
   fi
 
-  # Remove manifest
-  [ -f "$GLOBAL_MANIFEST" ] && rm "$GLOBAL_MANIFEST" && printf '  ✓ Removed %s\n' "$GLOBAL_MANIFEST"
-  [ -f "$LOCAL_MANIFEST"  ] && rm "$LOCAL_MANIFEST"  && printf '  ✓ Removed %s\n' "$LOCAL_MANIFEST"
+  # Remove the manifest for this scope only. Removing both meant a local
+  # uninstall deleted the global install's record of its clone path, after
+  # which `aether update` could no longer find the repository.
+  if [ -f "$manifest" ]; then
+    rm "$manifest"
+    printf '  ✓ Removed %s\n' "$manifest"
+  fi
 
   printf '\nPlugins (bonsai, whetstone, temper, cairn) remain installed for standalone use.\n'
   printf 'Restart Claude Code to apply changes.\n'

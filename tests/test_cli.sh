@@ -124,4 +124,73 @@ assert_eq "0" "$n" "--claude-md strips the aether block"
 [ -f "$S.bak" ] && pass "uninstall backs up settings.json first" \
                 || fail "uninstall backs up settings.json first"
 
+# ── local uninstall ──────────────────────────────────────────────────────────
+# Local mode puts the hook, gates, CLI and manifest inside the project rather
+# than under $HOME. cmd_uninstall hardcoded the global paths regardless of
+# scope, so a local uninstall removed none of them and deleted the *global*
+# manifest instead, breaking `aether update` for an unrelated global install.
+suite "local uninstall"
+H4=$(new_home)
+PROJ=$(mktemp -d)
+cd "$PROJ" || exit 1
+env HOME="$H4" bash "$REPO/install.sh" --no-bonsai --claude-md >/dev/null 2>&1
+
+for p in .claude/hooks/enforce-suite.sh .claude/hooks/gates .bin/aether .claude/aether.manifest; do
+  [ -e "$p" ] && pass "local install created $p" || fail "local install created $p"
+done
+
+# A global install that must be left completely alone.
+mkdir -p "$H4/.claude"
+printf 'version=1.0.0\nscope=global\nrepo=/elsewhere/aether\n' > "$H4/.claude/aether.manifest"
+
+env HOME="$H4" bash "$REPO/uninstall.sh" --claude-md >/dev/null 2>&1
+e=$?
+assert_exit 0 "$e" "local uninstall exits 0"
+
+for p in .claude/hooks/enforce-suite.sh .claude/hooks/gates .bin/aether .claude/aether.manifest; do
+  [ -e "$p" ] && fail "local uninstall removed $p" || pass "local uninstall removed $p"
+done
+[ -d .claude/hooks ] && fail "empty .claude/hooks/ is tidied away" || pass "empty .claude/hooks/ is tidied away"
+[ -d .bin ]          && fail "empty .bin/ is tidied away"          || pass "empty .bin/ is tidied away"
+
+[ -f "$H4/.claude/aether.manifest" ] \
+  && pass "a local uninstall leaves the global manifest alone" \
+  || fail "a local uninstall leaves the global manifest alone"
+
+[ -f .claude/commands/cairn-commit.md ] \
+  && pass "local uninstall leaves the plugin slash commands in place" \
+  || fail "local uninstall leaves the plugin slash commands in place"
+
+pre=$(jsonq .claude/settings.json '
+import json,sys
+s=json.load(open(sys.argv[1]))
+print("\n".join(h.get("command","") for e in s.get("hooks",{}).get("PreToolUse",[]) for h in e.get("hooks",[])))')
+case "$pre" in
+  *enforce-suite*) fail "local uninstall deregisters the hook" "still present" ;;
+  *) pass "local uninstall deregisters the hook" ;;
+esac
+
+cd "$REPO" || exit 1
+rm -rf "$PROJ"
+
+# The reverse asymmetry: a global uninstall must not touch a local install.
+suite "global uninstall does not reach into a project"
+H5=$(new_home)
+PROJ2=$(mktemp -d)
+cd "$PROJ2" || exit 1
+env HOME="$H5" bash "$REPO/install.sh" --no-bonsai >/dev/null 2>&1          # local
+env HOME="$H5" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1 # and global
+env HOME="$H5" bash "$REPO/uninstall.sh" --global >/dev/null 2>&1
+[ -f .claude/hooks/enforce-suite.sh ] \
+  && pass "global uninstall leaves the project's local hook alone" \
+  || fail "global uninstall leaves the project's local hook alone"
+[ -f .claude/aether.manifest ] \
+  && pass "global uninstall leaves the project's local manifest alone" \
+  || fail "global uninstall leaves the project's local manifest alone"
+[ -e "$H5/.local/share/aether/enforce-suite.sh" ] \
+  && fail "global uninstall removed the global hook" \
+  || pass "global uninstall removed the global hook"
+cd "$REPO" || exit 1
+rm -rf "$PROJ2"
+
 summary

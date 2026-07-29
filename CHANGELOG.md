@@ -21,7 +21,7 @@ version, one installer, no network access at install time.
   CLAUDE.md block, both superseded by the suite
 - `--no-bonsai` flag on `install.sh` for a shell-only install
 - `aether version` subcommand
-- `tests/` — 186 assertions run by `bash tests/run.sh`, covering dual-mode gate
+- `tests/` — 203 assertions run by `bash tests/run.sh`, covering dual-mode gate
   equivalence, bypass markers, fail-open behaviour (including corrupt, truncated
   and empty gate files), JSON-backend equivalence across python3/node/jq,
   install idempotence, migration from a standalone install, and uninstall.
@@ -97,6 +97,14 @@ version, one installer, no network access at install time.
 - temper wrote its gate's python to a `mktemp` file on every Bash tool call to
   work around the heredoc bug above; its body is quote-balanced, so it is
   inlined and nothing touches `/tmp`
+- **`aether uninstall` ignored its scope argument.** The hook, gates, CLI and
+  manifest paths were hardcoded to the global locations, so a local uninstall
+  removed none of what a local install had created — leaving
+  `.claude/hooks/enforce-suite.sh`, `.claude/hooks/gates/` and `.bin/aether`
+  behind — while deleting the *global* manifest and with it the `repo=` entry
+  `aether update` needs to find the clone. Every path is now derived from the
+  scope, preferring what the manifest recorded, and empty directories the
+  install created are tidied away
 
 ### Removed
 

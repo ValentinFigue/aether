@@ -1,0 +1,95 @@
+# cairn — plugin manifest
+#
+# Read by aether's install engine. Deliberately `key: value` rather than JSON:
+# bash parses this format already, so the engine needs no python3/node/jq to work
+# out what to install. Only the settings.json steps need an interpreter, which is
+# the same degradation the hand-written installers had.
+#
+# Lists are space-separated. `\|` escapes a pipe inside a hook matcher.
+
+name: cairn
+description: Narrates git boundaries — commit messages, PR descriptions, changelogs
+stage: ship
+scopes: local global
+config_section: cairn
+
+# ── Slash commands ───────────────────────────────────────────────────────────
+commands: draft-commit.md draft-pr.md draft-changelog.md draft-summary.md
+legacy_commands: cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md
+
+# ── Hooks ────────────────────────────────────────────────────────────────────
+# suite_owned means enforce-suite.sh sources this gate, so the engine skips
+# registering it separately when the suite is installed.
+hook.1: PreToolUse  | Bash              | hooks/enforce-cairn.sh | suite_owned
+hook.2: PostToolUse | Bash\|Write\|Edit | hooks/post-cairn.sh
+
+# ── CLI ──────────────────────────────────────────────────────────────────────
+cli: cairn
+cli.strategy: copy
+cli.scopes: global
+
+# ── settings.json ────────────────────────────────────────────────────────────
+permissions: Bash Read Write
+
+# ── CLAUDE.md block ──────────────────────────────────────────────────────────
+# has_own_sentinels: false — this template has no sentinels of its own, so the
+# engine wraps it. whetstone's and bonsai's carry theirs inline.
+template: templates/CLAUDE.md
+template.sentinel: cairn
+template.has_own_sentinels: false
+template.legacy_sentinels: docs
+
+# ── Config schema ────────────────────────────────────────────────────────────
+# One source for defaults, `aether config show/explain/doctor`, and the commented
+# files trellis writes. Replaces the hardcoded DEFAULTS map in bin/cairn.
+
+config.enabled.default: true
+config.enabled.type: bool
+config.enabled.doc: Whether cairn's gate and commands run at all
+config.enabled.used_by: /draft-commit /draft-pr /draft-changelog /draft-summary
+
+config.style.default: conventional
+config.style.type: enum:conventional,plain
+config.style.doc: Commit message format — Conventional Commits, or a plain subject line
+config.style.used_by: /draft-commit
+
+config.pr.base.default: auto
+config.pr.base.doc: Base branch to diff against; `auto` detects origin/main or origin/master
+config.pr.base.used_by: /draft-pr
+
+config.pr.style.default: conventional
+config.pr.style.type: enum:conventional,plain
+config.pr.style.doc: PR title format
+config.pr.style.used_by: /draft-pr
+
+config.pr.template_file.default:
+config.pr.template_file.type: path
+config.pr.template_file.doc: Structure to fill in for the PR body (superseded by .aether/templates/pr.md)
+config.pr.template_file.used_by: /draft-pr
+
+config.pr.rules_file.default:
+config.pr.rules_file.type: path
+config.pr.rules_file.doc: Prose rules for PR generation (superseded by the [draft-pr] section of rules.md)
+config.pr.rules_file.used_by: /draft-pr
+
+config.changelog.style.default: conventional
+config.changelog.style.type: enum:conventional,plain
+config.changelog.style.doc: Group entries by Conventional Commits type, or emit a flat list
+config.changelog.style.used_by: /draft-changelog
+
+config.changelog.extra_types.default:
+config.changelog.extra_types.doc: Additional commit types to group under, beyond the standard set
+config.changelog.extra_types.used_by: /draft-changelog
+
+config.changelog.exclude_paths.default:
+config.changelog.exclude_paths.doc: Paths whose commits never appear in a changelog entry
+config.changelog.exclude_paths.used_by: /draft-changelog
+
+config.summary.format.default: standup
+config.summary.format.type: enum:standup,slack,paragraph
+config.summary.format.doc: Default shape of a generated summary
+config.summary.format.used_by: /draft-summary
+
+config.summary.window.default: 1 day ago
+config.summary.window.doc: How far back to look when no --from is given
+config.summary.window.used_by: /draft-summary

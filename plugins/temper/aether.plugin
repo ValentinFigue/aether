@@ -1,0 +1,62 @@
+# temper — plugin manifest.  See plugins/cairn/aether.plugin for the format.
+
+name: temper
+description: Critiques diffs and PRs before they land — four critics, severity-rated
+stage: review
+scopes: local global
+config_section: temper
+
+commands: critique-diff.md critique-pr.md
+legacy_commands: temper.md
+
+# temper has no PostToolUse hook. Its gate is inserted at the front of the
+# PreToolUse list so it fires before cairn's on a git commit.
+hook.1: PreToolUse | Bash | hooks/enforce-temper.sh | suite_owned prepend
+
+cli: temper
+cli.strategy: copy
+cli.scopes: global
+
+permissions: Read Write Bash
+
+template: templates/CLAUDE.md
+template.sentinel: temper
+template.has_own_sentinels: true
+
+# ── Config schema ────────────────────────────────────────────────────────────
+
+config.enabled.default: true
+config.enabled.type: bool
+config.enabled.doc: Whether temper's gate and commands run at all
+config.enabled.used_by: /critique-diff /critique-pr
+
+config.critics.default: correctness, design, risk, coverage
+config.critics.doc: Which critics run by default
+config.critics.used_by: /critique-diff /critique-pr
+
+config.skip.default:
+config.skip.doc: Critics to omit from the default set
+config.skip.used_by: /critique-diff /critique-pr
+
+config.severity.default: red, yellow, green
+config.severity.doc: Which severities get reported
+config.severity.used_by: /critique-diff /critique-pr
+
+config.diff.default: staged
+config.diff.type: enum:staged,unstaged,all
+config.diff.doc: What /critique-diff reviews when no --diff flag is given
+config.diff.used_by: /critique-diff
+
+config.auto_nudge_lines.default: 200
+config.auto_nudge_lines.type: int
+config.auto_nudge_lines.doc: Nudge before a commit whose staged diff exceeds this many lines
+config.auto_nudge_lines.used_by: enforce-temper.sh
+
+config.auto_nudge_files.default: 10
+config.auto_nudge_files.type: int
+config.auto_nudge_files.doc: Same, for number of files changed
+config.auto_nudge_files.used_by: enforce-temper.sh
+
+config.critical_paths.default: *auth*|*permission*|*token*|migrations/|*alembic*|\.sql|*schema*|*secret*|*credential*|\.env
+config.critical_paths.doc: Pipe-separated patterns that always trigger a review nudge, whatever the diff size
+config.critical_paths.used_by: enforce-temper.sh

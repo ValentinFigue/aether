@@ -1,0 +1,66 @@
+# bonsai — plugin manifest.  See plugins/cairn/aether.plugin for the format.
+#
+# bonsai is the outlier and the reason the engine needs two escape hatches:
+# it builds from source, and it points at the clone rather than copying out of it.
+
+name: bonsai
+description: AST refactoring for Python and TypeScript — rename, move, find references
+stage: build
+# Global only. Every path bonsai writes is $HOME-rooted, and its MCP servers are
+# registered by absolute path, so a per-project install has nothing to mean.
+scopes: global
+config_section: bonsai
+
+# No slash commands — bonsai's tools are called by the model mid-edit through MCP,
+# not invoked by the user at a checkpoint.
+commands:
+legacy_commands:
+
+hook.1: PreToolUse  | Bash                     | hooks/enforce-bonsai.sh | suite_owned
+hook.2: PostToolUse | Write\|Edit\|MultiEdit   | hooks/post-bonsai.sh
+
+# Escape hatch 1 — symlinked, not copied, so the CLI tracks the clone.
+cli: bonsai
+cli.strategy: link
+cli.scopes: global
+
+permissions: mcp__bonsai-py__* mcp__bonsai-ts__*
+# Removed on install: the underscore spelling matched no tool, so the permission
+# it granted was inert.
+legacy_permissions: mcp__bonsai_py__* mcp__bonsai_ts__*
+
+template: templates/CLAUDE.md
+template.sentinel: bonsai
+template.has_own_sentinels: true
+
+skills: bonsai-first
+
+# Escape hatch 2 — a real build with a lockfile and a network fetch.
+# `requires` is probed first; missing tools skip bonsai rather than failing the suite.
+requires: uv node npm python3
+build: scripts/build.sh
+
+# ── MCP servers ──────────────────────────────────────────────────────────────
+# Flattened rather than nested so the manifest stays parseable without an
+# interpreter. ${PLUGIN_ROOT} is expanded to the absolute plugin path at install
+# time — which is why moving the clone breaks bonsai and nothing else.
+mcp.bonsai-py.command: uv
+mcp.bonsai-py.args: run --directory ${PLUGIN_ROOT}/py bonsai-py
+mcp.bonsai-ts.command: node
+mcp.bonsai-ts.args: ${PLUGIN_ROOT}/ts/dist/server.js
+
+# Published mode (`--published`) swaps the local build for registry packages.
+mcp.published.bonsai-py.command: uvx
+mcp.published.bonsai-py.args: bonsai-py
+mcp.published.bonsai-ts.command: npx
+mcp.published.bonsai-ts.args: --yes bonsai-ts
+
+# ── Config schema ────────────────────────────────────────────────────────────
+# `enabled` is the only key. It is written by `aether enable/disable` and read by
+# the suite dispatcher; no bonsai code reads it, which is a gap recorded in the
+# roadmap rather than fixed here.
+
+config.enabled.default: true
+config.enabled.type: bool
+config.enabled.doc: Whether bonsai's gate runs; does not unregister the MCP servers
+config.enabled.used_by: enforce-suite.sh

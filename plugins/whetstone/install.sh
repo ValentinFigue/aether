@@ -115,9 +115,13 @@ mkdir -p "$COMMANDS_DIR"
 LEGACY_COMMANDS="autocritic.md"
 for _old in $LEGACY_COMMANDS; do
   if [ -f "$COMMANDS_DIR/$_old" ]; then
-    cp "$COMMANDS_DIR/$_old" "$COMMANDS_DIR/$_old.bak"
-    rm "$COMMANDS_DIR/$_old"
-    echo "✓ Removed superseded $COMMANDS_DIR/$_old (kept a .bak)"
+    # Never fatal under `set -e` — see the note in aether's install.sh.
+    if cp "$COMMANDS_DIR/$_old" "$COMMANDS_DIR/$_old.bak" 2>/dev/null \
+       && rm "$COMMANDS_DIR/$_old" 2>/dev/null; then
+      echo "✓ Removed superseded $COMMANDS_DIR/$_old (kept a .bak)"
+    else
+      echo "! Could not remove superseded $COMMANDS_DIR/$_old — remove it by hand"
+    fi
   fi
 done
 

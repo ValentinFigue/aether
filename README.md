@@ -25,8 +25,8 @@ Since 1.0.0 all four plugins live in this repository, so setting up a new machin
 |---|---|---|
 | [whetstone](plugins/whetstone/) | Plan | Gates commits when a plan exists but hasn't been critiqued with `/critique-plan` |
 | [bonsai](plugins/bonsai/) | Build | Nudges toward AST tools (pyrename, tsmove, pyfindrefs) instead of sed/grep/mv on source files |
-| [temper](plugins/temper/) | Review | Blocks large/critical commits and pushes until `/critique-diff` has been run |
-| [cairn](plugins/cairn/) | Ship | Nudges toward `/draft-commit`, `/draft-pr`, and `/draft-changelog` at every git boundary |
+| [temper](plugins/temper/) | Review | Blocks large/critical commits and pushes until `/critique-diff` has been run; `/critique-pr` reviews a whole PR before merge |
+| [cairn](plugins/cairn/) | Ship | Nudges toward `/draft-commit`, `/draft-pr`, and `/draft-changelog` at every git boundary; `/draft-pr --apply` pushes the description to the PR |
 
 ---
 

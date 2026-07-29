@@ -39,3 +39,19 @@ Never bypass a 🔴 finding without a written reason in the commit message.
 🟡 Significant  — fix before the next session or document the exception
 🟢 Minor        — fix when convenient; still worth tracking
 <!-- temper:end -->
+
+### When to run /critique-pr
+
+`/critique-diff` reviews what you are about to commit; `/critique-pr` reviews what
+someone is about to merge. Run it once the PR is open and before merging when:
+
+- The PR touches more than one subsystem, or any critical path listed above
+- Commits landed after the description was written — the description is then the most
+  likely thing in the PR to be wrong
+- CI is green and the PR *looks* ready, which is exactly when nobody re-reads it
+
+It runs temper's same four critics over the whole PR diff, plus a fifth that only makes
+sense for a PR: whether the description still matches the code. An omitted change is
+more dangerous than an inaccurate one — a reviewer who trusts the description will not
+go looking for what it does not name.
+

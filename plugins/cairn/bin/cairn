@@ -245,24 +245,30 @@ cmd_update() {
   # cairn now ships inside aether, so updating means re-running the installer
   # out of the clone. The aether manifest records where that clone is; local
   # wins over global, matching how every other lookup in the suite resolves.
-  local repo=""
-  for m in ".claude/aether.manifest" "$HOME/.claude/aether.manifest"; do
+  # Local manifest wins over global, matching every other lookup in the suite.
+  # scope is read alongside repo: updating a local install must not silently
+  # write a global one into ~/.claude.
+  local repo="" scope=""
+  for m in "$HOME/.claude/aether.manifest" ".claude/aether.manifest"; do
     if [ -f "$m" ]; then
-      local r
+      local r s
       r=$(grep '^repo=' "$m" | sed 's/^repo=//' | head -1)
+      s=$(grep '^scope=' "$m" | sed 's/^scope=//' | head -1)
       [ -n "$r" ] && repo="$r"
+      [ -n "$s" ] && scope="$s"
     fi
   done
+  local scope_arg=""; [ "$scope" = "global" ] && scope_arg="global"
 
   if [ -z "$repo" ] || [ ! -d "$repo/.git" ]; then
     printf 'cairn ships inside the aether suite, which is where updates come from.\n'
     printf '  Whole suite:  aether update\n'
-    printf '  cairn only:  bash <your-aether-clone>/plugins/cairn/install.sh global\n'
+    printf '  cairn only:  bash <your-aether-clone>/plugins/cairn/install.sh [global]\n'
     return 1
   fi
 
   printf 'Updating cairn from %s\n\n' "$repo"
-  bash "$repo/plugins/cairn/install.sh" global
+  bash "$repo/plugins/cairn/install.sh" $scope_arg
 }
 
 cmd_uninstall() {

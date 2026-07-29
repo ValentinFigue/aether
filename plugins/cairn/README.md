@@ -134,6 +134,9 @@ On your feature branch, run `/draft-pr`:
 | `/draft-pr` | PR title + description (auto-detects base branch) |
 | `/draft-pr --base=develop` | Diff against `develop` instead of `main` |
 | `/draft-pr --style=plain` | Plain PR title |
+| `/draft-pr --apply` | Generate, then push the description to the PR via `gh pr edit` |
+| `/draft-pr --apply --title` | Also set the PR title (opt-in — titles are often hand-edited) |
+| `/draft-pr --apply --pr=42` | Target a specific PR instead of the current branch's |
 | `/draft-changelog` | CHANGELOG entry from last tag to HEAD |
 | `/draft-changelog --from=v0.1.0 --version=0.2.0` | Specify range and version |
 | `/draft-changelog --style=plain` | Flat bullet list, no type grouping |

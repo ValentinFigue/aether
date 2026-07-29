@@ -82,7 +82,7 @@ if [ -f "$HOOK_FILE" ]; then
 fi
 
 # Remove command file
-COMMAND_FILE="$COMMANDS_DIR/critique-diff.md"
+ALL_COMMANDS="critique-diff.md critique-pr.md"
 if [ -f "$COMMAND_FILE" ]; then
   rm "$COMMAND_FILE"
   echo "✓ Removed $COMMAND_FILE"

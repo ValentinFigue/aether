@@ -120,6 +120,21 @@ git push origin main  # suite:skip
 
 ---
 
+## Reviewing a PR
+
+`/critique-diff` reviews what you are about to commit. `/critique-pr` reviews what
+someone is about to merge — the whole PR diff, its CI and mergeable state, and one
+critic that only makes sense for a PR: whether the description still matches the code.
+
+```bash
+/critique-pr              # the PR for the current branch
+/critique-pr --pr=42      # a specific PR
+/critique-pr --only=risk  # same flags as /critique-diff
+```
+
+It reuses the four critic definitions from `critique-diff.md` rather than restating
+them, so the two can never drift. Requires `gh`, authenticated.
+
 ## Configuration
 
 Create `temper.config` in your project root (local) or `~/.claude/temper.config` (global):

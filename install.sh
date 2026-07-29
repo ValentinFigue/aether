@@ -66,7 +66,7 @@ COMMANDS_DIR="$SETTINGS_DIR/commands"
 # install can prune whatever it recorded but no longer ships — which is what
 # makes a command rename clean up after itself instead of leaving an orphan in
 # the palette that still invokes a stale copy.
-SHIPPED_COMMANDS="critique-plan.md critique-diff.md draft-commit.md draft-pr.md draft-changelog.md draft-summary.md"
+SHIPPED_COMMANDS="critique-plan.md critique-diff.md critique-pr.md draft-commit.md draft-pr.md draft-changelog.md draft-summary.md"
 
 # A manifest written before 1.0.0 has no commands= line, so there is nothing to
 # diff against. Seed it with the pre-rename names. Deletable once no 0.1.0
@@ -109,8 +109,15 @@ _prune_superseded_commands() {
   for old in $previous; do
     case " $SHIPPED_COMMANDS " in *" $old "*) continue ;; esac
     [ -f "$COMMANDS_DIR/$old" ] || continue
-    cp "$COMMANDS_DIR/$old" "$COMMANDS_DIR/$old.bak"
-    rm "$COMMANDS_DIR/$old"
+    # Never fatal. This runs under `set -e` after the plugins are installed but
+    # before the hook, gates, permissions and manifest are written — aborting on
+    # one unremovable file would leave a half-configured machine with no
+    # explanation. A surviving orphan is the lesser problem, and it is reported.
+    if ! cp "$COMMANDS_DIR/$old" "$COMMANDS_DIR/$old.bak" 2>/dev/null \
+       || ! rm "$COMMANDS_DIR/$old" 2>/dev/null; then
+      printf '  ! Could not remove superseded %s — remove it by hand\n' "$COMMANDS_DIR/$old"
+      continue
+    fi
     printf '  ✓ Removed superseded %s (kept a .bak)\n' "$COMMANDS_DIR/$old"
   done
 }

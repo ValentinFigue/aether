@@ -174,6 +174,21 @@ individually small.
 If this Claude Code session has involved more than 5 file edits, proactively suggest
 `/critique-diff` before the user runs any git command, even if they haven't asked for a review.
 
+### When to run /critique-pr
+
+`/critique-diff` reviews what you are about to commit; `/critique-pr` reviews what
+someone is about to merge. Run it once the PR is open and before merging when:
+
+- The PR touches more than one subsystem, or any critical path listed above
+- Commits landed after the description was written — the description is then the most
+  likely thing in the PR to be wrong
+- CI is green and the PR *looks* ready, which is exactly when nobody re-reads it
+
+It runs temper's same four critics over the whole PR diff, plus a fifth that only makes
+sense for a PR: whether the description still matches the code. An omitted change is
+more dangerous than an inaccurate one — a reviewer who trusts the description will not
+go looking for what it does not name.
+
 ### Severity contract
 
 🔴 Blocker      — do not push; fix first
@@ -196,6 +211,7 @@ pushing, and after shipping.
 |---|---|
 | About to `git commit` | `/draft-commit` — generate message from staged diff |
 | About to `git push` | `/draft-pr` — generate PR title and description |
+| PR description is stale | `/draft-pr --apply` — regenerate it and push it to the PR |
 | After temper finds no blockers | `/draft-commit` immediately — prime moment |
 | After a version bump in any manifest | `/draft-changelog` |
 | After a sprint, milestone, or release | `/draft-summary --format=slack` or `--format=paragraph` |

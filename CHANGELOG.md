@@ -19,6 +19,19 @@ version, one installer, no network access at install time.
 - `--suite` flag on all four plugin installers: installs commands, CLI and
   PostToolUse hook, but skips the PreToolUse hook and the plugin's own
   CLAUDE.md block, both superseded by the suite
+- **`/critique-pr`** — reviews an open PR before merge, completing the triad the command
+  rename established: plan → diff → PR. It applies temper's existing four critics rather
+  than a new checklist, reading their definitions out of `critique-diff.md` in the same
+  commands directory so the two cannot drift, and adds a fifth that only makes sense for
+  a PR: whether the description still matches the diff. An unmentioned change is weighted
+  above an inaccurate one — a reviewer who trusts the description will not look for what
+  it does not name. Also reports CI and mergeable state up front, since a red build is
+  worth knowing before reading a code review
+- **`/draft-pr --apply`** — pushes the generated description to the PR with `gh pr edit`
+  instead of only printing it for pasting. `--title` additionally sets the title
+  (opt-in, since titles are often hand-edited after opening) and `--pr=<n>` targets a
+  specific PR. With no PR for the branch it prints the `gh pr create` command rather than
+  creating one
 - `--no-bonsai` flag on `install.sh` for a shell-only install
 - `aether version` subcommand
 - `tests/` — 203 assertions run by `bash tests/run.sh`, covering dual-mode gate
@@ -133,6 +146,14 @@ version, one installer, no network access at install time.
   but still serve content, so after the rename they would have written the old
   files back under the old names and undone the prune. All three now re-run the
   local installer from the clone recorded in the aether manifest
+- **`cairn`/`temper`/`whetstone` `update` ignored the recorded scope** — a second
+  instance of the same bug as `aether uninstall` below. All three ran
+  `install.sh global` regardless of `scope=`, so updating a local install silently wrote
+  a global one into `~/.claude`. Scope is now read alongside `repo=` and passed through
+- **The command prune could abort an install midway.** Its `cp`/`rm` ran unguarded under
+  `set -e`, after the plugins were installed but before the hook, gates, permissions and
+  manifest were written, so one unremovable file left a half-configured machine with no
+  explanation. Failures now warn and continue — a surviving orphan is the lesser problem
 - **`aether uninstall` ignored its scope argument.** The hook, gates, CLI and
   manifest paths were hardcoded to the global locations, so a local uninstall
   removed none of what a local install had created — leaving

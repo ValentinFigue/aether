@@ -6,9 +6,12 @@ LOCAL_CONFIG="./temper.config"
 GLOBAL_COMMANDS="$HOME/.claude/commands"
 LOCAL_COMMANDS=".claude/commands"
 
+# Kept in step with the same list in install.sh and uninstall.sh.
+ALL_COMMANDS="critique-diff.md critique-pr.md"
+
 usage() {
   cat << 'EOF'
-temper — manage your /critique-diff install
+temper — manage your /critique-diff and /critique-pr install
 
 Usage:
   temper status                          Show install state and effective config
@@ -17,7 +20,7 @@ Usage:
   temper config set <key=value> [--global]   Set a config value
   temper config get                      Print resolved effective config
   temper config reset [local|global]     Remove config file
-  temper update                          Re-download latest critique-diff.md
+  temper update                          Re-install from the aether clone
   temper uninstall [local|global] [--claude-md]  Remove command + optionally CLAUDE.md section
   temper help                            Show this message
 
@@ -58,16 +61,16 @@ config_set_key() {
 
 cmd_status() {
   echo "Install:"
-  if [ -f "$GLOBAL_COMMANDS/critique-diff.md" ]; then
-    echo "  ~/.claude/commands/critique-diff.md    installed"
-  else
-    echo "  ~/.claude/commands/critique-diff.md    not installed"
-  fi
-  if [ -f "$LOCAL_COMMANDS/critique-diff.md" ]; then
-    echo "  .claude/commands/critique-diff.md      installed"
-  else
-    echo "  .claude/commands/critique-diff.md      not installed"
-  fi
+  for name in $ALL_COMMANDS; do
+    if [ -f "$GLOBAL_COMMANDS/$name" ]; then
+      echo "  ~/.claude/commands/$name    installed"
+    else
+      echo "  ~/.claude/commands/$name    not installed"
+    fi
+    if [ -f "$LOCAL_COMMANDS/$name" ]; then
+      echo "  .claude/commands/$name      installed"
+    fi
+  done
   echo ""
 
   echo "Global config ($GLOBAL_CONFIG):"
@@ -171,24 +174,30 @@ cmd_update() {
   # temper now ships inside aether, so updating means re-running the installer
   # out of the clone. The aether manifest records where that clone is; local
   # wins over global, matching how every other lookup in the suite resolves.
-  local repo=""
-  for m in ".claude/aether.manifest" "$HOME/.claude/aether.manifest"; do
+  # Local manifest wins over global, matching every other lookup in the suite.
+  # scope is read alongside repo: updating a local install must not silently
+  # write a global one into ~/.claude.
+  local repo="" scope=""
+  for m in "$HOME/.claude/aether.manifest" ".claude/aether.manifest"; do
     if [ -f "$m" ]; then
-      local r
+      local r s
       r=$(grep '^repo=' "$m" | sed 's/^repo=//' | head -1)
+      s=$(grep '^scope=' "$m" | sed 's/^scope=//' | head -1)
       [ -n "$r" ] && repo="$r"
+      [ -n "$s" ] && scope="$s"
     fi
   done
+  local scope_arg=""; [ "$scope" = "global" ] && scope_arg="global"
 
   if [ -z "$repo" ] || [ ! -d "$repo/.git" ]; then
     printf 'temper ships inside the aether suite, which is where updates come from.\n'
     printf '  Whole suite:  aether update\n'
-    printf '  temper only:  bash <your-aether-clone>/plugins/temper/install.sh global\n'
+    printf '  temper only:  bash <your-aether-clone>/plugins/temper/install.sh [global]\n'
     return 1
   fi
 
   printf 'Updating temper from %s\n\n' "$repo"
-  bash "$repo/plugins/temper/install.sh" global
+  bash "$repo/plugins/temper/install.sh" $scope_arg
 }
 
 cmd_uninstall() {
@@ -211,12 +220,14 @@ cmd_uninstall() {
     claude_file="./CLAUDE.md"
   fi
 
-  if [ -f "$commands_dir/critique-diff.md" ]; then
-    rm "$commands_dir/critique-diff.md"
-    echo "✓ Removed $commands_dir/critique-diff.md"
-  else
-    echo "  $commands_dir/critique-diff.md not found"
-  fi
+  for name in $ALL_COMMANDS; do
+    if [ -f "$commands_dir/$name" ]; then
+      rm "$commands_dir/$name"
+      echo "✓ Removed $commands_dir/$name"
+    else
+      echo "  $commands_dir/$name not found"
+    fi
+  done
 
   if [ "$clean_claude_md" = true ]; then
     if [ -f "$claude_file" ] && grep -q "<!-- temper:start -->" "$claude_file"; then

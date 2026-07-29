@@ -210,6 +210,63 @@ assert_eq "0" "$hits" "no raw.githubusercontent fetches in any installer"
 # copied into six files. Everything that writes or matches it must use hyphens;
 # the only permitted underscore references are the cleanup lists that strip the
 # old spelling from existing configs.
+# ── prune failure must not abort the install ─────────────────────────────────
+# The prune runs under `set -e` after the plugins are installed but before the
+# hook, gates, permissions and manifest are written. An unremovable file used to
+# abort there, leaving a half-configured machine and no error explaining it.
+# The old command is made unreadable rather than the directory unwritable, so
+# only the prune fails and the rest of the install proceeds normally.
+suite "prune failure is not fatal"
+HG=$(new_home)
+mkdir -p "$HG/.claude/commands"
+printf 'old\n' > "$HG/.claude/commands/cairn-commit.md"
+chmod 000 "$HG/.claude/commands/cairn-commit.md"
+printf 'version=0.1.0\nscope=global\n' > "$HG/.claude/aether.manifest"
+env HOME="$HG" bash "$REPO/install.sh" --global --no-bonsai >"$HG/out.log" 2>&1
+e=$?
+chmod 644 "$HG/.claude/commands/cairn-commit.md" 2>/dev/null || true
+assert_exit 0 "$e" "an unremovable superseded command does not fail the install"
+assert_contains "$(cat "$HG/out.log")" "Could not remove superseded" "the failure is reported, not swallowed"
+grep -q '^commands=' "$HG/.claude/aether.manifest" \
+  && pass "the manifest is still written after a prune failure" \
+  || fail "the manifest is still written after a prune failure"
+[ -x "$HG/.local/share/aether/enforce-suite.sh" ] \
+  && pass "the hook is still installed after a prune failure" \
+  || fail "the hook is still installed after a prune failure"
+
+# ── command files carry a real palette description ───────────────────────────
+# Four of the six used to start with "Parse $ARGUMENTS for flags:", which is what
+# the palette showed. Guard against that regressing.
+suite "palette descriptions"
+for f in "$REPO"/plugins/*/.claude/commands/*.md; do
+  n=$(basename "$f")
+  first=$(head -1 "$f")
+  case "$first" in
+    "Parse \$ARGUMENTS"*|"#"*|"")
+      fail "$n starts with a real description" "line 1 is: ${first:0:50}" ;;
+    *\(cairn\)*|*\(temper\)*|*\(whetstone\)*|*\(bonsai\)*)
+      pass "$n starts with a real description naming its plugin" ;;
+    *)
+      fail "$n names its owning plugin on line 1" "line 1 is: ${first:0:60}" ;;
+  esac
+done
+
+# ── critique-pr reuses temper's critics rather than restating them ───────────
+# Duplicating the four critic definitions here is the same trap the suite hook
+# was rescued from; a copy would drift from critique-diff.md.
+suite "critique-pr does not duplicate the critics"
+CPR="$REPO/plugins/temper/.claude/commands/critique-pr.md"
+[ -f "$CPR" ] && pass "critique-pr.md exists" || fail "critique-pr.md exists"
+assert_contains "$(cat "$CPR")" "critique-diff.md" "it points at critique-diff.md for the definitions"
+for c in Correctness Design Risk Coverage; do
+  assert_contains "$(cat "$CPR")" "$c" "it names the $c critic"
+done
+assert_contains "$(cat "$CPR")" "Description accuracy" "it adds the description critic"
+# The full temper critic prose must not be copied in. "You are a senior engineer"
+# opens each definition in critique-diff.md; it must appear zero times here.
+n=$(grep -c 'You are a senior engineer' "$CPR" || true)
+assert_eq "0" "$n" "the full critic definitions are not copied into critique-pr.md"
+
 # ── every command a nudge names must actually exist ──────────────────────────
 # This is the check that would have caught the whole class of drift before it
 # existed: hooks and CLAUDE.md templates naming slash commands that no installer

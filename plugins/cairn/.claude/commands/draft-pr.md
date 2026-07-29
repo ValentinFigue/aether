@@ -4,6 +4,9 @@ Parse $ARGUMENTS for flags. Supported flags:
 - `--base=<branch>` — base branch to diff against (default: auto-detected)
 - `--style=conventional` (default) — Conventional Commits PR title format
 - `--style=plain` — plain imperative PR title, no type prefix
+- `--apply` — push the generated description to the PR instead of only printing it
+- `--title` — with `--apply`, also set the PR title (opt-in; titles are often hand-edited after opening)
+- `--pr=<n>` — target a specific PR instead of the one for the current branch
 
 ---
 
@@ -138,4 +141,55 @@ Description:
 <description>
 ```
 
-Do not run any git commands. Do not modify any files.
+Without `--apply`, stop here. Do not run any git commands. Do not modify any files.
+
+---
+
+**Step 8 — Apply (only when `--apply` was passed)**
+
+Print the generated text first, exactly as Step 7 describes, then update the PR. The
+user should always be able to see what was written even if the update fails.
+
+Resolve the target PR:
+
+```bash
+gh pr view --json number,title,url,state 2>/dev/null
+```
+
+- With `--pr=<n>`, use that number instead: `gh pr view <n> --json number,title,url,state`.
+- If no PR exists for the current branch, **do not create one** — that is not what
+  `--apply` asked for. Print the generated text, then:
+
+  ```
+  No open PR for this branch. To create one with this description:
+    gh pr create --title "<title>" --body-file <path>
+  ```
+
+  and stop with a non-zero result.
+- If the PR is closed or merged, say so and stop rather than editing it.
+
+Write the description to a temp file and update. Never pass the body inline — it
+contains backticks, quotes and newlines that will not survive a shell argument:
+
+```bash
+BODY=$(mktemp)
+cat > "$BODY" <<'PRBODY'
+<description>
+PRBODY
+gh pr edit <n> --body-file "$BODY"
+rm -f "$BODY"
+```
+
+With `--title`, add `--title "<title>"` to the same `gh pr edit` call. Without it, leave
+the existing title alone.
+
+Then confirm what changed, naming the PR:
+
+```
+✓ Updated PR #<n> — <url>
+  description: replaced (<n> lines)
+  title:       unchanged   (or: set to "<title>")
+```
+
+If `gh` is not installed or not authenticated, say so and fall back to printing the
+text for manual pasting rather than failing silently.

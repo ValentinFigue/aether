@@ -79,6 +79,30 @@ out=$(env HOME="$H2" bash "$CLI" update 2>&1); e=$?
 assert_exit 1 "$e" "update fails when the recorded clone is gone"
 assert_contains "$out" "no longer there" "update names the missing clone"
 
+# ── plugin update honours the recorded scope ─────────────────────────────────
+# All three plugin CLIs used to run `install.sh global` regardless of scope=, so
+# updating a local install silently wrote a global one into ~/.claude. Same bug
+# as `aether uninstall` had, in three more places.
+suite "plugin update respects scope"
+HU=$(new_home)
+PROJ_U=$(mktemp -d)
+cd "$PROJ_U" || exit 1
+env HOME="$HU" bash "$REPO/install.sh" --no-bonsai >/dev/null 2>&1   # LOCAL install
+[ -f .claude/commands/draft-commit.md ] && pass "local install put commands in the project" \
+                                        || fail "local install put commands in the project"
+before=$(ls "$HU/.claude/commands" 2>/dev/null | wc -l | tr -d ' ')
+
+for p in cairn temper whetstone; do
+  env HOME="$HU" bash "$REPO/plugins/$p/bin/$p" update >/dev/null 2>&1 || true
+done
+
+after=$(ls "$HU/.claude/commands" 2>/dev/null | wc -l | tr -d ' ')
+assert_eq "$before" "$after" "updating a local install writes nothing to the global commands dir"
+[ -f .claude/commands/draft-commit.md ] && pass "the local install is still intact after update" \
+                                        || fail "the local install is still intact after update"
+cd "$REPO" || exit 1
+rm -rf "$PROJ_U"
+
 # ── uninstall ────────────────────────────────────────────────────────────────
 suite "uninstall"
 H3=$(new_home)

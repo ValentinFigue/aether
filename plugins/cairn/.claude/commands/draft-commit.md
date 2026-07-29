@@ -1,3 +1,5 @@
+Draft a commit message from the staged diff (cairn).
+
 Parse $ARGUMENTS for flags. Supported flags:
 - `--style=conventional` (default) — output a Conventional Commits message (type(scope): description)
 - `--style=plain` — output a plain imperative-mood message with no type prefix

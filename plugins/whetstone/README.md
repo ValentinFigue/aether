@@ -12,7 +12,7 @@ No dependencies. No MCP server. No build step.
 
 Claude Code's plan mode is powerful. But a plan written by one perspective has blind spots.
 
-`/autocritic` runs independent passes against your plan:
+`/critique-plan` runs independent passes against your plan:
 
 - An **implementation critic** that asks *"how exactly would this be built?"* — and flags what's missing
 - An **architecture critic** that looks for coupling, leaky abstractions, and things that will be painful to change
@@ -41,7 +41,7 @@ git clone https://github.com/ValentinFigue/aether
 cd aether/plugins/whetstone && bash install.sh global
 ```
 
-This installs the `/autocritic` command, the `whetstone` CLI to `~/.local/bin/`, the
+This installs the `/critique-plan` command, the `whetstone` CLI to `~/.local/bin/`, the
 `enforce-whetstone` PreToolUse hook, and the required `Read`/`Write` permissions in
 `~/.claude/settings.json` so the critic runs without permission prompts.
 
@@ -61,7 +61,7 @@ The installer reads everything from the clone, so keep it around — or re-run i
 moving it. There is no `curl | bash` one-liner: the script copies files out of the
 repository and cannot work when piped.
 
-Restart Claude Code. The `/autocritic` command is immediately available.
+Restart Claude Code. The `/critique-plan` command is immediately available.
 
 **To uninstall:**
 
@@ -80,8 +80,8 @@ critic run automatically after every plan — no manual invocation needed. Pass
 aether block instead (`bash install.sh --global --claude-md` from the repo root), which
 covers all four plugins at once.
 
-With this in place, Claude Code runs `/autocritic` after presenting any plan and blocks
-implementation if blockers are found. Use `/autocritic --off` to skip a specific run
+With this in place, Claude Code runs `/critique-plan` after presenting any plan and blocks
+implementation if blockers are found. Use `/critique-plan --off` to skip a specific run
 without disabling it globally.
 
 ---
@@ -90,23 +90,23 @@ without disabling it globally.
 
 | Command | What it does |
 |---|---|
-| `/autocritic` | Full critique — all three critics, all severities |
-| `/autocritic --only=risk` | Risk pass only |
-| `/autocritic --only=impl,arch` | Skip the risk critic |
-| `/autocritic --skip=arch` | All defaults except architecture |
-| `/autocritic --severity=red` | Blockers only |
-| `/autocritic --severity=red,yellow` | Blockers and significant findings |
-| `/autocritic --off` | Skip this run (useful when auto-trigger is active) |
-| `/autocritic --help` | Print the flag reference |
+| `/critique-plan` | Full critique — all three critics, all severities |
+| `/critique-plan --only=risk` | Risk pass only |
+| `/critique-plan --only=impl,arch` | Skip the risk critic |
+| `/critique-plan --skip=arch` | All defaults except architecture |
+| `/critique-plan --severity=red` | Blockers only |
+| `/critique-plan --severity=red,yellow` | Blockers and significant findings |
+| `/critique-plan --off` | Skip this run (useful when auto-trigger is active) |
+| `/critique-plan --help` | Print the flag reference |
 
 Optional deep-dive critics (off by default):
 
 | Command | What it does |
 |---|---|
-| `/autocritic --only=testing` | Test strategy and coverage gaps |
-| `/autocritic --only=complexity` | Over-engineering and YAGNI violations |
-| `/autocritic --only=api` | Breaking changes and versioning gaps |
-| `/autocritic --only=cost` | Cloud cost and ops surprises |
+| `/critique-plan --only=testing` | Test strategy and coverage gaps |
+| `/critique-plan --only=complexity` | Over-engineering and YAGNI violations |
+| `/critique-plan --only=api` | Breaking changes and versioning gaps |
+| `/critique-plan --only=cost` | Cloud cost and ops surprises |
 
 ---
 
@@ -209,7 +209,7 @@ whetstone config set --skip=arch              # drop arch critic locally
 whetstone config set --severity=red --global  # blockers-only everywhere
 whetstone config reset local                  # wipe project overrides
 
-whetstone update                              # pull latest autocritic.md
+whetstone update                              # pull latest critique-plan.md
 whetstone uninstall global --claude-md        # full removal
 ```
 
@@ -223,11 +223,11 @@ Three ways to skip the critic, in order of scope:
 
 | Method | Scope | When to use |
 |--------|-------|-------------|
-| `/autocritic --off` | This run only | Quick iteration on a plan you're actively editing |
+| `/critique-plan --off` | This run only | Quick iteration on a plan you're actively editing |
 | `# whetstone:skip` in the plan heading | This plan only (auto-trigger) | Spike or throwaway plan that doesn't need full critique |
 | `# suite:skip` in the plan heading | All suite hooks for this plan | Coordinated skip across temper, cairn, and whetstone |
 
-`--off` affects only the current `/autocritic` invocation. The skip markers are read by the auto-trigger in `CLAUDE.md` — they have no effect when running `/autocritic` directly.
+`--off` affects only the current `/critique-plan` invocation. The skip markers are read by the auto-trigger in `CLAUDE.md` — they have no effect when running `/critique-plan` directly.
 
 ---
 

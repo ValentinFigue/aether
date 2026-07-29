@@ -108,8 +108,21 @@ JSEOF
 
 # Install command file
 mkdir -p "$COMMANDS_DIR"
-cp "$REPO_DIR/.claude/commands/autocritic.md" "$COMMANDS_DIR/autocritic.md"
-echo "✓ /autocritic installed to $COMMANDS_DIR"
+# Commands this plugin used to ship under other names. The suite installer prunes
+# generically from the manifest, but a standalone `bash plugins/whetstone/install.sh`
+# has no manifest to consult, so it cleans up its own history. An orphan here is
+# not inert — it stays in the command palette and still runs the stale copy.
+LEGACY_COMMANDS="autocritic.md"
+for _old in $LEGACY_COMMANDS; do
+  if [ -f "$COMMANDS_DIR/$_old" ]; then
+    cp "$COMMANDS_DIR/$_old" "$COMMANDS_DIR/$_old.bak"
+    rm "$COMMANDS_DIR/$_old"
+    echo "✓ Removed superseded $COMMANDS_DIR/$_old (kept a .bak)"
+  fi
+done
+
+cp "$REPO_DIR/.claude/commands/critique-plan.md" "$COMMANDS_DIR/critique-plan.md"
+echo "✓ /critique-plan installed to $COMMANDS_DIR"
 
 # Inject Read + Write permissions into settings.json
 SETTINGS_FILE="$SETTINGS_DIR/settings.json"

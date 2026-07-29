@@ -23,10 +23,10 @@ Since 1.0.0 all four plugins live in this repository, so setting up a new machin
 
 | Plugin | Stage | What it does |
 |---|---|---|
-| [whetstone](plugins/whetstone/) | Plan | Gates commits when a plan exists but hasn't been critiqued with `/autocritic` |
+| [whetstone](plugins/whetstone/) | Plan | Gates commits when a plan exists but hasn't been critiqued with `/critique-plan` |
 | [bonsai](plugins/bonsai/) | Build | Nudges toward AST tools (pyrename, tsmove, pyfindrefs) instead of sed/grep/mv on source files |
-| [temper](plugins/temper/) | Review | Blocks large/critical commits and pushes until `/temper` has been run |
-| [cairn](plugins/cairn/) | Ship | Nudges toward `/cairn-commit`, `/cairn-pr`, and `/cairn-changelog` at every git boundary |
+| [temper](plugins/temper/) | Review | Blocks large/critical commits and pushes until `/critique-diff` has been run |
+| [cairn](plugins/cairn/) | Ship | Nudges toward `/draft-commit`, `/draft-pr`, and `/draft-changelog` at every git boundary |
 
 ---
 
@@ -68,7 +68,7 @@ There is no `curl | bash` one-liner. The installer copies files out of the clone
 | Hook registration | `settings.json` — one `PreToolUse` entry, matcher `Bash\|Write\|Edit\|MultiEdit` |
 | Permissions | `settings.json` — `Bash`, `Read`, `Write`, `mcp__bonsai-py__*`, `mcp__bonsai-ts__*` |
 | `aether` CLI | `~/.local/bin/aether` |
-| Slash commands | `~/.claude/commands/` — `cairn-*.md`, `temper.md`, `autocritic.md` |
+| Slash commands | `~/.claude/commands/` — `critique-*.md`, `draft-*.md` |
 | CLAUDE.md block | injected with `--claude-md` flag |
 | Install manifest | `~/.claude/aether.manifest` |
 
@@ -76,7 +76,7 @@ Per-plugin `PreToolUse` hooks are removed during install, since `enforce-suite.s
 
 ### PreToolUse is unified; PostToolUse is not
 
-The suite hook covers the `PreToolUse` phase only. cairn and bonsai also register `PostToolUse` hooks — `post-cairn.sh` (suggests `/cairn-commit` after a clean review, `/cairn-changelog` after a version bump) and `post-bonsai.sh` (reference-drift check after a rename-shaped edit). These have no equivalent in the suite hook, so they are left registered per-plugin rather than removed.
+The suite hook covers the `PreToolUse` phase only. cairn and bonsai also register `PostToolUse` hooks — `post-cairn.sh` (suggests `/draft-commit` after a clean review, `/draft-changelog` after a version bump) and `post-bonsai.sh` (reference-drift check after a rename-shaped edit). These have no equivalent in the suite hook, so they are left registered per-plugin rather than removed.
 
 ---
 

@@ -19,7 +19,7 @@ else
   CLAUDE_FILE="./CLAUDE.md"
 fi
 
-ALL_COMMANDS="cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md"
+ALL_COMMANDS="draft-commit.md draft-pr.md draft-changelog.md draft-summary.md"
 
 # Remove command files
 for name in $ALL_COMMANDS; do

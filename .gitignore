@@ -6,9 +6,9 @@
 
 # Plan and review output.
 #
-# The suite's own tools write here: /autocritic writes CRITIQUE.md, /temper
-# appends TEMPER.md, and enforce-whetstone.sh drops a .whetstone-nudged
-# sentinel. It is per-developer, per-session scratch that changes constantly
+# The suite's own tools write here: /critique-plan writes CRITIQUE.md,
+# /critique-diff appends TEMPER.md, and enforce-whetstone.sh drops a
+# .whetstone-nudged sentinel. It is per-developer, per-session scratch
 # and means nothing in someone else's checkout — the convention itself is
 # documented in templates/CLAUDE.md, which is versioned.
 /.claude/plans/

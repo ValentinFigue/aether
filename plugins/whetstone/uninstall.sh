@@ -119,7 +119,7 @@ if [ "$MODE" = "global" ]; then
 fi
 
 # Remove command file
-COMMAND_FILE="$COMMANDS_DIR/autocritic.md"
+COMMAND_FILE="$COMMANDS_DIR/critique-plan.md"
 if [ -f "$COMMAND_FILE" ]; then
   rm "$COMMAND_FILE"
   echo "✓ Removed $COMMAND_FILE"

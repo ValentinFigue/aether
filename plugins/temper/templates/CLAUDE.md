@@ -1,9 +1,9 @@
 <!-- temper:start -->
 # Code review discipline (temper)
 
-## When to run /temper
+## When to run /critique-diff
 
-Run `/temper` before any `git commit` or `git push` when any of the following is true:
+Run `/critique-diff` before any `git commit` or `git push` when any of the following is true:
 
 **Scope triggers:**
 - The diff touches more than 10 files or 200 lines
@@ -11,7 +11,7 @@ Run `/temper` before any `git commit` or `git push` when any of the following is
 - Any function signature was changed
 - A new dependency was added to pyproject.toml, package.json, or similar
 
-**Critical path triggers — always run /temper regardless of diff size:**
+**Critical path triggers — always run /critique-diff regardless of diff size:**
 - Authentication or authorisation code (`*auth*`, `*permission*`, `*token*`)
 - Database migrations (`migrations/`, `*alembic*`, `*.sql`)
 - Public API contracts (`*routes*`, `*endpoints*`, `*schema*`)
@@ -20,12 +20,12 @@ Run `/temper` before any `git commit` or `git push` when any of the following is
 **Post-bonsai gate:**
 After any bonsai refactoring tool completes (pyrename, pymove, pymovesymbol, pysignature,
 tsrename, tsmove, tsmovesymbol, tssignature), remind the user to run
-`/temper --diff=all` before committing. Structural changes are high-risk even when
+`/critique-diff --diff=all` before committing. Structural changes are high-risk even when
 individually small.
 
 **Session scope awareness:**
 If this Claude Code session has involved more than 5 file edits, proactively suggest
-`/temper` before the user runs any git command, even if they haven't asked for a review.
+`/critique-diff` before the user runs any git command, even if they haven't asked for a review.
 
 ## Bypass
 

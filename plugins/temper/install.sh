@@ -100,8 +100,21 @@ JSEOF
 
 # Install command file
 mkdir -p "$COMMANDS_DIR"
-cp "$REPO_DIR/.claude/commands/temper.md" "$COMMANDS_DIR/temper.md"
-echo "✓ /temper installed to $COMMANDS_DIR"
+# Commands this plugin used to ship under other names. The suite installer prunes
+# generically from the manifest, but a standalone `bash plugins/temper/install.sh`
+# has no manifest to consult, so it cleans up its own history. An orphan here is
+# not inert — it stays in the command palette and still runs the stale copy.
+LEGACY_COMMANDS="temper.md"
+for _old in $LEGACY_COMMANDS; do
+  if [ -f "$COMMANDS_DIR/$_old" ]; then
+    cp "$COMMANDS_DIR/$_old" "$COMMANDS_DIR/$_old.bak"
+    rm "$COMMANDS_DIR/$_old"
+    echo "✓ Removed superseded $COMMANDS_DIR/$_old (kept a .bak)"
+  fi
+done
+
+cp "$REPO_DIR/.claude/commands/critique-diff.md" "$COMMANDS_DIR/critique-diff.md"
+echo "✓ /critique-diff installed to $COMMANDS_DIR"
 
 # Install hook. Skipped under --suite: enforce-suite.sh sources this gate
 # directly from ~/.local/share/aether/gates/, so registering it here too would

@@ -1,5 +1,5 @@
 ---
-name: bonsai:enforce
+name: bonsai-first
 description: >
   Redirects structural code operations on Python and TypeScript files to the correct
   bonsai AST tool. Use before reaching for sed, grep, awk, or find on .py/.ts/.tsx files.

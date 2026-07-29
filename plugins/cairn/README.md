@@ -18,10 +18,10 @@ Not because the work was unclear — because writing a good commit message after
 
 | Command | What it does |
 |---|---|
-| `/cairn-commit` | Generate a Conventional Commits message from staged diff |
-| `/cairn-pr` | Generate a PR title and description from branch diff |
-| `/cairn-changelog` | Generate a CHANGELOG entry from a commit range |
-| `/cairn-summary` | Plain-language standup, Slack message, or formal summary |
+| `/draft-commit` | Generate a Conventional Commits message from staged diff |
+| `/draft-pr` | Generate a PR title and description from branch diff |
+| `/draft-changelog` | Generate a CHANGELOG entry from a commit range |
+| `/draft-summary` | Plain-language standup, Slack message, or formal summary |
 
 ---
 
@@ -89,37 +89,37 @@ git push origin main       # suite:skip   — silence all suite hooks
 
 ## Usage
 
-### `/cairn-commit` — commit messages
+### `/draft-commit` — commit messages
 
-Stage your changes, then run `/cairn-commit` in Claude Code:
+Stage your changes, then run `/draft-commit` in Claude Code:
 
 ```
 git add src/auth/token.py
-/cairn-commit
+/draft-commit
 ```
 
-### `/cairn-pr` — PR descriptions
+### `/draft-pr` — PR descriptions
 
-On your feature branch, run `/cairn-pr`:
-
-```
-/cairn-pr
-/cairn-pr --base=develop
-```
-
-### `/cairn-changelog` — CHANGELOG entries
+On your feature branch, run `/draft-pr`:
 
 ```
-/cairn-changelog
-/cairn-changelog --from=v0.1.0 --version=0.2.0
+/draft-pr
+/draft-pr --base=develop
 ```
 
-### `/cairn-summary` — standup and status updates
+### `/draft-changelog` — CHANGELOG entries
 
 ```
-/cairn-summary
-/cairn-summary --format=slack
-/cairn-summary --from=v0.1.0 --format=paragraph
+/draft-changelog
+/draft-changelog --from=v0.1.0 --version=0.2.0
+```
+
+### `/draft-summary` — standup and status updates
+
+```
+/draft-summary
+/draft-summary --format=slack
+/draft-summary --from=v0.1.0 --format=paragraph
 ```
 
 ---
@@ -128,25 +128,25 @@ On your feature branch, run `/cairn-pr`:
 
 | Command | What it does |
 |---|---|
-| `/cairn-commit` | Conventional Commits message from staged diff |
-| `/cairn-commit --style=plain` | Plain imperative-mood message |
-| `/cairn-commit --off` | Skip this run |
-| `/cairn-pr` | PR title + description (auto-detects base branch) |
-| `/cairn-pr --base=develop` | Diff against `develop` instead of `main` |
-| `/cairn-pr --style=plain` | Plain PR title |
-| `/cairn-changelog` | CHANGELOG entry from last tag to HEAD |
-| `/cairn-changelog --from=v0.1.0 --version=0.2.0` | Specify range and version |
-| `/cairn-changelog --style=plain` | Flat bullet list, no type grouping |
-| `/cairn-summary` | Standup summary of yesterday's commits |
-| `/cairn-summary --format=slack` | Slack-ready paragraph |
-| `/cairn-summary --format=paragraph` | Formal prose summary |
-| `/cairn-summary --from=v0.1.0` | Summary from a specific tag |
+| `/draft-commit` | Conventional Commits message from staged diff |
+| `/draft-commit --style=plain` | Plain imperative-mood message |
+| `/draft-commit --off` | Skip this run |
+| `/draft-pr` | PR title + description (auto-detects base branch) |
+| `/draft-pr --base=develop` | Diff against `develop` instead of `main` |
+| `/draft-pr --style=plain` | Plain PR title |
+| `/draft-changelog` | CHANGELOG entry from last tag to HEAD |
+| `/draft-changelog --from=v0.1.0 --version=0.2.0` | Specify range and version |
+| `/draft-changelog --style=plain` | Flat bullet list, no type grouping |
+| `/draft-summary` | Standup summary of yesterday's commits |
+| `/draft-summary --format=slack` | Slack-ready paragraph |
+| `/draft-summary --format=paragraph` | Formal prose summary |
+| `/draft-summary --from=v0.1.0` | Summary from a specific tag |
 
 ---
 
 ## What you get
 
-### `/cairn-commit`
+### `/draft-commit`
 
 ```
 feat(auth): add token expiry validation on login
@@ -169,7 +169,7 @@ git commit -m "docs: update token lifecycle diagram"
 Consider splitting this into separate commits.
 ```
 
-### `/cairn-pr`
+### `/draft-pr`
 
 ```
 PR Title:
@@ -191,7 +191,7 @@ Description:
 - [ ] Review token lifecycle diagram renders correctly
 ```
 
-### `/cairn-changelog`
+### `/draft-changelog`
 
 ```markdown
 ## [0.2.0] — 2026-05-06
@@ -206,7 +206,7 @@ Description:
 - Tokens no longer accepted past their expiry window when clock-skew tolerance exceeds 30s
 ```
 
-### `/cairn-summary`
+### `/draft-summary`
 
 ```
 Yesterday:
@@ -234,17 +234,17 @@ Cairn resolves settings in three layers, lowest to highest priority:
 
 | Key | Default | Description |
 |---|---|---|
-| `enabled` | `true` | Enable/disable `/cairn-commit` at runtime |
-| `style` | `conventional` | Default style for `/cairn-commit` |
-| `pr.base` | auto | Default base branch for `/cairn-pr` |
+| `enabled` | `true` | Enable/disable `/draft-commit` at runtime |
+| `style` | `conventional` | Default style for `/draft-commit` |
+| `pr.base` | auto | Default base branch for `/draft-pr` |
 | `pr.style` | `conventional` | Default PR title style |
 | `pr.template_file` | — | Path to PR description template (e.g. `.github/pull_request_template.md`) |
 | `pr.rules_file` | — | Path to prose generation rules (e.g. `.cairn/pr-rules.md`) |
 | `changelog.style` | `conventional` | Default changelog grouping style |
 | `changelog.extra_types` | — | Comma-separated extra conventional types (e.g. `hotfix,release`) |
 | `changelog.exclude_paths` | — | Comma-separated path prefixes to exclude |
-| `summary.format` | `standup` | Default output format for `/cairn-summary` |
-| `summary.window` | `1 day ago` | Default time window for `/cairn-summary` |
+| `summary.format` | `standup` | Default output format for `/draft-summary` |
+| `summary.window` | `1 day ago` | Default time window for `/draft-summary` |
 
 ### Example `cairn.config`
 
@@ -258,7 +258,7 @@ summary.format: slack
 
 ### PR rules file
 
-The `pr.rules_file` is freeform prose that shapes how `/cairn-pr` generates descriptions. Example `.cairn/pr-rules.md`:
+The `pr.rules_file` is freeform prose that shapes how `/draft-pr` generates descriptions. Example `.cairn/pr-rules.md`:
 
 ```markdown
 - Emphasize WHY changes were made, not just what changed
@@ -278,7 +278,7 @@ A global install also provides a `cairn` command for managing your setup:
 cairn status                                      # install state + config summary
 cairn config show                                 # full effective config with sources
 
-cairn disable local                               # silence /cairn-commit for this project
+cairn disable local                               # silence /draft-commit for this project
 cairn disable global                              # silence everywhere
 cairn enable local                                # restore
 
@@ -299,14 +299,14 @@ Run `cairn help` for the full reference.
 
 ## Roadmap
 
-- [x] `/cairn-commit` — generate a Conventional Commits message from staged diff
-- [x] `/cairn-pr` — generate a full PR title and description from the branch diff vs base
-- [x] `/cairn-changelog` — generate a CHANGELOG entry from a commit range
-- [x] `/cairn-summary` — plain-language standup summary of what changed and why
+- [x] `/draft-commit` — generate a Conventional Commits message from staged diff
+- [x] `/draft-pr` — generate a full PR title and description from the branch diff vs base
+- [x] `/draft-changelog` — generate a CHANGELOG entry from a commit range
+- [x] `/draft-summary` — plain-language standup summary of what changed and why
 - [x] `cairn.config` support for extra conventional types, exclude paths, and per-command settings
 - [x] `cairn disable` / `enable` respected by the command file at runtime
 - [ ] MCP server upgrade for richer git integration
-- [ ] Workflow guide: run `/temper` to review the diff → `/cairn-commit` to narrate it (temper→cairn handoff)
+- [ ] Workflow guide: run `/critique-diff` to review the diff → `/draft-commit` to narrate it (temper→cairn handoff)
 
 ---
 
@@ -321,7 +321,7 @@ Cairn is part of a four-tool suite. Each tool covers a different moment in the d
 | [**temper**](../temper/) | After you build | Critiques diffs before commit — catches issues while context is live |
 | **cairn** | When you ship | Narrates commits, PRs, and changelogs from the actual diff |
 
-The highest-value handoff in the suite: after temper finds no blockers, run `/cairn-commit` immediately — the review is fresh and the staged diff is ready.
+The highest-value handoff in the suite: after temper finds no blockers, run `/draft-commit` immediately — the review is fresh and the staged diff is ready.
 
 ---
 

@@ -1,6 +1,6 @@
 # Plan: Add JWT Authentication to Express API
 
-> This is an example plan included in the whetstone repo to demonstrate what `/autocritic` output looks like. See `CRITIQUE.md` in this directory for the critique that was generated from it.
+> This is an example plan included in the whetstone repo to demonstrate what `/critique-plan` output looks like. See `CRITIQUE.md` in this directory for the critique that was generated from it.
 
 ## Overview
 

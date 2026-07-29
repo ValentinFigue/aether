@@ -2,9 +2,9 @@
 # enforce-cairn.sh — PreToolUse command hook (matcher: Bash)
 #
 # Three gates:
-#   1. git commit with a weak or missing message    → suggest /cairn-commit
-#   2. git push to a remote                         → suggest /cairn-pr
-#   3. git commit with no inline -m flag            → suggest /cairn-commit
+#   1. git commit with a weak or missing message    → suggest /draft-commit
+#   2. git push to a remote                         → suggest /draft-pr
+#   3. git commit with no inline -m flag            → suggest /draft-commit
 #
 # Bypass: append  # cairn:skip  or  # suite:skip  to silence.
 # Exit 1 = show nudge (non-blocking).
@@ -98,8 +98,8 @@ PYEOF
   case "$result" in
     commit_weak)
       printf '%s\n' \
-        'Cairn nudge: the commit message looks weak — /cairn-commit writes a better one.' \
-        '  Stage your changes, then:  /cairn-commit' \
+        'Cairn nudge: the commit message looks weak — /draft-commit writes a better one.' \
+        '  Stage your changes, then:  /draft-commit' \
         '  It generates a Conventional Commits message from the actual diff.' \
         '  Paste the result into:  git commit -m "<cairn output>"' \
         '' \
@@ -108,8 +108,8 @@ PYEOF
       ;;
     commit_no_message)
       printf '%s\n' \
-        'Cairn nudge: no inline message — /cairn-commit generates one from your staged diff.' \
-        '  /cairn-commit' \
+        'Cairn nudge: no inline message — /draft-commit generates one from your staged diff.' \
+        '  /draft-commit' \
         '  Then:  git commit -m "<cairn output>"' \
         '' \
         '  Append  # cairn:skip  to open your editor instead.'
@@ -117,9 +117,9 @@ PYEOF
       ;;
     push)
       printf '%s\n' \
-        'Cairn nudge: about to push — /cairn-pr writes the PR title and description.' \
-        '  /cairn-pr              (auto-detects base branch)' \
-        '  /cairn-pr --base=develop' \
+        'Cairn nudge: about to push — /draft-pr writes the PR title and description.' \
+        '  /draft-pr              (auto-detects base branch)' \
+        '  /draft-pr --base=develop' \
         '' \
         '  Append  # cairn:skip  to push without a PR description.'
       return 1

@@ -60,6 +60,19 @@ SUITE_PLUGINS="whetstone bonsai temper cairn"
 INSTALLED_PLUGINS=""
 FAILED=0
 
+COMMANDS_DIR="$SETTINGS_DIR/commands"
+
+# Every slash command this version ships. Recorded into the manifest so the next
+# install can prune whatever it recorded but no longer ships — which is what
+# makes a command rename clean up after itself instead of leaving an orphan in
+# the palette that still invokes a stale copy.
+SHIPPED_COMMANDS="critique-plan.md critique-diff.md draft-commit.md draft-pr.md draft-changelog.md draft-summary.md"
+
+# A manifest written before 1.0.0 has no commands= line, so there is nothing to
+# diff against. Seed it with the pre-rename names. Deletable once no 0.1.0
+# install survives.
+LEGACY_COMMANDS="autocritic.md temper.md cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md"
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 # Snapshot a file before the first mutation of this run. Every JSON helper below
@@ -70,6 +83,36 @@ _backup() {
   local file="$1"
   [ -f "$file" ] || return 0
   cp "$file" "$file.bak"
+}
+
+# Remove command files a previous install shipped and this one does not.
+#
+# Only $COMMANDS_DIR is touched — the directory for the scope being installed.
+# Sweeping both the global and the local directory would mean `install.sh
+# --global`, run from inside some unrelated project, silently deleting that
+# project's commands.
+#
+# Command files get hand-edited, and a superseded one is always backed up before
+# removal. There is deliberately no "was it modified?" check: for a *renamed*
+# command there is no shipped original left to compare against, so the only
+# honest answer is to keep a copy. One .bak per superseded command, once.
+_prune_superseded_commands() {
+  local recorded previous old
+  [ -d "$COMMANDS_DIR" ] || return 0
+
+  recorded=""
+  [ -f "$MANIFEST" ] && recorded=$(grep '^commands=' "$MANIFEST" | sed 's/^commands=//' | head -1)
+  # No commands= key means a pre-1.0.0 manifest (or none at all): fall back to
+  # the known pre-rename set.
+  previous="${recorded:-$LEGACY_COMMANDS}"
+
+  for old in $previous; do
+    case " $SHIPPED_COMMANDS " in *" $old "*) continue ;; esac
+    [ -f "$COMMANDS_DIR/$old" ] || continue
+    cp "$COMMANDS_DIR/$old" "$COMMANDS_DIR/$old.bak"
+    rm "$COMMANDS_DIR/$old"
+    printf '  ✓ Removed superseded %s (kept a .bak)\n' "$COMMANDS_DIR/$old"
+  done
 }
 
 # Which interpreter rewrites settings.json. Left to itself this always picks
@@ -326,6 +369,14 @@ if ! $DRY_RUN && [ -f "$SETTINGS_FILE" ]; then
   _json_remove_stale_hooks "$SETTINGS_FILE" || true
 fi
 
+# Must run before the manifest is rewritten in step 8 — it reads the previous
+# commands= value to work out what is no longer shipped.
+if $DRY_RUN; then
+  printf '  [dry-run] Would remove any superseded command files from %s\n' "$COMMANDS_DIR"
+else
+  _prune_superseded_commands
+fi
+
 # ── Step 4: Install enforce-suite.sh and the gates it sources ────────────────
 
 printf '\nInstalling suite hook...\n'
@@ -402,8 +453,19 @@ if [ "$WITH_CLAUDE_MD" = true ]; then
       fi
     done
 
+    # Replace an existing block rather than skipping it. Skipping meant the
+    # injected rules were frozen at whatever version first wrote them: after a
+    # command rename the block would keep telling Claude to run commands that no
+    # longer exist, while the hooks nudged the new names. Replacing makes the
+    # block track templates/CLAUDE.md for this and every future change.
     if [ -f "$CLAUDE_FILE" ] && grep -q "<!-- aether:start -->" "$CLAUDE_FILE"; then
-      printf '  %s already contains aether section — skipped\n' "$CLAUDE_FILE"
+      awk "/<!-- aether:start -->/{skip=1} !skip{print} /<!-- aether:end -->/{skip=0}" \
+        "$CLAUDE_FILE" > "$CLAUDE_FILE.tmp" && mv "$CLAUDE_FILE.tmp" "$CLAUDE_FILE"
+      {
+        printf '\n'
+        cat "$SCRIPT_DIR/templates/CLAUDE.md"
+      } >> "$CLAUDE_FILE"
+      printf '  ✓ aether rules refreshed in %s\n' "$CLAUDE_FILE"
     else
       {
         printf '\n'
@@ -427,6 +489,7 @@ repo=$SCRIPT_DIR
 claude_md=$WITH_CLAUDE_MD
 bonsai=$WITH_BONSAI
 plugins=$(echo $INSTALLED_PLUGINS)
+commands=$SHIPPED_COMMANDS
 MANIFEST_EOF
   printf '\n  ✓ Manifest written to %s\n' "$MANIFEST"
 fi

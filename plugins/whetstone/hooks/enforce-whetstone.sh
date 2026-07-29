@@ -40,7 +40,7 @@ print(max(plans, key=os.path.getmtime) if plans else "")
 
     if [ -n "$plan_file" ] && [ ! -f "$CRITIQUE_FILE" ]; then
       printf 'Whetstone: a plan exists but has not been critiqued yet.\n'
-      printf '  Run /autocritic before committing to surface blockers now.\n'
+      printf '  Run /critique-plan before committing to surface blockers now.\n'
       printf '  Append  # whetstone:skip  to your git command to bypass.\n'
       return 1
     fi
@@ -54,7 +54,7 @@ print('stale' if plan > crit else 'ok')
 " 2>/dev/null) || return 0
       if [ "$stale" = "stale" ]; then
         printf 'Whetstone: plan was modified after the last critique — critique is stale.\n'
-        printf '  Re-run /autocritic on the updated plan before committing.\n'
+        printf '  Re-run /critique-plan on the updated plan before committing.\n'
         printf '  Append  # whetstone:skip  to your git command to bypass.\n'
         return 1
       fi
@@ -76,7 +76,7 @@ print('yes' if re.search(r'\.(py|ts|tsx|js|jsx|mjs)$', sys.argv[1]) else 'no')
       [ -f "$sentinel" ] && return 0
       touch "$sentinel" 2>/dev/null || true
       printf 'Whetstone: writing source code with no critiqued plan on record.\n'
-      printf '  If this is a planned change, run /autocritic first.\n'
+      printf '  If this is a planned change, run /critique-plan first.\n'
       printf '  Append  # whetstone:skip  to your path to bypass.\n'
       return 1
     fi

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # enforce-temper.sh — PreToolUse command hook (matcher: Bash)
 #
-# Blocks high-risk git operations and nudges the agent to run /temper first.
+# Blocks high-risk git operations and nudges the agent to run /critique-diff first.
 # This is Tier 2 (reactive). The proactive Tier 1 rules live in templates/CLAUDE.md.
 #
 # Triggers:
@@ -171,15 +171,15 @@ PYEOF
   case "$result" in
     push)
       cat <<'MSG'
-temper: about to push — have you run /temper to review your changes?
-  Run /temper first, then push.
+temper: about to push — have you run /critique-diff to review your changes?
+  Run /critique-diff first, then push.
   Append  # temper:skip  (or  # suite:skip) to your push command to bypass this check.
 MSG
       return 1
       ;;
     commit_large)
       cat <<'MSG'
-temper: large commit detected — consider running /temper first.
+temper: large commit detected — consider running /critique-diff first.
   Your staged diff exceeds the size threshold (lines or files).
   Append  # temper:skip  (or  # suite:skip) to your commit command to bypass this check.
 MSG
@@ -187,7 +187,7 @@ MSG
       ;;
     commit_critical)
       cat <<'MSG'
-temper: critical path file detected in staged changes — run /temper first.
+temper: critical path file detected in staged changes — run /critique-diff first.
   One or more staged files matches a critical path pattern (auth, schema, migrations, credentials).
   Append  # temper:skip  (or  # suite:skip) to your commit command to bypass this check.
 MSG
@@ -195,7 +195,7 @@ MSG
       ;;
     merge_primary)
       cat <<'MSG'
-temper: merging into a primary branch — consider running /temper --diff=all first.
+temper: merging into a primary branch — consider running /critique-diff --diff=all first.
   Merges into main/master/develop/trunk have high surface area.
   Append  # temper:skip  (or  # suite:skip) to your merge command to bypass this check.
 MSG
@@ -203,15 +203,15 @@ MSG
       ;;
     rebase_large)
       cat <<'MSG'
-temper: interactive rebase touching many commits — consider /temper --diff=all after.
+temper: interactive rebase touching many commits — consider /critique-diff --diff=all after.
   Append  # temper:skip  (or  # suite:skip) to your rebase command to bypass this check.
 MSG
       return 1
       ;;
     stash_large)
       cat <<'MSG'
-temper: large stash detected — consider running /temper before committing.
-  Your stash exceeds the size threshold. Apply it, then run /temper before committing.
+temper: large stash detected — consider running /critique-diff before committing.
+  Your stash exceeds the size threshold. Apply it, then run /critique-diff before committing.
   Append  # temper:skip  (or  # suite:skip) to your stash pop command to bypass this check.
 MSG
       return 1

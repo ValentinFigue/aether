@@ -1,4 +1,6 @@
-# Auto-critic
+Critique a plan before implementation — surfaces blockers while they are still cheap (whetstone).
+
+# critique-plan
 
 ## Configuration
 

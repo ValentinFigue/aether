@@ -1,3 +1,5 @@
+Draft a CHANGELOG entry from a commit range (cairn).
+
 Parse $ARGUMENTS for flags. Supported flags:
 - `--from=<ref>` — starting ref (tag, SHA, or branch); default: last tag
 - `--to=<ref>` — ending ref; default: `HEAD`

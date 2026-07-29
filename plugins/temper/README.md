@@ -10,7 +10,7 @@ It is the symmetric counterpart to [whetstone](../whetstone/): where whetstone c
 
 ## What it does
 
-Run `/temper` before committing or pushing. Temper reads your staged diff (or any diff you point it at), runs four critic personas against the code, and produces a structured review with severity ratings:
+Run `/critique-diff` before committing or pushing. Temper reads your staged diff (or any diff you point it at), runs four critic personas against the code, and produces a structured review with severity ratings:
 
 ```
 ### Review report
@@ -72,7 +72,7 @@ bash install.sh
 
 ### With proactive CLAUDE.md rules
 
-Adds behavioral guidelines to your CLAUDE.md that teach Claude Code to proactively suggest `/temper` based on session scope, bonsai refactoring, and critical file patterns:
+Adds behavioral guidelines to your CLAUDE.md that teach Claude Code to proactively suggest `/critique-diff` based on session scope, bonsai refactoring, and critical file patterns:
 
 ```bash
 bash install.sh --claude-md          # local
@@ -88,20 +88,20 @@ No Python, npm, or build step required. Just bash and Claude Code.
 ## Usage
 
 ```
-/temper                     Review staged changes (default)
-/temper --diff=all          Review all changes since HEAD
-/temper --diff=HEAD~3       Review last 3 commits
-/temper --only=risk         Run only the Risk critic
-/temper --skip=coverage     Run all critics except Coverage
-/temper --severity=red      Report only blockers
-/temper --target=src/auth.py  Scope to one file
+/critique-diff                     Review staged changes (default)
+/critique-diff --diff=all          Review all changes since HEAD
+/critique-diff --diff=HEAD~3       Review last 3 commits
+/critique-diff --only=risk         Run only the Risk critic
+/critique-diff --skip=coverage     Run all critics except Coverage
+/critique-diff --severity=red      Report only blockers
+/critique-diff --target=src/auth.py  Scope to one file
 ```
 
 ---
 
 ## When the hook fires
 
-The `enforce-temper.sh` PreToolUse hook blocks the following operations and asks you to run `/temper` first:
+The `enforce-temper.sh` PreToolUse hook blocks the following operations and asks you to run `/critique-diff` first:
 
 | Operation | Condition |
 |-----------|-----------|
@@ -144,7 +144,7 @@ temper disable [local|global]          Disable temper
 temper config set auto_nudge_lines=300
 temper config set critics=correctness,risk --global
 temper config reset local
-temper update                          Re-download latest temper.md
+temper update                          Re-download latest critique-diff.md
 temper uninstall [global] [--claude-md]
 ```
 
@@ -153,10 +153,10 @@ temper uninstall [global] [--claude-md]
 ## Two-tier gate model
 
 **Tier 1 — Proactive (CLAUDE.md rules)**
-When installed with `--claude-md`, behavioral guidelines teach Claude Code to suggest `/temper` before you even reach a git command — based on session scope, critical file patterns, and bonsai refactoring activity. These are soft instructions, not hard blocks.
+When installed with `--claude-md`, behavioral guidelines teach Claude Code to suggest `/critique-diff` before you even reach a git command — based on session scope, critical file patterns, and bonsai refactoring activity. These are soft instructions, not hard blocks.
 
 **Tier 2 — Reactive (enforce-temper.sh hook)**
-The hook is the hard gate. It intercepts high-risk git operations and blocks them until you acknowledge the risk via `/temper` or `# temper:skip`.
+The hook is the hard gate. It intercepts high-risk git operations and blocks them until you acknowledge the risk via `/critique-diff` or `# temper:skip`.
 
 ---
 

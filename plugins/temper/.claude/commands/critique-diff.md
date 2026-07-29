@@ -1,4 +1,6 @@
-# temper — diff critic
+Critique a diff before commit or push — four critics, severity-rated (temper).
+
+# critique-diff
 
 ## Configuration
 

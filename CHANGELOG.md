@@ -36,6 +36,26 @@ version, one installer, no network access at install time.
 
 ### Changed
 
+- **Every slash command is renamed to one act-and-object vocabulary.** The six
+  commands shipped under three conventions — `/autocritic` (bare verb, no owner),
+  `/temper` (bare plugin name, no verb) and `/cairn-*` (`<plugin>-<verb>`) — which
+  hid what the suite is: two commands critique something that exists, four draft
+  text you are about to write. Naming them after the implementing plugin also
+  listed the pipeline backwards in the alphabetically-sorted palette.
+
+  | Was | Now |
+  |---|---|
+  | `/autocritic` | `/critique-plan` |
+  | `/temper` | `/critique-diff` |
+  | `/cairn-commit` | `/draft-commit` |
+  | `/cairn-pr` | `/draft-pr` |
+  | `/cairn-changelog` | `/draft-changelog` |
+  | `/cairn-summary` | `/draft-summary` |
+
+  Plugin names, CLI binaries, `# <plugin>:skip` markers and `<plugin>.config`
+  filenames are unchanged. Each command's first line now names its owning plugin,
+  so the palette description says which plugin to `disable`. Upgrading removes the
+  old command files automatically — see *Fixed*.
 - **bonsai is installed automatically.** It was previously skipped with a FIXME
   telling you to clone it yourself. Its installer already resolved its own root
   from `BASH_SOURCE` and registered MCP servers by absolute path, so sharing
@@ -97,6 +117,22 @@ version, one installer, no network access at install time.
 - temper wrote its gate's python to a `mktemp` file on every Bash tool call to
   work around the heredoc bug above; its body is quote-balanced, so it is
   inlined and nothing touches `/tmp`
+- **Nothing pruned superseded command files, and the CLAUDE.md block was frozen.**
+  Two problems the command rename exposed. No install path ever removed a
+  `commands/*.md` it no longer shipped, so a rename would leave orphans in the
+  palette still invoking stale copies; the manifest now records `commands=` and
+  each install prunes what it recorded but no longer ships, backing up any file
+  the user had edited. And CLAUDE.md injection *skipped* whenever the aether
+  block already existed, freezing the injected rules at whatever version first
+  wrote them — after the rename it would have kept telling Claude to run commands
+  that no longer exist. Injection now replaces the block, so it tracks the
+  template for this and every future change
+- **`cairn update`, `temper update` and `whetstone update` fetched from the
+  pre-monorepo repos.** They re-downloaded command files by name from
+  `raw.githubusercontent.com/ValentinFigue/<plugin>`. Those repos are archived
+  but still serve content, so after the rename they would have written the old
+  files back under the old names and undone the prune. All three now re-run the
+  local installer from the clone recorded in the aether manifest
 - **`aether uninstall` ignored its scope argument.** The hook, gates, CLI and
   manifest paths were hardcoded to the global locations, so a local uninstall
   removed none of what a local install had created — leaving

@@ -1,3 +1,5 @@
+Draft a PR title and description from the branch diff (cairn).
+
 Parse $ARGUMENTS for flags. Supported flags:
 - `--base=<branch>` — base branch to diff against (default: auto-detected)
 - `--style=conventional` (default) — Conventional Commits PR title format
@@ -92,7 +94,7 @@ Resolve style:
 3. `style` from config
 4. Default: `conventional`
 
-**PR Title** — same rules as /cairn-commit:
+**PR Title** — same rules as /draft-commit:
 - Conventional style: `<type>(<scope>): <short description>` (≤ 72 chars)
 - Plain style: short imperative description (≤ 72 chars)
 - If the branch name contains a ticket number pattern (e.g. `PROJ-123`, `issue-42`), include it in the title suffix: `feat(auth): add token validation [PROJ-123]`

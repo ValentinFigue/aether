@@ -2,8 +2,8 @@
 # post-cairn.sh — PostToolUse hook (matcher: Bash|Write|Edit)
 #
 # Two triggers:
-#   1. After temper completes with no blockers → suggest /cairn-commit
-#   2. After a version bump in a manifest file → suggest /cairn-changelog
+#   1. After temper completes with no blockers → suggest /draft-commit
+#   2. After a version bump in a manifest file → suggest /draft-changelog
 #
 # Exit 1 = show nudge.
 # Exit 0 = allow silently.
@@ -43,14 +43,14 @@ case "$result" in
   post_temper)
     printf '%s\n' \
       'Cairn: temper found no blockers — ready to commit.' \
-      '  /cairn-commit   generates the commit message from your staged diff.'
+      '  /draft-commit   generates the commit message from your staged diff.'
     exit 1
     ;;
   version_bump)
     printf '%s\n' \
-      'Cairn: version bump detected — /cairn-changelog generates the CHANGELOG entry.' \
-      '  /cairn-changelog' \
-      '  /cairn-changelog --from=<previous-tag> --version=<new-version>'
+      'Cairn: version bump detected — /draft-changelog generates the CHANGELOG entry.' \
+      '  /draft-changelog' \
+      '  /draft-changelog --from=<previous-tag> --version=<new-version>'
     exit 1
     ;;
 esac

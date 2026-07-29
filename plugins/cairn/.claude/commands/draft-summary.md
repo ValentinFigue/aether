@@ -1,3 +1,5 @@
+Draft a standup, Slack or prose summary of recent commits (cairn).
+
 Parse $ARGUMENTS for flags. Supported flags:
 - `--from=<ref>` — starting ref or time expression; default: `1 day ago`
 - `--to=<ref>` — ending ref; default: `HEAD`

@@ -30,7 +30,7 @@ else
   CLAUDE_FILE="./CLAUDE.md"
 fi
 
-ALL_COMMANDS="cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md"
+ALL_COMMANDS="draft-commit.md draft-pr.md draft-changelog.md draft-summary.md"
 
 _json_add_perms() {
   local file="$1"
@@ -171,6 +171,19 @@ PYEOF
 }
 
 # Install command files
+# Commands this plugin used to ship under other names. The suite installer prunes
+# generically from the manifest, but a standalone `bash plugins/cairn/install.sh`
+# has no manifest to consult, so it cleans up its own history. An orphan here is
+# not inert — it stays in the command palette and still runs the stale copy.
+LEGACY_COMMANDS="cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md"
+for _old in $LEGACY_COMMANDS; do
+  if [ -f "$COMMANDS_DIR/$_old" ]; then
+    cp "$COMMANDS_DIR/$_old" "$COMMANDS_DIR/$_old.bak"
+    rm "$COMMANDS_DIR/$_old"
+    echo "✓ Removed superseded $COMMANDS_DIR/$_old (kept a .bak)"
+  fi
+done
+
 mkdir -p "$COMMANDS_DIR"
 for name in $ALL_COMMANDS; do
   cp "$REPO_DIR/.claude/commands/$name" "$COMMANDS_DIR/$name"
@@ -266,13 +279,13 @@ echo ""
 if [ "$MODE" = "global" ]; then
   echo "Available in all Claude Code projects. Restart Claude Code to activate."
   echo ""
-  echo "Commands: /cairn-commit  /cairn-pr  /cairn-changelog  /cairn-summary"
+  echo "Commands: /draft-commit  /draft-pr  /draft-changelog  /draft-summary"
   echo ""
   echo "Run 'cairn status' to verify your install."
 else
   echo "Available in this project. Restart Claude Code to activate."
   echo ""
-  echo "Commands: /cairn-commit  /cairn-pr  /cairn-changelog  /cairn-summary"
+  echo "Commands: /draft-commit  /draft-pr  /draft-changelog  /draft-summary"
   echo ""
   echo "Tips:"
   echo "  Global install:             bash install.sh global"

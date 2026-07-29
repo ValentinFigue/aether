@@ -32,8 +32,12 @@ else
   fail "install exits 0" "$(tail -5 "$H/out.log")"
 fi
 
-for c in cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md temper.md autocritic.md; do
+for c in draft-commit.md draft-pr.md draft-changelog.md draft-summary.md critique-diff.md critique-plan.md; do
   [ -f "$H/.claude/commands/$c" ] && pass "command installed: $c" || fail "command installed: $c"
+done
+# None of the pre-1.0.0 names may appear on a fresh install.
+for c in autocritic.md temper.md cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md; do
+  [ -f "$H/.claude/commands/$c" ] && fail "old command absent: $c" || pass "old command absent: $c"
 done
 
 [ -x "$H/.local/share/aether/enforce-suite.sh" ] \
@@ -206,6 +210,73 @@ assert_eq "0" "$hits" "no raw.githubusercontent fetches in any installer"
 # copied into six files. Everything that writes or matches it must use hyphens;
 # the only permitted underscore references are the cleanup lists that strip the
 # old spelling from existing configs.
+# ── every command a nudge names must actually exist ──────────────────────────
+# This is the check that would have caught the whole class of drift before it
+# existed: hooks and CLAUDE.md templates naming slash commands that no installer
+# ships. It keeps catching it on every future rename.
+suite "referenced commands exist"
+SHIPPED=$(cd "$REPO" && ls plugins/*/.claude/commands/*.md | xargs -n1 basename | sed 's/\.md$//' | sort -u)
+referenced=$(grep -rhoE '/[a-z][a-z0-9]+(-[a-z0-9]+)+' \
+    "$REPO"/plugins/*/hooks/*.sh "$REPO"/hooks/*.sh \
+    "$REPO"/templates/CLAUDE.md "$REPO"/plugins/*/templates/CLAUDE.md 2>/dev/null \
+  | sed 's|^/||' | sort -u)
+missing=""
+for r in $referenced; do
+  # Only consider tokens that look like one of our two command families;
+  # everything else in these files is a path fragment or a flag.
+  case "$r" in critique-*|draft-*) ;; *) continue ;; esac
+  printf '%s\n' "$SHIPPED" | grep -qx "$r" || missing="$missing $r"
+done
+if [ -z "$missing" ]; then
+  pass "every /critique-* and /draft-* named in hooks and templates is shipped"
+else
+  fail "every /critique-* and /draft-* named in hooks and templates is shipped" "missing:$missing"
+fi
+
+# And the reverse: no hook or template still names a pre-rename command.
+stale=$(grep -rhoE '/(autocritic|cairn-(commit|pr|changelog|summary))\b' \
+  "$REPO"/plugins/*/hooks/*.sh "$REPO"/hooks/*.sh \
+  "$REPO"/templates/CLAUDE.md "$REPO"/plugins/*/templates/CLAUDE.md 2>/dev/null | sort -u)
+if [ -z "$stale" ]; then
+  pass "no hook or template names a pre-rename command"
+else
+  fail "no hook or template names a pre-rename command" "$stale"
+fi
+
+# ── per-plugin update must not resurrect old command names ───────────────────
+# cairn/temper/whetstone used to re-download command files by name from the
+# pre-monorepo repos. Those are archived but still serve content, so this would
+# have written the old files straight back after the prune.
+suite "plugin update cannot resurrect old commands"
+# Comment lines are excluded: each CLI keeps a note explaining why the old
+# network fetch was removed, and that note is worth keeping.
+hits=$(grep -n 'raw.githubusercontent' "$REPO"/plugins/*/bin/* 2>/dev/null \
+       | grep -vE ':[0-9]+: *#' || true)
+if [ -z "$hits" ]; then
+  pass "no plugin CLI fetches command files over the network"
+else
+  fail "no plugin CLI fetches command files over the network" "$hits"
+fi
+
+HR=$(new_home)
+mkdir -p "$HR/.claude/commands"
+env HOME="$HR" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+for c in autocritic.md temper.md cairn-commit.md; do
+  printf 'resurrected\n' > "$HR/.claude/commands/$c"
+done
+for p in cairn temper whetstone; do
+  env HOME="$HR" bash "$REPO/plugins/$p/bin/$p" update >/dev/null 2>&1 || true
+done
+resurrected=""
+for c in autocritic.md temper.md cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md; do
+  [ -f "$HR/.claude/commands/$c" ] && resurrected="$resurrected $c"
+done
+if [ -z "$resurrected" ]; then
+  pass "running every plugin's update leaves no pre-rename command behind"
+else
+  fail "running every plugin's update leaves no pre-rename command behind" "found:$resurrected"
+fi
+
 suite "MCP tool-name spelling"
 offenders=$(grep -rln 'mcp__bonsai_py__\|mcp__bonsai_ts__' "$REPO" 2>/dev/null \
   | grep -v '/\.git/' \
@@ -227,6 +298,81 @@ for f in "$REPO/install.sh" "$REPO/plugins/bonsai/install.sh"; do
          | grep -v 'dead\|remove\|filter\|select' | wc -l | tr -d ' ')
   assert_eq "0" "$adds" "$(basename "$(dirname "$f")")/$(basename "$f") never writes the underscore spelling"
 done
+
+# ── upgrading from the pre-rename command names ──────────────────────────────
+# The case that decides whether the rename is safe to ship. An orphaned command
+# file is not inert: it stays in the palette and still runs the stale copy.
+suite "upgrade prunes superseded commands"
+HU=$(new_home)
+mkdir -p "$HU/.claude/commands"
+OLD_NAMES="autocritic.md temper.md cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md"
+for c in $OLD_NAMES; do printf 'stale copy of %s\n' "$c" > "$HU/.claude/commands/$c"; done
+# A 0.1.0 manifest has no commands= line, so the installer must fall back to the
+# known pre-rename set rather than finding nothing to prune.
+printf 'version=0.1.0\nscope=global\n' > "$HU/.claude/aether.manifest"
+
+env HOME="$HU" bash "$REPO/install.sh" --global --no-bonsai >"$HU/out.log" 2>&1
+e=$?
+assert_exit 0 "$e" "upgrade over a 0.1.0 install exits 0"
+for c in $OLD_NAMES; do
+  [ -f "$HU/.claude/commands/$c" ] && fail "pruned $c" || pass "pruned $c"
+done
+for c in critique-plan.md critique-diff.md draft-commit.md; do
+  [ -f "$HU/.claude/commands/$c" ] && pass "installed $c" || fail "installed $c"
+done
+assert_contains "$(cat "$HU/.claude/aether.manifest")" "commands=" \
+  "the manifest now records what it shipped"
+
+# A hand-edited command must not vanish silently.
+suite "prune preserves user edits"
+HE=$(new_home)
+mkdir -p "$HE/.claude/commands"
+printf 'MY OWN HEAVILY EDITED VERSION\n' > "$HE/.claude/commands/cairn-commit.md"
+cp "$REPO/plugins/cairn/.claude/commands/draft-pr.md" "$HE/.claude/commands/cairn-pr.md" 2>/dev/null || true
+printf 'version=0.1.0\nscope=global\n' > "$HE/.claude/aether.manifest"
+env HOME="$HE" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+[ -f "$HE/.claude/commands/cairn-commit.md.bak" ] \
+  && pass "an edited command is backed up before removal" \
+  || fail "an edited command is backed up before removal"
+assert_contains "$(cat "$HE/.claude/commands/cairn-commit.md.bak" 2>/dev/null)" \
+  "MY OWN HEAVILY EDITED" "the backup holds the user's content"
+
+# ── a global install must not touch the current project ──────────────────────
+# The prune loops over $COMMANDS_DIR only. Sweeping both scopes would mean
+# installing globally from inside some unrelated repo deletes that repo's
+# commands.
+suite "prune is scope-limited"
+HS=$(new_home)
+PROJ_S=$(mktemp -d)
+mkdir -p "$PROJ_S/.claude/commands"
+printf 'a project-local command\n' > "$PROJ_S/.claude/commands/cairn-commit.md"
+cd "$PROJ_S" || exit 1
+env HOME="$HS" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+[ -f "$PROJ_S/.claude/commands/cairn-commit.md" ] \
+  && pass "a --global install leaves the project's commands alone" \
+  || fail "a --global install leaves the project's commands alone"
+cd "$REPO" || exit 1
+rm -rf "$PROJ_S"
+
+# ── CLAUDE.md is refreshed, not skipped ──────────────────────────────────────
+# Skipping froze the injected rules at whatever version wrote them first, so the
+# block would keep naming commands the rename deleted.
+suite "CLAUDE.md refresh"
+HC=$(new_home)
+mkdir -p "$HC/.claude"
+printf 'my own notes\n\n<!-- aether:start -->\nRun /autocritic and /cairn-commit.\n<!-- aether:end -->\n' \
+  > "$HC/.claude/CLAUDE.md"
+env HOME="$HC" bash "$REPO/install.sh" --global --claude-md --no-bonsai >/dev/null 2>&1
+C="$HC/.claude/CLAUDE.md"
+assert_contains "$(cat "$C")" "/critique-plan" "the block is refreshed to the new names"
+case "$(cat "$C")" in
+  *"/autocritic"*) fail "the stale block is gone" "still names /autocritic" ;;
+  *) pass "the stale block is gone" ;;
+esac
+n=$(grep -c '<!-- aether:start -->' "$C")
+assert_eq "1" "$n" "refresh leaves exactly one aether block"
+assert_contains "$(cat "$C")" "my own notes" "content outside the sentinels is preserved"
+[ -f "$C.bak" ] && pass "CLAUDE.md is backed up before refresh" || fail "CLAUDE.md is backed up before refresh"
 
 # ── JSON backend equivalence ─────────────────────────────────────────────────
 # install.sh rewrites settings.json with python3, node or jq, whichever is

@@ -8,45 +8,45 @@ pushing, and after shipping.
 
 | Moment | Command |
 |---|---|
-| About to `git commit` | `/cairn-commit` — generate message from staged diff |
-| About to `git push` | `/cairn-pr` — generate PR title and description |
-| After temper finds no blockers | `/cairn-commit` immediately — prime moment |
-| After a version bump in any manifest | `/cairn-changelog` |
-| After a sprint, milestone, or release | `/cairn-summary --format=slack` or `--format=paragraph` |
-| Multi-area staged diff | `/cairn-commit` — cairn will suggest splitting if needed |
+| About to `git commit` | `/draft-commit` — generate message from staged diff |
+| About to `git push` | `/draft-pr` — generate PR title and description |
+| After temper finds no blockers | `/draft-commit` immediately — prime moment |
+| After a version bump in any manifest | `/draft-changelog` |
+| After a sprint, milestone, or release | `/draft-summary --format=slack` or `--format=paragraph` |
+| Multi-area staged diff | `/draft-commit` — cairn will suggest splitting if needed |
 
 ### Proactive triggers — reach for cairn without waiting for a nudge
 
-- **After temper completes with no 🔴 findings**: run `/cairn-commit` on the
+- **After temper completes with no 🔴 findings**: run `/draft-commit` on the
   staged diff. The review is fresh, the context is live — this is the best
   moment to write the commit message.
 
 - **After any bonsai rename or move**: the diff will be large and
-  mechanically noisy (`pyrename` touches every call site). `/cairn-commit`
+  mechanically noisy (`pyrename` touches every call site). `/draft-commit`
   reads the intent behind the change, not the line count —
   it will write `refactor(auth): rename TokenValidator → TokenVerifier`
   rather than `changed 47 files`.
 
 - **Before pushing a branch that diverged more than 3 commits from base**:
-  run `/cairn-pr` to draft the PR description while the context is still live.
+  run `/draft-pr` to draft the PR description while the context is still live.
   Do not wait until after the push.
 
 - **When a whetstone 🟡 risk finding was noted in the plan but not resolved**:
-  reference it explicitly in the commit message via `/cairn-commit`. The commit
+  reference it explicitly in the commit message via `/draft-commit`. The commit
   message is the right place to document a known accepted risk.
 
-- **After any session that touched more than 5 files**: run `/cairn-summary`
+- **After any session that touched more than 5 files**: run `/draft-summary`
   before closing the session. It costs nothing and keeps the trail readable.
 
 ### Commit message quality contract
 
 Never write `git commit -m "fix"`, `"update"`, `"wip"`, or any single-word
-message. If there is no time to run `/cairn-commit`, the minimum acceptable
+message. If there is no time to run `/draft-commit`, the minimum acceptable
 message is a conventional commit with a non-trivial description:
 
     fix(auth): prevent token acceptance past expiry when clock-skew > 30s
 
-If `/cairn-commit` produces a message that spans multiple logical areas
+If `/draft-commit` produces a message that spans multiple logical areas
 (e.g. `feat(auth): ... and fix(docs): ...`), follow its suggestion to split
 into separate commits before running `git commit`.
 
@@ -62,11 +62,11 @@ for the nudge:
 - When removing something → add under `### Removed`
 
 Dogfooding rule: every commit to a cairn-managed repo should use
-`/cairn-commit` to generate its own message.
+`/draft-commit` to generate its own message.
 
 ### Documentation sync rules
 
-Any change to a `.claude/commands/cairn-*.md` file must be reflected in
+Any change to a `.claude/commands/draft-*.md` file must be reflected in
 README.md before the change is committed:
 
 - Flag added or removed → update the quick reference table

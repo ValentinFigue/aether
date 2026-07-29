@@ -4,7 +4,7 @@
 
 # Anchored to this directory. As bare patterns these matched at any depth, and
 # on a case-insensitive filesystem `TEMPER.md` also matched
-# .claude/commands/temper.md — which is why the /temper slash command was never
-# committed to the temper repo.
+# .claude/commands/temper.md (now critique-diff.md) — which is why the slash
+# command was never committed to the temper repo.
 /temper.config
 /TEMPER.md

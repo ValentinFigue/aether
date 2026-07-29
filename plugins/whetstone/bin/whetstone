@@ -5,11 +5,10 @@ GLOBAL_CONFIG="$HOME/.claude/whetstone.config"
 LOCAL_CONFIG="./whetstone.config"
 GLOBAL_COMMANDS="$HOME/.claude/commands"
 LOCAL_COMMANDS=".claude/commands"
-REMOTE_BASE="https://raw.githubusercontent.com/ValentinFigue/whetstone/main"
 
 usage() {
   cat << 'EOF'
-whetstone — manage your /autocritic install
+whetstone — manage your /critique-plan install
 
 Usage:
   whetstone status                          Show install state and effective config
@@ -17,7 +16,7 @@ Usage:
   whetstone disable [local|global]          Disable whetstone
   whetstone config set <flags> [--global]   Set default flags
   whetstone config reset [local|global]     Remove config file
-  whetstone update                          Re-download latest autocritic.md
+  whetstone update                          Re-download latest critique-plan.md
   whetstone uninstall [local|global] [--claude-md]  Remove command + optionally CLAUDE.md section
   whetstone help                            Show this message
 
@@ -54,15 +53,15 @@ config_set_key() {
 
 cmd_status() {
   echo "Install:"
-  if [ -f "$GLOBAL_COMMANDS/autocritic.md" ]; then
-    echo "  ~/.claude/commands/autocritic.md    installed"
+  if [ -f "$GLOBAL_COMMANDS/critique-plan.md" ]; then
+    echo "  ~/.claude/commands/critique-plan.md    installed"
   else
-    echo "  ~/.claude/commands/autocritic.md    not installed"
+    echo "  ~/.claude/commands/critique-plan.md    not installed"
   fi
-  if [ -f "$LOCAL_COMMANDS/autocritic.md" ]; then
-    echo "  .claude/commands/autocritic.md      installed"
+  if [ -f "$LOCAL_COMMANDS/critique-plan.md" ]; then
+    echo "  .claude/commands/critique-plan.md      installed"
   else
-    echo "  .claude/commands/autocritic.md      not installed"
+    echo "  .claude/commands/critique-plan.md      not installed"
   fi
   echo ""
 
@@ -146,16 +145,33 @@ cmd_config_reset() {
 }
 
 cmd_update() {
-  local updated=0
-  for target in "$GLOBAL_COMMANDS/autocritic.md" "$LOCAL_COMMANDS/autocritic.md"; do
-    if [ -f "$target" ]; then
-      curl -fsSL -o "$target" "$REMOTE_BASE/.claude/commands/autocritic.md"
-      echo "✓ Updated $target"
-      updated=$((updated + 1))
+  # Previously this re-downloaded command files by name from
+  # raw.githubusercontent.com/ValentinFigue/whetstone. That repo predates the
+  # monorepo and is being archived — but archived repos still serve content, so
+  # after the command rename this would have fetched the *old* files and written
+  # them back under the *old* names, undoing the installer's prune.
+  #
+  # whetstone now ships inside aether, so updating means re-running the installer
+  # out of the clone. The aether manifest records where that clone is; local
+  # wins over global, matching how every other lookup in the suite resolves.
+  local repo=""
+  for m in ".claude/aether.manifest" "$HOME/.claude/aether.manifest"; do
+    if [ -f "$m" ]; then
+      local r
+      r=$(grep '^repo=' "$m" | sed 's/^repo=//' | head -1)
+      [ -n "$r" ] && repo="$r"
     fi
   done
-  [ "$updated" -eq 0 ] && echo "No autocritic.md found. Run install.sh first." && exit 1
-  true
+
+  if [ -z "$repo" ] || [ ! -d "$repo/.git" ]; then
+    printf 'whetstone ships inside the aether suite, which is where updates come from.\n'
+    printf '  Whole suite:  aether update\n'
+    printf '  whetstone only:  bash <your-aether-clone>/plugins/whetstone/install.sh global\n'
+    return 1
+  fi
+
+  printf 'Updating whetstone from %s\n\n' "$repo"
+  bash "$repo/plugins/whetstone/install.sh" global
 }
 
 cmd_uninstall() {
@@ -178,11 +194,11 @@ cmd_uninstall() {
     claude_file="./CLAUDE.md"
   fi
 
-  if [ -f "$commands_dir/autocritic.md" ]; then
-    rm "$commands_dir/autocritic.md"
-    echo "✓ Removed $commands_dir/autocritic.md"
+  if [ -f "$commands_dir/critique-plan.md" ]; then
+    rm "$commands_dir/critique-plan.md"
+    echo "✓ Removed $commands_dir/critique-plan.md"
   else
-    echo "  $commands_dir/autocritic.md not found"
+    echo "  $commands_dir/critique-plan.md not found"
   fi
 
   if [ "$clean_claude_md" = true ]; then

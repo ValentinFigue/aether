@@ -115,7 +115,7 @@ import json,sys
 s=json.load(open(sys.argv[1]))
 print("\n".join(h.get("command","") for e in s.get("hooks",{}).get("PostToolUse",[]) for h in e.get("hooks",[])))')
 assert_contains "$post" "post-cairn.sh" "uninstall leaves post-cairn.sh registered"
-[ -f "$H3/.claude/commands/cairn-commit.md" ] \
+[ -f "$H3/.claude/commands/draft-commit.md" ] \
   && pass "uninstall leaves plugin slash commands in place" \
   || fail "uninstall leaves plugin slash commands in place"
 
@@ -157,7 +157,7 @@ done
   && pass "a local uninstall leaves the global manifest alone" \
   || fail "a local uninstall leaves the global manifest alone"
 
-[ -f .claude/commands/cairn-commit.md ] \
+[ -f .claude/commands/draft-commit.md ] \
   && pass "local uninstall leaves the plugin slash commands in place" \
   || fail "local uninstall leaves the plugin slash commands in place"
 

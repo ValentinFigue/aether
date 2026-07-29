@@ -16,13 +16,13 @@ A single bypass (`# aether:skip`) silences all four.
 
 ## Planning discipline (whetstone)
 
-Before implementing any non-trivial change, present a plan and run `/autocritic`
+Before implementing any non-trivial change, present a plan and run `/critique-plan`
 on it. Catch blockers at plan time — not at review time (temper) and not at
 incident time.
 
 ### What counts as a plan that needs critique
 
-Run `/autocritic` automatically when the proposed work:
+Run `/critique-plan` automatically when the proposed work:
 
 - Spans more than 2 files
 - Introduces a new module, class, or public API
@@ -40,11 +40,11 @@ Skip the critique (use `# whetstone:skip` or just proceed) when:
 
 ### Auto-trigger rules
 
-After **presenting any plan**, run `/autocritic` immediately — do not wait for
+After **presenting any plan**, run `/critique-plan` immediately — do not wait for
 a prompt. Surface blockers before asking the user to approve.
 
 After **any user feedback on a plan** (scope change, added constraint, pushback
-on an approach), update the plan file and re-run `/autocritic` on the revised
+on an approach), update the plan file and re-run `/critique-plan` on the revised
 plan before presenting it for approval.
 
 After **a temper Design finding** that leads to a renamed symbol or restructured
@@ -52,7 +52,7 @@ module — re-critique the plan if the structural change is significant. A Desig
 finding that causes architectural drift is a new plan, not a patch.
 
 After **a bonsai tool reports unexpected references** during a dry-run — surface
-that as new information in the plan and re-run `/autocritic`. Unexpected blast
+that as new information in the plan and re-run `/critique-plan`. Unexpected blast
 radius is a plan-level concern, not just a code-level one.
 
 ### Post-critique gate
@@ -73,7 +73,7 @@ Store plans and critiques in `.claude/plans/`:
 ```
 .claude/plans/
 ├── <plan-name>.md   # the current plan (one file per plan)
-└── CRITIQUE.md      # the latest /autocritic output (append with date headers)
+└── CRITIQUE.md      # the latest /critique-plan output (append with date headers)
 ```
 
 The hook (`enforce-suite.sh`) detects stale critiques by comparing the
@@ -94,7 +94,7 @@ critiques to `.claude/plans/CRITIQUE.md` so the hook can find them.
 
 To skip whetstone for a specific plan, include `# whetstone:skip` in the plan heading.
 To skip all suite hooks for a plan, use `# suite:skip` instead.
-For a one-off skip without modifying the plan, say `/autocritic --off`.
+For a one-off skip without modifying the plan, say `/critique-plan --off`.
 
 ---
 
@@ -148,9 +148,9 @@ Reach for bonsai — without waiting for the hook to nudge — in these situatio
 
 ## Code review discipline (temper)
 
-### When to run /temper
+### When to run /critique-diff
 
-Run `/temper` before any `git commit` or `git push` when any of the following is true:
+Run `/critique-diff` before any `git commit` or `git push` when any of the following is true:
 
 **Scope triggers:**
 - The diff touches more than 10 files or 200 lines
@@ -158,7 +158,7 @@ Run `/temper` before any `git commit` or `git push` when any of the following is
 - Any function signature was changed
 - A new dependency was added to pyproject.toml, package.json, or similar
 
-**Critical path triggers — always run /temper regardless of diff size:**
+**Critical path triggers — always run /critique-diff regardless of diff size:**
 - Authentication or authorisation code (`*auth*`, `*permission*`, `*token*`)
 - Database migrations (`migrations/`, `*alembic*`, `*.sql`)
 - Public API contracts (`*routes*`, `*endpoints*`, `*schema*`)
@@ -167,12 +167,12 @@ Run `/temper` before any `git commit` or `git push` when any of the following is
 **Post-bonsai gate:**
 After any bonsai refactoring tool completes (pyrename, pymove, pymovesymbol, pysignature,
 tsrename, tsmove, tsmovesymbol, tssignature), remind the user to run
-`/temper --diff=all` before committing. Structural changes are high-risk even when
+`/critique-diff --diff=all` before committing. Structural changes are high-risk even when
 individually small.
 
 **Session scope awareness:**
 If this Claude Code session has involved more than 5 file edits, proactively suggest
-`/temper` before the user runs any git command, even if they haven't asked for a review.
+`/critique-diff` before the user runs any git command, even if they haven't asked for a review.
 
 ### Severity contract
 
@@ -194,19 +194,19 @@ pushing, and after shipping.
 
 | Moment | Command |
 |---|---|
-| About to `git commit` | `/cairn-commit` — generate message from staged diff |
-| About to `git push` | `/cairn-pr` — generate PR title and description |
-| After temper finds no blockers | `/cairn-commit` immediately — prime moment |
-| After a version bump in any manifest | `/cairn-changelog` |
-| After a sprint, milestone, or release | `/cairn-summary --format=slack` or `--format=paragraph` |
-| Multi-area staged diff | `/cairn-commit` — cairn will suggest splitting if needed |
+| About to `git commit` | `/draft-commit` — generate message from staged diff |
+| About to `git push` | `/draft-pr` — generate PR title and description |
+| After temper finds no blockers | `/draft-commit` immediately — prime moment |
+| After a version bump in any manifest | `/draft-changelog` |
+| After a sprint, milestone, or release | `/draft-summary --format=slack` or `--format=paragraph` |
+| Multi-area staged diff | `/draft-commit` — cairn will suggest splitting if needed |
 
 ### Proactive triggers
 
-- **After temper completes with no 🔴 findings**: run `/cairn-commit`. The review is fresh — best moment to write the commit message.
-- **After any bonsai rename or move**: the diff will be large and noisy. `/cairn-commit` reads the intent, not the line count.
-- **Before pushing a branch that diverged more than 3 commits from base**: run `/cairn-pr` while context is live.
-- **After any session that touched more than 5 files**: run `/cairn-summary` before closing.
+- **After temper completes with no 🔴 findings**: run `/draft-commit`. The review is fresh — best moment to write the commit message.
+- **After any bonsai rename or move**: the diff will be large and noisy. `/draft-commit` reads the intent, not the line count.
+- **Before pushing a branch that diverged more than 3 commits from base**: run `/draft-pr` while context is live.
+- **After any session that touched more than 5 files**: run `/draft-summary` before closing.
 
 ### Changelog and versioning rules
 

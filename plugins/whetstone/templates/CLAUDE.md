@@ -1,13 +1,13 @@
 <!-- whetstone:start -->
 ## Planning discipline (whetstone)
 
-Before implementing any non-trivial change, present a plan and run `/autocritic`
+Before implementing any non-trivial change, present a plan and run `/critique-plan`
 on it. Catch blockers at plan time — not at review time (temper) and not at
 incident time.
 
 ### What counts as a plan that needs critique
 
-Run `/autocritic` automatically when the proposed work:
+Run `/critique-plan` automatically when the proposed work:
 
 - Spans more than 2 files
 - Introduces a new module, class, or public API
@@ -25,11 +25,11 @@ Skip the critique (use `# whetstone:skip` or just proceed) when:
 
 ### Auto-trigger rules
 
-After **presenting any plan**, run `/autocritic` immediately — do not wait for
+After **presenting any plan**, run `/critique-plan` immediately — do not wait for
 a prompt. Surface blockers before asking the user to approve.
 
 After **any user feedback on a plan** (scope change, added constraint, pushback
-on an approach), update the plan file and re-run `/autocritic` on the revised
+on an approach), update the plan file and re-run `/critique-plan` on the revised
 plan before presenting it for approval.
 
 After **a temper Design finding** that leads to a renamed symbol or restructured
@@ -37,7 +37,7 @@ module — re-critique the plan if the structural change is significant. A Desig
 finding that causes architectural drift is a new plan, not a patch.
 
 After **a bonsai tool reports unexpected references** during a dry-run — surface
-that as new information in the plan and re-run `/autocritic`. Unexpected blast
+that as new information in the plan and re-run `/critique-plan`. Unexpected blast
 radius is a plan-level concern, not just a code-level one.
 
 ### Post-critique gate
@@ -58,7 +58,7 @@ Store plans and critiques in `.claude/plans/`:
 ```
 .claude/plans/
 ├── <plan-name>.md   # the current plan (one file per plan)
-└── CRITIQUE.md      # the latest /autocritic output (append with date headers)
+└── CRITIQUE.md      # the latest /critique-plan output (append with date headers)
 ```
 
 The hook (`enforce-whetstone.sh`) detects stale critiques by comparing the
@@ -79,5 +79,5 @@ critiques to `.claude/plans/CRITIQUE.md` so the hook can find them.
 
 To skip whetstone for a specific plan, include `# whetstone:skip` in the plan heading.
 To skip all suite hooks for a plan, use `# suite:skip` instead.
-For a one-off skip without modifying the plan, say `/autocritic --off`.
+For a one-off skip without modifying the plan, say `/critique-plan --off`.
 <!-- whetstone:end -->

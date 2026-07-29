@@ -1,6 +1,6 @@
 # Critique — example-plan.md — 2026-05-06
 
-> This is the `/autocritic` output for `example-plan.md`. It demonstrates the kind of findings whetstone surfaces and the severity ratings system.
+> This is the `/critique-plan` output for `example-plan.md`. It demonstrates the kind of findings whetstone surfaces and the severity ratings system.
 
 ### Critique report
 

@@ -1,0 +1,59 @@
+name: suite tests
+
+# Runs on every push and PR. The suite is pure bash plus python3, so there is
+# nothing to install — deliberately, so the tests run wherever aether does.
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+jobs:
+  tests:
+    name: tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS matters: the gitignore bug that hid temper's slash command only
+        # reproduced on a case-insensitive filesystem.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: git identity for fixture repos
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+      - name: Run test suite
+        run: bash tests/run.sh
+
+  shell-syntax:
+    name: shell syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n every script
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            if ! bash -n "$f" 2>/tmp/err; then
+              echo "::error file=$f::$(head -1 /tmp/err)"
+              fail=1
+            fi
+          done < <(git ls-files '*.sh' 'bin/*' 'plugins/*/bin/*')
+          exit $fail
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      # Advisory: the hooks lean on intentional word-splitting and dynamic
+      # sourcing that shellcheck flags by default.
+      - name: Run shellcheck
+        continue-on-error: true
+        run: |
+          git ls-files '*.sh' 'bin/*' 'plugins/*/bin/*' \
+            | xargs shellcheck --severity=error --shell=bash || true

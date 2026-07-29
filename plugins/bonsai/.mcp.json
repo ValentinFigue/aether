@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "bonsai-py": {
+      "command": "uv",
+      "args": ["run", "--directory", "py", "bonsai-py"]
+    },
+    "bonsai-ts": {
+      "command": "node",
+      "args": ["ts/dist/server.js"]
+    }
+  }
+}

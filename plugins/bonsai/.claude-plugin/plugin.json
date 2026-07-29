@@ -1,0 +1,24 @@
+{
+  "$schema": "https://www.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "bonsai",
+  "version": "1.0.0",
+  "description": "Static-analysis refactoring tools for Claude Code \u2014 Python (AST) and TypeScript (compiler API): find references, detect dead code, rename symbols, move files/symbols, and change function signatures, all without a language server.",
+  "author": {
+    "name": "Valentin Figu\u00e9",
+    "email": "valentin.figue@orange.fr",
+    "url": "https://github.com/ValentinFigue"
+  },
+  "homepage": "https://github.com/ValentinFigue/aether",
+  "repository": "https://github.com/ValentinFigue/aether",
+  "license": "MIT",
+  "keywords": [
+    "python",
+    "typescript",
+    "refactoring",
+    "ast",
+    "rename",
+    "dead-code",
+    "imports",
+    "mcp"
+  ]
+}

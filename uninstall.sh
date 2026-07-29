@@ -1,82 +1,38 @@
 #!/bin/bash
+# uninstall.sh — thin wrapper around `aether uninstall`.
+#
+# This used to duplicate the CLI's uninstall logic almost line for line, so the
+# two drifted: only one of them knew about the gates/ directory. The single
+# implementation now lives in bin/aether.
+#
+# The repo's copy of the CLI is used rather than the installed one, because
+# uninstalling deletes ~/.local/bin/aether and bash reads scripts incrementally
+# — a script that removes itself mid-run can fail partway through.
+
 set -e
 
-MODE="local"
-WITH_CLAUDE_MD=false
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
+# The CLI spells the scope `global`; accept `--global` too, as install.sh does.
+ARGS=()
 for arg in "$@"; do
   case "$arg" in
-    global|--global) MODE="global" ;;
-    --claude-md)     WITH_CLAUDE_MD=true ;;
+    --global) ARGS+=("global") ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: bash uninstall.sh [global|--global] [--claude-md]
+
+  global        Remove the global install (default: this project only)
+  --claude-md   Also strip the aether block from CLAUDE.md
+
+Removes the suite hook, its gates and the aether CLI. The four plugins stay
+installed for standalone use — remove them with their own uninstall scripts
+under plugins/<name>/.
+EOF
+      exit 0
+      ;;
+    *) ARGS+=("$arg") ;;
   esac
 done
 
-if [ "$MODE" = "global" ]; then
-  SETTINGS_FILE="$HOME/.claude/settings.json"
-  HOOK_DIR="$HOME/.local/share/aether"
-  CLI="$HOME/.local/bin/aether"
-  CLAUDE_FILE="$HOME/.claude/CLAUDE.md"
-  MANIFEST="$HOME/.claude/aether.manifest"
-else
-  SETTINGS_FILE=".claude/settings.json"
-  HOOK_DIR=".claude/hooks"
-  CLI=""
-  CLAUDE_FILE="./CLAUDE.md"
-  MANIFEST=".claude/aether.manifest"
-fi
-
-# Remove enforce-suite.sh and any stale per-plugin hooks from settings.json
-if [ -f "$SETTINGS_FILE" ] && command -v python3 &>/dev/null; then
-  python3 - "$SETTINGS_FILE" <<'PYEOF' > "$SETTINGS_FILE.tmp" && mv "$SETTINGS_FILE.tmp" "$SETTINGS_FILE"
-import json, sys
-f = sys.argv[1]
-with open(f) as fh: s = json.load(fh)
-STALE = ["enforce-suite", "enforce-cairn", "enforce-temper", "enforce-whetstone",
-         "enforce-bonsai", "post-cairn", "post-bonsai"]
-for phase in ("PreToolUse", "PostToolUse"):
-    entries = s.get("hooks", {}).get(phase, [])
-    for entry in entries:
-        entry["hooks"] = [
-            h for h in entry.get("hooks", [])
-            if not any(kw in h.get("command", "") for kw in STALE)
-        ]
-    s.get("hooks", {})[phase] = [e for e in entries if e.get("hooks")]
-print(json.dumps(s, indent=2))
-PYEOF
-  printf '✓ Removed aether hooks from %s\n' "$SETTINGS_FILE"
-elif [ -f "$SETTINGS_FILE" ]; then
-  printf '  Could not update %s automatically (install python3).\n' "$SETTINGS_FILE"
-  printf '  Remove the enforce-suite.sh PreToolUse hook manually.\n'
-fi
-
-# Remove enforce-suite.sh from hook directory
-if [ -f "$HOOK_DIR/enforce-suite.sh" ]; then
-  rm "$HOOK_DIR/enforce-suite.sh"
-  printf '✓ Removed %s/enforce-suite.sh\n' "$HOOK_DIR"
-fi
-
-# Remove aether CLI (global only)
-if [ -n "$CLI" ] && [ -f "$CLI" ]; then
-  rm "$CLI"
-  printf '✓ Removed %s\n' "$CLI"
-fi
-
-# Remove CLAUDE.md block
-if [ "$WITH_CLAUDE_MD" = true ] && [ -f "$CLAUDE_FILE" ]; then
-  for marker in "aether" "cairn" "temper" "whetstone" "bonsai"; do
-    if grep -q "<!-- ${marker}:start -->" "$CLAUDE_FILE" 2>/dev/null; then
-      awk "/<!-- ${marker}:start -->/{skip=1} !skip{print} /<!-- ${marker}:end -->/{skip=0}" \
-        "$CLAUDE_FILE" > "$CLAUDE_FILE.tmp" && mv "$CLAUDE_FILE.tmp" "$CLAUDE_FILE"
-      printf '✓ Removed %s section from %s\n' "$marker" "$CLAUDE_FILE"
-    fi
-  done
-fi
-
-# Remove manifest
-[ -f "$MANIFEST" ] && rm "$MANIFEST" && printf '✓ Removed %s\n' "$MANIFEST"
-
-printf '\n'
-printf 'aether removed.\n'
-[ "$MODE" = "local" ] && printf 'Note: aether CLI (~/.local/bin/aether) is only removed on global uninstall.\n'
-printf 'Plugins (bonsai, whetstone, temper, cairn) remain installed for standalone use.\n'
-printf 'Restart Claude Code to apply changes.\n'
+exec bash "$SCRIPT_DIR/bin/aether" uninstall "${ARGS[@]}"

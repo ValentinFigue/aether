@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bonsai-py"
+version = "1.0.0"
+description = "AST-based Python refactoring tools as a Claude Code MCP plugin"
+readme = "../README.md"
+license = { file = "../LICENSE" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Valentin Figué", email = "valentin.figue@orange.fr" }
+]
+keywords = [
+    "claude", "claude-code", "mcp", "refactoring", "ast",
+    "python", "rename", "dead-code", "imports"
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "tomli>=1.1.0; python_version < '3.11'",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pre-commit>=4.0"]
+
+[project.urls]
+Homepage = "https://github.com/valentinfigue/bonsai"
+Repository = "https://github.com/valentinfigue/bonsai"
+Issues = "https://github.com/valentinfigue/bonsai/issues"
+
+[project.scripts]
+bonsai-py    = "bonsai_python.__main__:main"
+pyfindrefs   = "bonsai_python.pyfindrefs:main"
+pycallers    = "bonsai_python.pycallers:main"
+pyfindunused = "bonsai_python.pyfindunused:main"
+pygrep       = "bonsai_python.pygrep:main"
+pymove       = "bonsai_python.pymove:main"
+pymovesymbol = "bonsai_python.pymovesymbol:main"
+pyrename     = "bonsai_python.pyrename:main"
+pysignature  = "bonsai_python.pysignature:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bonsai_python"]
+artifacts = ["src/bonsai_python/_hooks_template.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+# E501 ignored: MCP tool docstrings are intentionally long (Claude reads the first line)
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ty.environment]
+python = ".venv"
+python-version = "3.11"
+
+[tool.ty.rules]
+unresolved-import = "ignore"

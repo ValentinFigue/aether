@@ -1,0 +1,336 @@
+#!/bin/bash
+set -e
+
+GLOBAL_CONFIG="$HOME/.claude/cairn.config"
+LOCAL_CONFIG="./cairn.config"
+GLOBAL_COMMANDS="$HOME/.claude/commands"
+LOCAL_COMMANDS=".claude/commands"
+
+ALL_COMMANDS="draft-commit.md draft-pr.md draft-changelog.md draft-summary.md"
+
+usage() {
+  cat << 'EOF'
+cairn — manage your cairn install
+
+Usage:
+  cairn status                          Show install state and effective config
+  cairn enable  [local|global]          Enable cairn (default: local)
+  cairn disable [local|global]          Disable cairn
+  cairn config show                     Show effective merged config with sources
+  cairn config set <flags> [--global]   Set default flags
+  cairn config reset [local|global]     Remove config file
+  cairn update                          Re-download latest command files
+  cairn uninstall [local|global] [--claude-md]  Remove commands + optionally CLAUDE.md section
+  cairn help                            Show this message
+
+Config flags (for 'config set'):
+  --style=conventional        Use Conventional Commits format (default)
+  --style=plain               Use plain imperative-mood format
+  --pr-base=<branch>          Default base branch for /draft-pr
+  --pr-style=<style>          Default PR title style for /draft-pr
+  --pr-template=<path>        Path to PR description template file
+  --pr-rules=<path>           Path to prose generation rules file for /draft-pr
+  --changelog-style=<style>   Default changelog grouping style
+  --changelog-extra-types=<t> Comma-separated extra conventional types
+  --changelog-exclude-paths=<p>  Comma-separated path prefixes to exclude
+  --summary-format=<fmt>      Default format for /draft-summary (standup|slack|paragraph)
+  --summary-window=<window>   Default time window for /draft-summary (e.g. "1 day ago")
+  --global                    Write to global config (~/.claude/cairn.config)
+
+Examples:
+  cairn config set --style=plain
+  cairn config set --style=conventional --global
+  cairn config set --pr-base=develop --pr-rules=.cairn/pr-rules.md
+  cairn config set "--summary-window=1 week ago"
+  cairn config show
+  cairn config reset local
+  cairn uninstall global --claude-md
+EOF
+}
+
+config_get() {
+  local file="$1" key="$2"
+  [ -f "$file" ] && grep "^$key:" "$file" | sed "s/^$key: *//" || true
+}
+
+config_set_key() {
+  local file="$1" key="$2" value="$3"
+  if [ -f "$file" ] && grep -q "^$key:" "$file"; then
+    awk -v k="$key" -v v="$value" '$0 ~ "^"k":" {print k": "v; next} {print}' \
+      "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+  else
+    echo "$key: $value" >> "$file"
+  fi
+}
+
+cmd_status() {
+  echo "Install:"
+  for name in $ALL_COMMANDS; do
+    local label="  ~/.claude/commands/$name"
+    if [ -f "$GLOBAL_COMMANDS/$name" ]; then
+      printf "  %-45s installed\n" "~/.claude/commands/$name"
+    else
+      printf "  %-45s not installed\n" "~/.claude/commands/$name"
+    fi
+    if [ -f "$LOCAL_COMMANDS/$name" ]; then
+      printf "  %-45s installed\n" ".claude/commands/$name"
+    else
+      printf "  %-45s not installed\n" ".claude/commands/$name"
+    fi
+  done
+  echo ""
+
+  echo "Global config ($GLOBAL_CONFIG):"
+  if [ -f "$GLOBAL_CONFIG" ]; then
+    sed 's/^/  /' "$GLOBAL_CONFIG"
+  else
+    echo "  (none)"
+  fi
+  echo ""
+
+  echo "Local config ($LOCAL_CONFIG):"
+  if [ -f "$LOCAL_CONFIG" ]; then
+    sed 's/^/  /' "$LOCAL_CONFIG"
+  else
+    echo "  (none)"
+  fi
+  echo ""
+
+  local enabled style
+  enabled=$(config_get "$GLOBAL_CONFIG" "enabled")
+  local le; le=$(config_get "$LOCAL_CONFIG" "enabled"); [ -n "$le" ] && enabled="$le"
+  style=$(config_get "$GLOBAL_CONFIG" "style")
+  local ls; ls=$(config_get "$LOCAL_CONFIG" "style"); [ -n "$ls" ] && style="$ls"
+
+  echo "Effective config (summary — run 'cairn config show' for full detail):"
+  echo "  enabled: ${enabled:-true}"
+  echo "  style:   ${style:-conventional}"
+}
+
+cmd_enable() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  config_set_key "$target" "enabled" "true"
+  echo "✓ cairn enabled ($target)"
+}
+
+cmd_disable() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  config_set_key "$target" "enabled" "false"
+  echo "✓ cairn disabled ($target)"
+}
+
+cmd_config_show() {
+  # All known keys and their defaults
+  declare -A DEFAULTS=(
+    [enabled]="true"
+    [style]="conventional"
+    [pr.base]="auto"
+    [pr.style]="conventional"
+    [pr.template_file]=""
+    [pr.rules_file]=""
+    [changelog.style]="conventional"
+    [changelog.extra_types]=""
+    [changelog.exclude_paths]=""
+    [summary.format]="standup"
+    [summary.window]="1 day ago"
+  )
+
+  declare -A KEY_ORDER=(
+    [0]=enabled [1]=style
+    [2]=pr.base [3]=pr.style [4]=pr.template_file [5]=pr.rules_file
+    [6]=changelog.style [7]=changelog.extra_types [8]=changelog.exclude_paths
+    [9]=summary.format [10]=summary.window
+  )
+
+  echo "Effective config (local overrides global):"
+  echo ""
+
+  for i in 0 1 2 3 4 5 6 7 8 9 10; do
+    local key="${KEY_ORDER[$i]}"
+    local gval lval effective source
+    gval=$(config_get "$GLOBAL_CONFIG" "$key")
+    lval=$(config_get "$LOCAL_CONFIG" "$key")
+
+    if [ -n "$lval" ]; then
+      effective="$lval"
+      source="local"
+    elif [ -n "$gval" ]; then
+      effective="$gval"
+      source="global"
+    else
+      effective="${DEFAULTS[$key]}"
+      source="default"
+    fi
+
+    if [ -n "$effective" ]; then
+      printf "  %-32s %-24s (%s)\n" "$key:" "$effective" "$source"
+    else
+      printf "  %-32s %-24s (%s)\n" "$key:" "(not set)" "$source"
+    fi
+  done
+}
+
+cmd_config_set() {
+  local target="$LOCAL_CONFIG"
+  local style="" pr_base="" pr_style="" pr_template="" pr_rules=""
+  local cl_style="" cl_extra_types="" cl_exclude_paths=""
+  local sum_format="" sum_window=""
+
+  for arg in "$@"; do
+    case "$arg" in
+      --global)                     target="$GLOBAL_CONFIG" ;;
+      --style=*)                    style="${arg#--style=}" ;;
+      --pr-base=*)                  pr_base="${arg#--pr-base=}" ;;
+      --pr-style=*)                 pr_style="${arg#--pr-style=}" ;;
+      --pr-template=*)              pr_template="${arg#--pr-template=}" ;;
+      --pr-rules=*)                 pr_rules="${arg#--pr-rules=}" ;;
+      --changelog-style=*)          cl_style="${arg#--changelog-style=}" ;;
+      --changelog-extra-types=*)    cl_extra_types="${arg#--changelog-extra-types=}" ;;
+      --changelog-exclude-paths=*)  cl_exclude_paths="${arg#--changelog-exclude-paths=}" ;;
+      --summary-format=*)           sum_format="${arg#--summary-format=}" ;;
+      --summary-window=*)           sum_window="${arg#--summary-window=}" ;;
+    esac
+  done
+
+  local wrote=0
+  [ -n "$style" ]           && config_set_key "$target" "style" "$style" \
+                                && echo "✓ style: $style" && wrote=$((wrote+1))
+  [ -n "$pr_base" ]         && config_set_key "$target" "pr.base" "$pr_base" \
+                                && echo "✓ pr.base: $pr_base" && wrote=$((wrote+1))
+  [ -n "$pr_style" ]        && config_set_key "$target" "pr.style" "$pr_style" \
+                                && echo "✓ pr.style: $pr_style" && wrote=$((wrote+1))
+  [ -n "$pr_template" ]     && config_set_key "$target" "pr.template_file" "$pr_template" \
+                                && echo "✓ pr.template_file: $pr_template" && wrote=$((wrote+1))
+  [ -n "$pr_rules" ]        && config_set_key "$target" "pr.rules_file" "$pr_rules" \
+                                && echo "✓ pr.rules_file: $pr_rules" && wrote=$((wrote+1))
+  [ -n "$cl_style" ]        && config_set_key "$target" "changelog.style" "$cl_style" \
+                                && echo "✓ changelog.style: $cl_style" && wrote=$((wrote+1))
+  [ -n "$cl_extra_types" ]  && config_set_key "$target" "changelog.extra_types" "$cl_extra_types" \
+                                && echo "✓ changelog.extra_types: $cl_extra_types" && wrote=$((wrote+1))
+  [ -n "$cl_exclude_paths" ] && config_set_key "$target" "changelog.exclude_paths" "$cl_exclude_paths" \
+                                && echo "✓ changelog.exclude_paths: $cl_exclude_paths" && wrote=$((wrote+1))
+  [ -n "$sum_format" ]      && config_set_key "$target" "summary.format" "$sum_format" \
+                                && echo "✓ summary.format: $sum_format" && wrote=$((wrote+1))
+  [ -n "$sum_window" ]      && config_set_key "$target" "summary.window" "$sum_window" \
+                                && echo "✓ summary.window: $sum_window" && wrote=$((wrote+1))
+
+  if [ "$wrote" -eq 0 ]; then
+    echo "No flags provided. Run 'cairn help' to see available config flags."
+    exit 1
+  fi
+
+  echo "  Written to $target"
+}
+
+cmd_config_reset() {
+  local scope="${1:-local}"
+  local target; [ "$scope" = "global" ] && target="$GLOBAL_CONFIG" || target="$LOCAL_CONFIG"
+  if [ -f "$target" ]; then
+    rm "$target"
+    echo "✓ Removed $target"
+  else
+    echo "  $target not found — nothing to reset"
+  fi
+}
+
+cmd_update() {
+  # Previously this re-downloaded command files by name from
+  # raw.githubusercontent.com/ValentinFigue/cairn. That repo predates the
+  # monorepo and is being archived — but archived repos still serve content, so
+  # after the command rename this would have fetched the *old* files and written
+  # them back under the *old* names, undoing the installer's prune.
+  #
+  # cairn now ships inside aether, so updating means re-running the installer
+  # out of the clone. The aether manifest records where that clone is; local
+  # wins over global, matching how every other lookup in the suite resolves.
+  # Local manifest wins over global, matching every other lookup in the suite.
+  # scope is read alongside repo: updating a local install must not silently
+  # write a global one into ~/.claude.
+  local repo="" scope=""
+  for m in "$HOME/.claude/aether.manifest" ".claude/aether.manifest"; do
+    if [ -f "$m" ]; then
+      local r s
+      r=$(grep '^repo=' "$m" | sed 's/^repo=//' | head -1)
+      s=$(grep '^scope=' "$m" | sed 's/^scope=//' | head -1)
+      [ -n "$r" ] && repo="$r"
+      [ -n "$s" ] && scope="$s"
+    fi
+  done
+  local scope_arg=""; [ "$scope" = "global" ] && scope_arg="global"
+
+  if [ -z "$repo" ] || [ ! -d "$repo/.git" ]; then
+    printf 'cairn ships inside the aether suite, which is where updates come from.\n'
+    printf '  Whole suite:  aether update\n'
+    printf '  cairn only:  bash <your-aether-clone>/plugins/cairn/install.sh [global]\n'
+    return 1
+  fi
+
+  printf 'Updating cairn from %s\n\n' "$repo"
+  bash "$repo/plugins/cairn/install.sh" $scope_arg
+}
+
+cmd_uninstall() {
+  local scope="local"
+  local clean_claude_md=false
+
+  for arg in "$@"; do
+    case "$arg" in
+      global)       scope="global" ;;
+      --claude-md)  clean_claude_md=true ;;
+    esac
+  done
+
+  local commands_dir claude_file
+  if [ "$scope" = "global" ]; then
+    commands_dir="$GLOBAL_COMMANDS"
+    claude_file="$HOME/.claude/CLAUDE.md"
+  else
+    commands_dir="$LOCAL_COMMANDS"
+    claude_file="./CLAUDE.md"
+  fi
+
+  for name in $ALL_COMMANDS; do
+    if [ -f "$commands_dir/$name" ]; then
+      rm "$commands_dir/$name"
+      echo "✓ Removed $commands_dir/$name"
+    else
+      echo "  $commands_dir/$name not found"
+    fi
+  done
+
+  if [ "$clean_claude_md" = true ]; then
+    for marker in "cairn" "docs"; do
+      if [ -f "$claude_file" ] && grep -q "<!-- ${marker}:start -->" "$claude_file"; then
+        awk "/<!-- ${marker}:start -->/{skip=1} !skip{print} /<!-- ${marker}:end -->/{skip=0}" \
+          "$claude_file" > "$claude_file.tmp" && mv "$claude_file.tmp" "$claude_file"
+        echo "✓ Removed ${marker} section from $claude_file"
+      fi
+    done
+  fi
+
+  echo ""
+  echo "Restart Claude Code to apply changes."
+}
+
+COMMAND="${1:-help}"
+shift || true
+
+case "$COMMAND" in
+  status)    cmd_status ;;
+  enable)    cmd_enable "$@" ;;
+  disable)   cmd_disable "$@" ;;
+  config)
+    SUB="${1:-}"; shift || true
+    case "$SUB" in
+      show)  cmd_config_show ;;
+      set)   cmd_config_set "$@" ;;
+      reset) cmd_config_reset "$@" ;;
+      *)     echo "Unknown subcommand: config $SUB"; echo ""; usage; exit 1 ;;
+    esac ;;
+  update)    cmd_update ;;
+  uninstall) cmd_uninstall "$@" ;;
+  help|--help|-h) usage ;;
+  *) echo "Unknown command: $COMMAND"; echo ""; usage; exit 1 ;;
+esac

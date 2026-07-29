@@ -1,0 +1,207 @@
+# temper
+
+Harden your code before it ships. Temper runs four adversarial critics against your diff — catching logic errors, design drift, production risks, and coverage gaps at review time, not incident time.
+
+It is the symmetric counterpart to [whetstone](../whetstone/): where whetstone critiques *plans*, temper critiques *diffs*.
+
+> Tempering is the hardening process applied *after* forging. The metal has been shaped — now we make sure it holds.
+
+---
+
+## What it does
+
+Run `/critique-diff` before committing or pushing. Temper reads your staged diff (or any diff you point it at), runs four critic personas against the code, and produces a structured review with severity ratings:
+
+```
+### Review report
+
+| # | Critic      | Severity | Finding                                         | Recommendation                        |
+|---|-------------|----------|-------------------------------------------------|---------------------------------------|
+| 1 | Correctness | 🔴       | Missing nil check on user.email before send()   | Add guard: if user.email is None: ...  |
+| 2 | Risk        | 🟡       | New endpoint has no rate limiting               | Add @rate_limit decorator             |
+| 3 | Coverage    | 🟢       | Happy path tested but empty-list case is not    | Add test for empty input              |
+
+Blockers: 1
+Significant: 1
+Minor: 1
+```
+
+If blockers are found, temper gates the push until they're resolved.
+
+---
+
+## The four critics
+
+| Critic | Focus |
+|--------|-------|
+| **Correctness** | Logic errors, null dereferences, off-by-ones, unhandled errors |
+| **Design** | Coupling, misleading names, duplication, premature complexity |
+| **Risk** | Security vulnerabilities, data loss, breaking API changes, missing observability |
+| **Coverage** | Untested paths, invalidated tests, untestable code |
+
+---
+
+## Install
+
+temper ships as part of the [aether suite](../../README.md). Clone once, then install
+either the whole suite or temper alone.
+
+### Whole suite — whetstone, bonsai, temper and cairn behind one hook
+
+```bash
+git clone https://github.com/ValentinFigue/aether
+cd aether && bash install.sh --global --claude-md
+```
+
+### temper alone — global
+
+```bash
+git clone https://github.com/ValentinFigue/aether
+cd aether/plugins/temper && bash install.sh global
+```
+
+The installer reads everything from the clone, so keep it around — or re-run it after
+moving it. There is no `curl | bash` one-liner: the script copies files out of the
+repository and cannot work when piped.
+
+### Local install (this project only)
+
+```bash
+bash install.sh
+```
+
+### With proactive CLAUDE.md rules
+
+Adds behavioral guidelines to your CLAUDE.md that teach Claude Code to proactively suggest `/critique-diff` based on session scope, bonsai refactoring, and critical file patterns:
+
+```bash
+bash install.sh --claude-md          # local
+bash install.sh global --claude-md   # global
+```
+
+### No dependencies
+
+No Python, npm, or build step required. Just bash and Claude Code.
+
+---
+
+## Usage
+
+```
+/critique-diff                     Review staged changes (default)
+/critique-diff --diff=all          Review all changes since HEAD
+/critique-diff --diff=HEAD~3       Review last 3 commits
+/critique-diff --only=risk         Run only the Risk critic
+/critique-diff --skip=coverage     Run all critics except Coverage
+/critique-diff --severity=red      Report only blockers
+/critique-diff --target=src/auth.py  Scope to one file
+```
+
+---
+
+## When the hook fires
+
+The `enforce-temper.sh` PreToolUse hook blocks the following operations and asks you to run `/critique-diff` first:
+
+| Operation | Condition |
+|-----------|-----------|
+| `git push` | Always (except `--dry-run`) |
+| `git commit` | Staged diff > 200 lines or > 10 files, or critical path file matched |
+| `git merge` | Merging into main / master / develop / trunk |
+| `git rebase -i` | Range touches > 5 commits |
+| `git stash pop` | Stash diff > 200 lines |
+
+**Bypass:** append `# temper:skip` to silence the temper hook, or `# suite:skip` to silence all suite hooks (temper, cairn, whetstone) at once.
+
+```bash
+git push origin main  # temper:skip
+git push origin main  # suite:skip
+```
+
+---
+
+## Reviewing a PR
+
+`/critique-diff` reviews what you are about to commit. `/critique-pr` reviews what
+someone is about to merge — the whole PR diff, its CI and mergeable state, and one
+critic that only makes sense for a PR: whether the description still matches the code.
+
+```bash
+/critique-pr              # the PR for the current branch
+/critique-pr --pr=42      # a specific PR
+/critique-pr --only=risk  # same flags as /critique-diff
+```
+
+It reuses the four critic definitions from `critique-diff.md` rather than restating
+them, so the two can never drift. Requires `gh`, authenticated.
+
+## Configuration
+
+Create `temper.config` in your project root (local) or `~/.claude/temper.config` (global):
+
+```
+enabled: true
+critics: correctness, design, risk, coverage
+skip:
+severity: red, yellow
+diff: staged
+auto_nudge_lines: 200
+auto_nudge_files: 10
+critical_paths: *auth*, *permission*, *token*, migrations/, *alembic*, *.sql, *schema*, *secret*, *credential*, *.env
+```
+
+### CLI
+
+```
+temper status                          Show install state and effective config
+temper enable  [local|global]          Enable temper
+temper disable [local|global]          Disable temper
+temper config set auto_nudge_lines=300
+temper config set critics=correctness,risk --global
+temper config reset local
+temper update                          Re-download latest critique-diff.md
+temper uninstall [global] [--claude-md]
+```
+
+---
+
+## Two-tier gate model
+
+**Tier 1 — Proactive (CLAUDE.md rules)**
+When installed with `--claude-md`, behavioral guidelines teach Claude Code to suggest `/critique-diff` before you even reach a git command — based on session scope, critical file patterns, and bonsai refactoring activity. These are soft instructions, not hard blocks.
+
+**Tier 2 — Reactive (enforce-temper.sh hook)**
+The hook is the hard gate. It intercepts high-risk git operations and blocks them until you acknowledge the risk via `/critique-diff` or `# temper:skip`.
+
+---
+
+## Severity contract
+
+| Rating | Meaning |
+|--------|---------|
+| 🔴 Blocker | Do not push. Fix first. |
+| 🟡 Significant | Fix before the next session or document the exception in the commit message. |
+| 🟢 Minor | Fix when convenient. Worth noting. |
+
+---
+
+## Uninstall
+
+```bash
+bash uninstall.sh               # local
+bash uninstall.sh global        # global
+bash uninstall.sh global --claude-md  # also remove CLAUDE.md section
+```
+
+---
+
+## The suite
+
+| Plugin | Purpose | When |
+|--------|---------|------|
+| [whetstone](../whetstone/) | Critique plans | Before you build |
+| [bonsai](../bonsai/) | AST refactoring | While you build |
+| **temper** | Critique diffs | After you build |
+| [cairn](../cairn/) | Git narration | When you ship |
+
+> **Suite install order:** install temper before cairn. Both hooks intercept `git commit` — temper (review gate) should fire first, then cairn (narration). Install order matches hook execution order in `settings.json`.

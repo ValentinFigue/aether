@@ -1,0 +1,34 @@
+# Every path rule here is anchored with a leading slash so it matches only at
+# the repo root. Unanchored, `.claude/commands/` would also match
+# plugins/cairn/.claude/commands/ and silently untrack every plugin's shipped
+# slash commands — the same trap that hid temper's own command file for months
+# (a bare `TEMPER.md` pattern matched .claude/commands/temper.md at depth).
+
+# Plan and review output.
+#
+# The suite's own tools write here: /critique-plan writes CRITIQUE.md,
+# /critique-diff appends TEMPER.md, and enforce-whetstone.sh drops a
+# .whetstone-nudged sentinel. It is per-developer, per-session scratch
+# and means nothing in someone else's checkout — the convention itself is
+# documented in templates/CLAUDE.md, which is versioned.
+/.claude/plans/
+
+# Artifacts of a local install.
+#
+# This repo is the installer, so `bash install.sh` without --global writes its
+# output straight into the working tree: the suite hook and its gates, copies of
+# every plugin's slash commands, the CLI, and the manifest. All are generated
+# from files that are already versioned under plugins/.
+#
+# /.claude/settings.json is deliberately absent: a project may want to share it.
+/.claude/hooks/
+/.claude/commands/
+/.claude/aether.manifest
+/.bin/
+
+# Backups written before install.sh and uninstall.sh mutate settings.json or
+# CLAUDE.md in place.
+*.bak
+
+# macOS
+.DS_Store

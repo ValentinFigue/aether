@@ -200,7 +200,14 @@ _cfg_set() {
     "${section:+[$section] }" "$key" "$value" "$file"; return 0; }
   mkdir -p "$(dirname "$file")"
   [ -f "$file" ] || : > "$file"
-  awk -v sec="$section" -v k="$key" -v v="$value" -v doc="$doc" '
+  # v and doc come through the environment, not -v. `awk -v` performs escape
+  # processing on its argument, so a value containing a backslash was silently
+  # rewritten: critical_paths lost the backslash from `\.sql` and `\.env`, and a
+  # regex like `\d+` in [git] ticket became `d+`. That corrupted `config set` and,
+  # worse, migration — which carries the pre-1.0 critical_paths across verbatim.
+  AETHER_V="$value" AETHER_DOC="$doc" \
+  awk -v sec="$section" -v k="$key" '
+    BEGIN { v = ENVIRON["AETHER_V"]; doc = ENVIRON["AETHER_DOC"] }
     function emit() {
       if (doc != "") print "# " doc
       print k ": " v
@@ -209,6 +216,7 @@ _cfg_set() {
     # One line of lookahead. A comment is only a key\x27s documentation if it sits
     # directly above it, so it is held for exactly one line before being flushed.
     function flush() { if (prev != "") { print prev; prev = "" } }
+    { sub(/\r$/, "") }            # normalise CRLF, as the reader does
     # Blank lines are held so an inserted key lands at the end of its section
     # rather than after the blank line that separates it from the next one.
     /^[[:space:]]*$/ { flush(); if (!done) { held = held $0 "\n"; next } }
@@ -248,6 +256,7 @@ _cfg_unset() {
   [ -f "$file" ] || return 0
   _dry && { printf '    would unset %s%s in %s\n' "${section:+[$section] }" "$key" "$file"; return 0; }
   awk -v sec="$section" -v k="$key" '
+    { sub(/\r$/, "") }
     /^\[.*\]$/ { cur = substr($0, 2, length($0) - 2); print; next }
     {
       line = $0; sub(/^[[:space:]]+/, "", line)
@@ -338,8 +347,18 @@ _op_splice() {
     awk "/<!-- ${marker}:start -->/{skip=1} !skip{print} /<!-- ${marker}:end -->/{skip=0}" \
       "$file" > "$file.tmp" 2>/dev/null && mv "$file.tmp" "$file"
   fi
+  # Drop trailing blank lines before re-appending. The removal above takes the
+  # block but not the blank line that separated it, and the append below adds a
+  # fresh one — so every re-install grew CLAUDE.md by exactly one line, forever.
+  # Stripping first makes the whole operation idempotent.
+  awk '{ l[NR] = $0 }
+       END { last = NR
+             while (last > 0 && l[last] ~ /^[[:space:]]*$/) last--
+             for (i = 1; i <= last; i++) print l[i] }' \
+    "$file" > "$file.tmp" 2>/dev/null && mv "$file.tmp" "$file"
   {
-    printf '\n'
+    # One separating blank line, and only when there is something to separate from.
+    [ -s "$file" ] && printf '\n'
     if [ "$wrap" = wrap ]; then
       printf '<!-- %s:start -->\n' "$marker"
       cat "$content_file"

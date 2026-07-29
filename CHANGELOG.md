@@ -122,6 +122,21 @@ number. Their individual histories are preserved under
   stale-hook cleanup silently did not happen. All three backends now produce
   byte-identical output, and a phase aether does not manage (`SessionStart`) is
   preserved.
+- **A CRLF config file read as an empty one.** `[temper]\r` does not match
+  `/^\[.*\]$/`, so the section was never entered and *every* key in the file
+  silently did nothing — including `enabled: false`, which made `aether disable`
+  appear not to work. A regression against 1.0.0, whose `grep`-based reader at
+  least returned the value. All five parsers now normalise CRLF.
+- **`config set` silently corrupted any value containing a backslash.**
+  `awk -v v="$value"` performs escape processing on its argument, so `\.sql`
+  became `.sql` and a regex like `\d+` became `d+`. The default
+  `temper.critical_paths` contains `\.sql` and `\.env`, and migration uses the
+  same writer — so an upgrade quietly rewrote it. Values now come through the
+  environment, where no escape processing happens.
+- **Every install grew CLAUDE.md by one line.** Removing the sentinel block took
+  the block but not the blank line that separated it, and the re-append added a
+  fresh one: 295 lines, then 296, then 297. Trailing blanks are now stripped
+  before re-appending, so the splice is byte-idempotent.
 - **`aether update` corrupted itself mid-run.** It executes from
   `~/.local/bin/aether` and copies a new `bin/aether` over that same path, and
   `cp` truncates and rewrites in place. bash reads a script incrementally as it

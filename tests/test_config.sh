@@ -45,6 +45,47 @@ assert_eq ""            "$(cfg temper nope)"             "an undeclared key reso
 printf '\n[temper]\ndiff: all\ndiff: staged\n' >> "$P/.aether/config"
 assert_eq "all" "$(cfg temper diff)" "a duplicated key yields exactly one value"
 
+# ── hostile config files ─────────────────────────────────────────────────────
+suite "config parser edge cases"
+HZ=$(mk); PZ=$(mk); mkdir -p "$HZ/.aether" "$PZ/.aether"
+z() { ( cd "$PZ" && HOME="$HZ" bash -c ". '$LIB'; aether_cfg_get \"\$1\" \"\$2\"" _ "$1" "$2" ); }
+
+# A CRLF file used to read as an EMPTY one: "[temper]\r" fails /^\[.*\]$/, so the
+# section was never entered and every key in the file silently did nothing —
+# including `enabled: false`, which meant `aether disable` appeared not to work.
+printf '[temper]\r\nseverity: red\r\nenabled: false\r\n' > "$PZ/.aether/config"
+assert_eq "red"   "$(z temper severity)" "a CRLF file is not read as an empty one"
+assert_eq "false" "$(z temper enabled)"  "…and enabled: false still disables"
+
+printf '[temper]\nseverity: red' > "$PZ/.aether/config"          # no trailing newline
+assert_eq "red" "$(z temper severity)" "a file with no trailing newline resolves"
+
+printf '[temper]\n\tseverity:\tred\n' > "$PZ/.aether/config"
+assert_eq "red" "$(z temper severity)" "tabs around the key and value are stripped"
+
+printf '[cairn]\npr.base: main\nbase: WRONG\n' > "$PZ/.aether/config"
+assert_eq "main" "$(z cairn pr.base)" "a dotted key is not confused with its suffix"
+
+printf '[temper]\ncritical_paths: *a*|\\.sql|x\n' > "$PZ/.aether/config"
+assert_eq '*a*|\.sql|x' "$(z temper critical_paths)" "a backslash survives being read"
+
+printf 'enabled: true\n[temper]\nenabled: false\n' > "$PZ/.aether/config"
+assert_eq "true"  "$(z '' enabled)"      "a sectionless key is not shadowed by a section"
+assert_eq "false" "$(z temper enabled)"  "…and the section's own key resolves separately"
+
+# ── values that awk would mangle ─────────────────────────────────────────────
+# `awk -v v="$value"` performs escape processing on its argument, so a value with
+# a backslash was silently rewritten: critical_paths lost the backslash from
+# `\.sql` and `\.env`, and a regex like `\d+` became `d+`. Migration used the same
+# writer, so an upgrade quietly corrupted the pre-1.0 critical_paths too.
+suite "config set preserves the value verbatim"
+HY=$(mk); PY_=$(mk); mkdir -p "$HY/.aether" "$PY_/.aether"
+y() { ( cd "$PY_" && env HOME="$HY" bash "$CLI" "$@" 2>/dev/null ); }
+for v in '*auth*|\.sql|\.env|migrations/' 'TK-\d+' 'red, yellow' 'printf "a\tb"' 'a: b'; do
+  y config set temper.critical_paths "$v" >/dev/null
+  assert_eq "$v" "$(y config get temper.critical_paths)" "round-trips: $v"
+done
+
 # ── config show ──────────────────────────────────────────────────────────────
 suite "config show"
 out=$( cd "$P" && env HOME="$H" bash "$CLI" config show temper 2>&1 )

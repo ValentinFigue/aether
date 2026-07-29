@@ -440,6 +440,28 @@ for l in sys.stdin:
     || fail "bonsai-ts answers a handshake" "got: ${n:-no response}"
 fi
 
+# ── the CLAUDE.md splice is idempotent ───────────────────────────────────────
+# Removing the block took the block but not the blank line that separated it,
+# and the re-append added a fresh one — so every install grew CLAUDE.md by
+# exactly one line, forever. 295, 296, 297…
+suite "CLAUDE.md splice is idempotent"
+HB=$(new_home)
+mkdir -p "$HB/.claude"
+printf '# My own rules\n\nDo the thing.\n' > "$HB/.claude/CLAUDE.md"
+for _ in 1 2 3; do
+  env HOME="$HB" bash "$REPO/install.sh" --global --claude-md --no-bonsai >/dev/null 2>&1
+done
+first=$(env HOME="$HB" bash -c 'wc -l < "$HOME/.claude/CLAUDE.md"' | tr -d ' ')
+env HOME="$HB" bash "$REPO/install.sh" --global --claude-md --no-bonsai >/dev/null 2>&1
+again=$(env HOME="$HB" bash -c 'wc -l < "$HOME/.claude/CLAUDE.md"' | tr -d ' ')
+assert_eq "$first" "$again" "a fourth install does not grow CLAUDE.md"
+n=$(grep -c 'aether:start' "$HB/.claude/CLAUDE.md" || true)
+assert_eq "1" "$n" "the block still appears exactly once"
+assert_contains "$(cat "$HB/.claude/CLAUDE.md")" "Do the thing." "the user's own content survives"
+head -1 "$HB/.claude/CLAUDE.md" | grep -q '^# My own rules$' \
+  && pass "…and stays at the top of the file" \
+  || fail "…and stays at the top of the file" "$(head -1 "$HB/.claude/CLAUDE.md")"
+
 # ── a script may overwrite itself ────────────────────────────────────────────
 # `aether update` runs from ~/.local/bin/aether and copies a new bin/aether over
 # it. `cp` truncates and rewrites in place, and bash reads a script incrementally

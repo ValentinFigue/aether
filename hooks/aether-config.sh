@@ -32,6 +32,7 @@ aether_cfg_read() {
   local file="$1" section="$2" key="$3"
   [ -f "$file" ] || return 0
   awk -v sec="$section" -v k="$key" '
+    { sub(/\r$/, "") }            # a CRLF file must not read as an empty one
     /^[[:space:]]*#/ { next }
     /^\[.*\]$/ { cur = substr($0, 2, length($0) - 2); next }
     {
@@ -70,6 +71,7 @@ aether_cfg_lineno() {
   local file="$1" section="$2" key="$3"
   [ -f "$file" ] || return 0
   awk -v sec="$section" -v k="$key" '
+    { sub(/\r$/, "") }            # a CRLF file must not read as an empty one
     /^[[:space:]]*#/ { next }
     /^\[.*\]$/ { cur = substr($0, 2, length($0) - 2); next }
     {
@@ -85,6 +87,7 @@ aether_cfg_keys() {
   local file="$1"
   [ -f "$file" ] || return 0
   awk '
+    { sub(/\r$/, "") }
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*$/ { next }
     /^\[.*\]$/ { cur = substr($0, 2, length($0) - 2); next }

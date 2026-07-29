@@ -2,6 +2,15 @@
 
 Aether binds bonsai, whetstone, temper, and cairn into a single coordinated suite — one repo, one install, one config, one bypass convention, one hook that knows the order of things. A fifth plugin, trellis, writes the config the other four read.
 
+
+| | |
+|---|---|
+| [Install](#install) · [How it works](#how-it-works) | getting it onto a machine |
+| [Configuration](#configuration) · [Trust](#trust) | the part you touch daily |
+| [Commands](#commands) · [The development workflow](#the-development-workflow) | what to run, and when |
+| [CLI reference](#cli-reference) · [Bypass](#bypass) | `aether …`, and turning it off |
+| [Roadmap](#roadmap) | what is missing |
+
 ---
 
 ## Why
@@ -438,7 +447,190 @@ ordering, and creates the section if it is missing.
 
 ---
 
-## The workflow
+## Commands
+
+Eight slash commands. Every one reads its defaults from config, and every one
+takes flags that override config for that run.
+
+### Plan — whetstone
+
+```bash
+/critique-plan                      # three critics: impl, arch, risk
+/critique-plan --only=impl,arch     # just those two
+/critique-plan --skip=risk          # all defaults except one
+/critique-plan --severity=red       # only blockers
+/critique-plan --off                # skip it this once
+```
+
+Four more critics are opt-in because they are not always relevant: `testing`,
+`complexity`, `api`, `cost`. Ask for them by name — `/critique-plan --only=impl,api`.
+
+Findings are appended to `.aether/out/CRITIQUE.md` with a date header, so the
+file accumulates a history rather than being overwritten. A 🔴 means don't start
+implementing yet.
+
+### Build — bonsai
+
+bonsai has no slash command. It is 13 MCP tools plus a gate that notices when you
+reach for `sed` on a `.py` file:
+
+```
+python (8)      pyrename · pymove · pymovesymbol · pysignature
+                pyfindrefs · pycallers · pyfindunused · pygrep
+typescript (5)  tsrename · tsmove · tsmovesymbol · tssignature · tsfindrefs
+```
+
+Ask for the operation and Claude picks the tool: *"rename `parse_config` to
+`load_config` everywhere"* uses `pyrename`, which follows re-exports and aliased
+imports that a text replace silently misses. Always dry-run a mutating tool first.
+
+### Review — temper
+
+```bash
+/critique-diff                      # four critics over the staged diff
+/critique-diff --diff=all           # staged + unstaged
+/critique-diff --target=src/auth.py # one file
+/critique-diff --only=correctness,risk
+/critique-diff --severity=red,yellow
+
+/critique-pr                        # the PR for the current branch
+/critique-pr --pr=42
+/critique-pr --severity=red         # blockers only, before merging
+```
+
+The four critics are Correctness, Design, Risk and Coverage. `/critique-pr` adds
+a fifth that only makes sense for a PR: whether the description still matches the
+code. An *omitted* change is weighted above an inaccurate one — a reviewer who
+trusts the description will not go looking for what it does not name.
+
+With `[project]` set and the repo trusted, Correctness and Coverage run your real
+tooling and quote real failures. Without it they read the diff and say so.
+
+### Ship — cairn
+
+```bash
+/draft-commit                       # message from the staged diff
+/draft-commit --style=plain         # no Conventional Commits prefix
+/draft-commit --raw                 # just the message, nothing else
+
+/draft-pr                           # title + description from the branch diff
+/draft-pr --apply                   # …and push it to the PR with `gh pr edit`
+/draft-pr --apply --title           # also replace the title (opt-in)
+/draft-pr --base=develop --pr=42
+
+/draft-changelog --version=1.2.0    # entry from the last tag to HEAD
+/draft-changelog --from=v1.0.0 --to=HEAD
+
+/draft-summary                      # standup notes from the last day
+/draft-summary --format=slack --from=v1.0.0
+/draft-summary --format=paragraph --author=you@example.com
+```
+
+`--apply` is the one that writes to something outside your checkout. Everything
+else prints and lets you paste.
+
+### Setup — trellis
+
+```bash
+/draft-config                       # detect, ask about gaps, write .aether/config
+/draft-config --global              # write ~/.aether/config instead
+/draft-config --dry-run             # print what it would write
+/draft-config --only=project,git    # just those sections
+/draft-config --force               # overwrite keys you already set
+```
+
+Run this once per repo. It never runs what it detects — `aether trust` is a
+separate, explicit step.
+
+---
+
+## The development workflow
+
+One pass through a change, and where each command earns its place.
+
+### 1. Set the repo up — once
+
+```bash
+cd ~/Code/my-project
+/draft-config            # writes .aether/config from CI, manifests, git history
+aether config show       # read it back: values, sources, what each key does
+aether trust             # review the commands, then allow the critics to run them
+git add .aether/config .aether/rules.md && git commit -m "chore: add aether config"
+```
+
+Committing `.aether/config` is the point — it is a description of the project, so
+your colleagues get the same thresholds and the same test command. `out/` and
+`manifest` are per-developer and should stay ignored.
+
+### 2. Plan, before writing anything
+
+Describe the change; Claude proposes a plan in `.claude/plans/<name>.md`. Then:
+
+```bash
+/critique-plan
+```
+
+🔴 findings mean the plan is wrong, not the code. Fixing a plan costs a
+conversation; fixing the same problem after implementation costs a refactor.
+whetstone's gate enforces this at `git commit`: a plan on disk with no critique
+newer than it produces a nudge.
+
+### 3. Build
+
+Nothing to invoke. Ask for the change you want. Two things happen on their own:
+
+- Reach for `sed`/`grep`/`mv` on a `.py`, `.ts`, `.tsx`, `.js` or `.jsx` file and
+  bonsai's gate points at the AST tool that handles re-exports and aliased imports.
+- After a rename-shaped edit, `post-bonsai.sh` re-checks references and says if
+  something now dangles.
+
+### 4. Review, before it leaves your machine
+
+```bash
+git add -p
+/critique-diff           # Coverage runs your test command; Correctness runs lint and typecheck
+```
+
+Fix the 🔴s. 🟡 either gets fixed or written down. temper's gate blocks a `git push`
+that has had no review, and blocks a commit touching a critical path — auth,
+migrations, secrets, schemas — regardless of size.
+
+### 5. Ship
+
+```bash
+/draft-commit            # reads the diff, not your memory of it
+git commit -m "<paste>"
+/draft-pr --apply        # opens or updates the PR description
+```
+
+Then, once the PR is open and CI has gone green — which is exactly when nobody
+re-reads it:
+
+```bash
+/critique-pr             # the same four critics over the whole PR, plus description accuracy
+```
+
+Commits landed after the description was written? Then the description is the most
+likely thing in the PR to be wrong, and that fifth critic is the one that matters.
+
+### 6. Release
+
+```bash
+/draft-changelog --version=1.2.0
+/draft-summary --format=slack --from=v1.1.0
+```
+
+### Bypassing, when the discipline is wrong
+
+The gates are advice, not policy. One marker turns any of them off for one command:
+
+```bash
+git commit -m "wip"           # aether:skip
+git push origin main          # temper:skip
+grep -r TODO ./src            # bonsai:skip
+```
+
+### How the gates actually run
 
 ```
 git commit / git push / Write source file
@@ -509,6 +701,47 @@ exactly that, so `cairn status` still works and there is one implementation.
 `enabled: false` for the gate to read, the second stops the gate being loaded.
 The soft mute is usually what you want; the hard one is for debugging.
 
+### Worked examples
+
+```bash
+# What is installed, and where
+aether status
+aether config path                       # ./.aether/config
+aether config path global                # ~/.aether/config
+
+# Read the config, three ways
+aether config show                       # everything, with docs and sources
+aether config show temper --values       # values and sources, no prose
+aether config show temper --raw          # bare `key: value`, what the commands read
+aether config explain cairn.pr.base      # one key: default, type, every layer
+
+# Change it
+aether config set temper.auto_nudge_lines 400          # this project
+aether config set cairn.style plain global             # everywhere
+aether config unset temper.auto_nudge_lines
+aether config edit global                              # open it in $EDITOR
+
+# Check it
+aether config doctor                     # unknown keys, missing binaries, trust state
+
+# Allow this project's commands and prose to be used
+aether trust
+aether trust status                      # none | ok | changed
+aether trust forget
+
+# Turn things off
+aether disable                           # all plugins, this project
+aether disable global                    # all plugins, everywhere
+aether config set bonsai.enabled false   # one plugin, this project
+aether hook disable bonsai               # stop the gate loading at all (debugging)
+
+# Maintain
+aether update                            # git pull the clone, re-run the installer
+aether migrate                           # move a pre-1.0 layout into ~/.aether/
+aether install temper global             # add one plugin
+aether uninstall bonsai global           # remove one plugin
+```
+
 **Example output of `aether status`:**
 
 ```
@@ -518,11 +751,50 @@ aether v1.0.0
   whetstone    enabled
   temper       enabled
   cairn        enabled
+  trellis      enabled
 
   Suite hook: enforce-suite.sh registered (global)
   Gates:      4 loaded from /Users/you/.aether/hooks/gates
   Clone:      /Users/you/Code/aether
   Installed version: 1.0.0
+```
+
+**A worked config, end to end:**
+
+```bash
+$ cd ~/Code/my-api
+$ /draft-config
+Wrote .aether/config
+
+  [project]
+    test        uv run pytest      from .github/workflows/ci.yml
+    lint        uvx ruff check     from .github/workflows/ci.yml
+    typecheck   mypy src           guessed from pyproject.toml — verify this
+  [git]
+    scopes      api, web, infra    from 200 commits (81% conventional)
+
+  Skipped 1 candidate:
+    npm run test:watch             watch mode
+
+Nothing runs yet. Review the commands, then: aether trust
+
+$ aether config show project --values
+[project]
+  test        uv run pytest      project · .aether/config:4
+  lint        uvx ruff check     project · .aether/config:6
+  typecheck   mypy src           project · .aether/config:8
+
+$ aether config get project.test          # withheld: not trusted yet
+
+$ aether trust
+  Commands the critics would run:
+    test        uv run pytest
+    lint        uvx ruff check
+    typecheck   mypy src
+  ✓ trusted.
+
+$ aether config get project.test
+uv run pytest
 ```
 
 ---
@@ -574,6 +846,42 @@ bash tests/run.sh gates        # just the gate tests
 ```
 
 Plain bash and python3, no packages to install. The suite covers dual-mode gate equivalence (each gate behaves identically standalone and under the dispatcher), bypass markers, fail-open on malformed input, install idempotence, migration from a standalone install, and uninstall.
+
+---
+
+## Roadmap
+
+Deliberately short. Everything here is a gap someone has actually hit, not a
+feature idea.
+
+**Close the loop between review and fix.** A critic finds something and a human
+retypes it. `/critique-diff --fix` applying only the mechanical findings — the
+ones with a file, a line and one obvious edit — would remove the retyping without
+removing the judgement.
+
+**Dependencies.** Nothing in the suite looks at what a change pulls in.
+`/critique-deps` for a new or bumped dependency: is it maintained, does it need
+network at runtime, does the licence fit.
+
+**Decisions.** `/draft-adr` from a critiqued plan. The plan already contains the
+alternatives and why they were rejected, which is the expensive half of an ADR,
+and it is currently thrown away once the code lands.
+
+**A verify command.** `aether check` running everything in `[project]` in one
+pass, so the same commands a critic uses are one keystroke for a human too.
+
+**Merge discipline.** `aether merge` gating on the things worth blocking a merge
+for — critique run, description accurate, CI green on the actual head — rather
+than leaving them to whoever remembers.
+
+**Multi-repo config.** `[project]` assumes one test command for one tree. A
+monorepo needs per-path sections, and that is a real design question rather than
+a small change.
+
+**A distribution story.** Today it is `git clone` plus a script, and the clone has
+to stay put because bonsai's MCP servers reference it by absolute path. A
+published package would fix that; a plugin marketplace entry was considered and
+rejected as premature.
 
 ---
 

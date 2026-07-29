@@ -152,6 +152,14 @@ number. Their individual histories are preserved under
   reads as untrusted and says why. Losing the feature is the right trade against
   losing the guarantee.
 
+### Documentation
+
+- README gains **Commands** (every slash command with the flags that override
+  config), **The development workflow** (one pass through a change, from
+  `/draft-config` to `/draft-changelog`), worked `aether` CLI examples including a
+  config walked end to end, and a short **Roadmap**. A table of contents, because
+  it is now long enough to need one.
+
 ### Notes
 
 Until you migrate, the pre-1.0 `<plugin>.config` files in either scope are still

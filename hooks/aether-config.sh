@@ -27,6 +27,69 @@ aether_out_dir() {
 # nothing breaks before migration. Writes only ever go to the new location, so
 # the two cannot diverge.
 
+# ── Preloading ───────────────────────────────────────────────────────────────
+# One awk per config file, once, instead of one per key looked up.
+#
+# The PreToolUse hook resolves `enabled` for every plugin plus four temper
+# thresholds — twelve reads, and so twelve awk processes, on every Bash, Write
+# and Edit. That cost nothing before this release only because there was no
+# config file to read; seeding a starter config at install made the path
+# always-on and took the hook from 81ms to 101ms. Reading both files once and
+# answering from a shell variable brings it back.
+#
+# Format: layer|section|key|value. The layer is kept because [project] from the
+# project layer is gated on trust, and a merged view could not tell the two apart.
+
+aether_cfg_dump() {         # <file> <layer>
+  local file="$1" layer="$2"
+  [ -f "$file" ] || return 0
+  awk -v L="$layer" '
+    { sub(/\r$/, "") }
+    /^[[:space:]]*#/ { next }
+    /^[[:space:]]*$/ { next }
+    /^\[.*\]$/ { cur = substr($0, 2, length($0) - 2); next }
+    {
+      line = $0; sub(/^[[:space:]]+/, "", line)
+      i = index(line, ":")
+      if (i > 1) {
+        v = substr(line, i + 1); sub(/^[[:space:]]+/, "", v)
+        print L "|" cur "|" substr(line, 1, i - 1) "|" v
+      }
+    }' "$file"
+}
+
+# Idempotent. Call it once per process; every aether_cfg_resolve after that is
+# free. Not called implicitly, so a long-lived caller that expects to see edits
+# it just made keeps the uncached path.
+aether_cfg_preload() {
+  AETHER_CFG_ALL="$(aether_cfg_dump "${AETHER_HOME:-$HOME/.aether}/config" global)
+$(aether_cfg_dump .aether/config project)"
+  AETHER_CFG_PRELOADED=1
+}
+
+# Resolve from the preloaded dump: project beats global, per key, with no forks.
+_aether_cfg_from_dump() {
+  local section="$1" key="$2" line trusted=unknown
+  AETHER_CFG_VALUE=""
+  while IFS= read -r line; do
+    case "$line" in
+      *"|$section|$key|"*) ;;
+      *) continue ;;
+    esac
+    local layer="${line%%|*}" rest="${line#*|}"
+    [ "${rest%%|*}" = "$section" ] || continue
+    rest="${rest#*|}"
+    [ "${rest%%|*}" = "$key" ] || continue
+    if [ "$section" = project ] && [ "$layer" = project ]; then
+      [ "$trusted" = unknown ] && { aether_trusted && trusted=yes || trusted=no; }
+      [ "$trusted" = yes ] || continue
+    fi
+    AETHER_CFG_VALUE="${rest#*|}"
+  done <<EOF
+$AETHER_CFG_ALL
+EOF
+}
+
 # aether_cfg_read <file> <section> <key>  — one value from one file
 aether_cfg_read() {
   local file="$1" section="$2" key="$3"
@@ -47,23 +110,57 @@ aether_cfg_read() {
 }
 
 # aether_cfg_get <section> <key> — global, then project, then the pre-1.0 fallback
-aether_cfg_get() {
-  local section="$1" key="$2" val=""
-  local g; g=$(aether_cfg_read "$(aether_cfg_file global)" "$section" "$key"); [ -n "$g" ] && val="$g"
+# Every `$( )` here is a fork, and this runs four times per PreToolUse hook — once
+# per plugin, for `enabled`. The first version built each path with a command
+# substitution and read every layer unconditionally: ~40 forks per tool call even
+# on a machine with no config files at all, which took the hook from 81ms to
+# 130ms. Paths are now expanded inline and a layer is only read if its file
+# exists, so the common case (nothing configured) forks nothing.
+# Resolves into $AETHER_CFG_VALUE and prints nothing, so a caller does not need
+# `$( )` — which forks. The PreToolUse hook reads five keys per invocation and
+# runs on every Bash, Write and Edit, so those forks were the whole difference
+# between 80ms and 130ms per tool call. aether_cfg_get wraps this for the CLI and
+# the slash commands, where one fork does not matter.
+aether_cfg_resolve() {
+  local section="$1" key="$2" val="" v f
+  if [ -n "${AETHER_CFG_PRELOADED:-}" ]; then
+    _aether_cfg_from_dump "$section" "$key"
+    [ -n "$AETHER_CFG_VALUE" ] && return 0
+    [ -z "$section" ] && return 0
+    # The pre-1.0 files are not in the dump, so they are checked here — but only
+    # if they exist. Falling through to the general path instead meant every
+    # *unset* key re-read both new files, and most keys are unset, so the cache
+    # saved nothing at all.
+    f="$HOME/.claude/$section.config"
+    if [ -f "$f" ]; then v=$(aether_cfg_read "$f" "" "$key"); [ -n "$v" ] && val="$v"; fi
+    f="./$section.config"
+    if [ -f "$f" ]; then v=$(aether_cfg_read "$f" "" "$key"); [ -n "$v" ] && val="$v"; fi
+    AETHER_CFG_VALUE="$val"
+    return 0
+  fi
+  f="${AETHER_HOME:-$HOME/.aether}/config"
+  if [ -f "$f" ]; then v=$(aether_cfg_read "$f" "$section" "$key"); [ -n "$v" ] && val="$v"; fi
+
   # [project] holds shell commands a critic would execute, so the project layer
   # of that one section waits for `aether trust`. Every other section applies
   # immediately: a threshold cannot run anything.
   if [ "$section" = project ] && ! aether_trusted; then
-    printf '%s' "$val"; return 0
+    AETHER_CFG_VALUE="$val"; return 0
   fi
-  local l; l=$(aether_cfg_read "$(aether_cfg_file local)"  "$section" "$key"); [ -n "$l" ] && val="$l"
+
+  if [ -f .aether/config ]; then
+    v=$(aether_cfg_read .aether/config "$section" "$key"); [ -n "$v" ] && val="$v"
+  fi
   if [ -z "$val" ] && [ -n "$section" ]; then
-    local og ol
-    og=$(aether_cfg_read "$HOME/.claude/$section.config" "" "$key"); [ -n "$og" ] && val="$og"
-    ol=$(aether_cfg_read "./$section.config"             "" "$key"); [ -n "$ol" ] && val="$ol"
+    f="$HOME/.claude/$section.config"
+    if [ -f "$f" ]; then v=$(aether_cfg_read "$f" "" "$key"); [ -n "$v" ] && val="$v"; fi
+    f="./$section.config"
+    if [ -f "$f" ]; then v=$(aether_cfg_read "$f" "" "$key"); [ -n "$v" ] && val="$v"; fi
   fi
-  printf '%s' "$val"
+  AETHER_CFG_VALUE="$val"
 }
+
+aether_cfg_get() { aether_cfg_resolve "$@"; printf '%s' "$AETHER_CFG_VALUE"; }
 
 # aether_cfg_lineno <file> <section> <key> — where a value came from, so
 # `aether config show` can point at the line the user needs to edit.
@@ -139,10 +236,12 @@ aether_hash_project() {
 #           downgrading to global would hide the fact that something changed.
 aether_trust_state() {
   [ -f .aether/config ] || [ -f .aether/rules.md ] || { printf 'none'; return 0; }
-  [ -n "$(aether_hash_project)" ] || { printf 'nohash'; return 0; }
+  # Cheapest check first: with no trust file there is nothing to compare against,
+  # so there is no reason to hash anything.
   local f recorded here
-  f=$(aether_trust_file)
+  f="${AETHER_HOME:-$HOME/.aether}/trusted"
   [ -f "$f" ] || { printf 'none'; return 0; }
+  [ -n "$(aether_hash_project)" ] || { printf 'nohash'; return 0; }
   here=$(pwd -P)
   recorded=$(awk -v p="$here" '{ i = index($0, " "); if (substr($0, i + 1) == p) { print substr($0, 1, i - 1); exit } }' "$f")
   [ -n "$recorded" ] || { printf 'none'; return 0; }

@@ -122,6 +122,16 @@ number. Their individual histories are preserved under
   stale-hook cleanup silently did not happen. All three backends now produce
   byte-identical output, and a phase aether does not manage (`SessionStart`) is
   preserved.
+- **The PreToolUse hook got 25% slower**, from 81ms to 105ms per tool call — and
+  it runs on every Bash, Write and Edit. Cause: resolving a key ran one `awk` per
+  key per layer, which cost nothing before only because there was no config file
+  to read. Seeding a starter config at install made that path always-on, at twelve
+  awk processes per invocation. Both files are now dumped once into a shell
+  variable and every lookup answers from it: **1 awk process, 86ms.** A test
+  counts processes rather than timing, so it stays meaningful on a loaded CI box,
+  and another asserts the cached and uncached paths resolve identically —
+  including the trust gate on `[project]`, which the dump reproduces from a layer
+  column.
 - **A CRLF config file read as an empty one.** `[temper]\r` does not match
   `/^\[.*\]$/`, so the section was never entered and *every* key in the file
   silently did nothing — including `enabled: false`, which made `aether disable`

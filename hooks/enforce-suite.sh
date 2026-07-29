@@ -76,29 +76,36 @@ printf '%s' "$cmd_or_path" | grep -qE '#[[:space:]]*cairn:skip'              && 
 $bypass_all && exit 0
 
 # ── Config reader ────────────────────────────────────────────────────────────
-# One parser, shared with bin/aether. Under the suite it is already sourced by
-# enforce-suite.sh; standalone this finds it. A gate that cannot find it must
-# still run — every config key has a default, so the gate degrades to those
-# rather than going silent.
-if ! command -v aether_cfg_get >/dev/null 2>&1; then
-  _ac_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
-  for _ac in "$_ac_here/../aether-config.sh" "$_ac_here/aether-config.sh" \
-             "$_ac_here/../../../hooks/aether-config.sh" \
-             "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh"; do
-    [ -f "$_ac" ] && { . "$_ac"; break; }
-  done
-  unset _ac _ac_here
-  if ! command -v aether_cfg_get >/dev/null 2>&1; then
-    aether_cfg_get() { :; }
-    aether_out_dir() { [ -d .aether ] && printf '.aether/out' || printf '%s/out' "${AETHER_HOME:-$HOME/.aether}"; }
-  fi
+# One parser, shared with bin/aether, and sourcing it here means the gates get it
+# for free. The engine installs it beside this file, and $_suite_dir is already
+# resolved above — so no extra process is spawned to find it. The generic search
+# below is only for an install that predates the file.
+if [ -f "$_suite_dir/aether-config.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$_suite_dir/aether-config.sh"
+elif [ -f "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh"
+fi
+# A gate that cannot find it must still run: every key has a default, so the
+# gates degrade to those rather than going silent.
+# Read both config files once, here, rather than once per key below.
+command -v aether_cfg_preload >/dev/null 2>&1 && aether_cfg_preload
+if ! command -v aether_cfg_resolve >/dev/null 2>&1; then
+  aether_cfg_resolve() { AETHER_CFG_VALUE=""; }
+  aether_cfg_get()     { :; }
+  aether_out_dir()     { [ -d .aether ] && printf '.aether/out' || printf '%s/out' "${AETHER_HOME:-$HOME/.aether}"; }
 fi
 
 # ── Plugin enabled check ─────────────────────────────────────────────────────
 # Sourcing the reader here also means the gates get it for free.
 
+# No $( ) — this runs once per plugin on every tool call.
 _plugin_enabled() {
-  [ "$(aether_cfg_get "$1" enabled)" = "false" ] && return 1
+  if command -v aether_cfg_resolve >/dev/null 2>&1; then
+    aether_cfg_resolve "$1" enabled
+    [ "$AETHER_CFG_VALUE" = "false" ] && return 1
+  fi
   return 0
 }
 

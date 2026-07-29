@@ -40,7 +40,12 @@ fi
 
 # Namespaced: several plugin hooks are sourced into one shell under the suite,
 # so a bare _config_get would collide.
-_temper_config_get() { aether_cfg_get temper "$1"; }
+# Assigns rather than prints, for the same reason _plugin_enabled does: the gate
+# reads four keys and runs on every Bash call.
+_temper_cfg() {
+  if command -v aether_cfg_resolve >/dev/null 2>&1; then aether_cfg_resolve temper "$1"
+  else AETHER_CFG_VALUE=""; fi
+}
 
 # ── Gate ─────────────────────────────────────────────────────────────────────
 # Reads: $cmd_or_path.  Returns: 1 to nudge, 0 to stay silent.
@@ -54,16 +59,16 @@ gate_temper() {
   fi
 
   local enabled auto_nudge_lines auto_nudge_files critical_paths result
-  enabled=$(_temper_config_get "enabled")
+  _temper_cfg enabled; enabled="$AETHER_CFG_VALUE"
   if [ "$enabled" = "false" ]; then
     return 0
   fi
 
-  auto_nudge_lines=$(_temper_config_get "auto_nudge_lines")
+  _temper_cfg auto_nudge_lines; auto_nudge_lines="$AETHER_CFG_VALUE"
   auto_nudge_lines=${auto_nudge_lines:-200}
-  auto_nudge_files=$(_temper_config_get "auto_nudge_files")
+  _temper_cfg auto_nudge_files; auto_nudge_files="$AETHER_CFG_VALUE"
   auto_nudge_files=${auto_nudge_files:-10}
-  critical_paths=$(_temper_config_get "critical_paths")
+  _temper_cfg critical_paths; critical_paths="$AETHER_CFG_VALUE"
   critical_paths=${critical_paths:-"*auth*|*permission*|*token*|migrations/|*alembic*|\\.sql|*schema*|*secret*|*credential*|\\.env"}
 
   # Inlined rather than written to a mktemp file. The original comment here said

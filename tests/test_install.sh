@@ -440,6 +440,21 @@ for l in sys.stdin:
     || fail "bonsai-ts answers a handshake" "got: ${n:-no response}"
 fi
 
+# ── the hook stays cheap ─────────────────────────────────────────────────────
+# It runs on every Bash, Write and Edit. Resolving each key separately meant one
+# awk per key — twelve per tool call once the installer started seeding a config,
+# which took the hook from 81ms to 105ms. Counting processes rather than timing
+# keeps this stable on a loaded CI machine.
+suite "the PreToolUse hook does not spawn a process per key"
+HK=$(new_home)
+env HOME="$HK" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+n=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"ls"}}' \
+    | env HOME="$HK" bash -x "$HK/.aether/hooks/enforce-suite.sh" 2>&1 >/dev/null \
+    | grep -c '+ awk' || true)
+[ "$n" -le 3 ] \
+  && pass "at most 3 awk processes per invocation (saw $n)" \
+  || fail "at most 3 awk processes per invocation" "saw $n — the per-key path is back"
+
 # ── the CLAUDE.md splice is idempotent ───────────────────────────────────────
 # Removing the block took the block but not the blank line that separated it,
 # and the re-append added a fresh one — so every install grew CLAUDE.md by

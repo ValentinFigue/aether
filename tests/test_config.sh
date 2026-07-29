@@ -339,6 +339,60 @@ printf '[temper]\nseverity: red\n' > "$PT2/.aether/config"
 out=$( cd "$PT2" && env HOME="$HT2" bash "$CLI" trust 2>&1 )
 assert_contains "$out" "Nothing executable" "trust says so when there is nothing to run"
 
+# ── the preloaded path agrees with the uncached one ─────────────────────────
+# The hook reads twelve keys per tool call, so it dumps both config files once
+# and answers from a shell variable. Two code paths resolving the same key is
+# exactly the kind of split that drifts, so assert they agree — including the
+# trust gate on [project], which the dump has to reproduce from its layer column.
+suite "preloaded and uncached resolution agree"
+HQ=$(mk); PQ=$(mk); mkdir -p "$HQ/.aether" "$PQ/.aether"
+cat > "$HQ/.aether/config" <<'EOF'
+enabled: true
+[temper]
+severity: red, yellow
+auto_nudge_lines: 200
+[cairn]
+style: conventional
+EOF
+cat > "$PQ/.aether/config" <<'EOF'
+[temper]
+auto_nudge_lines: 400
+[project]
+test: echo hi
+EOF
+both() {   # <section> <key> -> "uncached|preloaded"
+  ( cd "$PQ" && HOME="$HQ" bash -c "
+      . '$LIB'
+      aether_cfg_resolve \"\$1\" \"\$2\"; a=\"\$AETHER_CFG_VALUE\"
+      aether_cfg_preload
+      aether_cfg_resolve \"\$1\" \"\$2\"; b=\"\$AETHER_CFG_VALUE\"
+      printf '%s|%s' \"\$a\" \"\$b\"" _ "$1" "$2" )
+}
+# Section and key are passed separately so the sectionless case is really
+# sectionless — `set -- $pair` on " enabled" drops the leading empty field and
+# silently tested section "enabled" instead.
+check_both() {
+  local sec="$1" key="$2" r
+  r=$(both "$sec" "$key")
+  [ "${r%%|*}" = "${r#*|}" ] \
+    && pass "both paths agree on [${sec:-suite}] $key = ${r%%|*}" \
+    || fail "both paths agree on [${sec:-suite}] $key" "uncached=${r%%|*} preloaded=${r#*|}"
+}
+check_both temper  auto_nudge_lines
+check_both temper  severity
+check_both cairn   style
+check_both ""      enabled
+check_both temper  nope
+check_both project test
+
+# The sectionless key must actually resolve, not merely agree on being empty.
+assert_eq "true|true" "$(both "" enabled)" "a sectionless key resolves in both paths"
+
+# …and after trusting, both must start returning the [project] value.
+( cd "$PQ" && env HOME="$HQ" bash "$CLI" trust >/dev/null 2>&1 )
+r=$(both project test)
+assert_eq "echo hi|echo hi" "$r" "both paths honour trust for [project]"
+
 # ── nothing chatters on stderr ───────────────────────────────────────────────
 # `_schema_all | awk '... exit'` closed the pipe mid-write, and bash on Linux
 # reports the EPIPE as `printf: write error: Broken pipe`. The tests capture with

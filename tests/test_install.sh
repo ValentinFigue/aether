@@ -440,6 +440,49 @@ for l in sys.stdin:
     || fail "bonsai-ts answers a handshake" "got: ${n:-no response}"
 fi
 
+# ── a script may overwrite itself ────────────────────────────────────────────
+# `aether update` runs from ~/.local/bin/aether and copies a new bin/aether over
+# it. `cp` truncates and rewrites in place, and bash reads a script incrementally
+# as it executes — so the byte offsets shifted under the interpreter and it
+# resumed mid-token: `syntax error near unexpected token ';;'`, from the
+# dispatcher's case, after the install had otherwise reported success.
+suite "install replaces files by rename"
+HX=$(new_home)
+mkdir -p "$HX/bin"
+printf 'echo old\n' > "$HX/bin/target"
+before=$(ls -i "$HX/bin/target" | awk '{print $1}')
+AETHER_REPO="$REPO" bash -c '
+  . "'"$REPO"'/hooks/aether-config.sh" 2>/dev/null
+  eval "$(sed "/^COMMAND=/,\$d" "'"$REPO"'/bin/aether")"
+  _op_copy "'"$REPO"'/bin/aether" "'"$HX"'/bin/target"' >/dev/null 2>&1
+after=$(ls -i "$HX/bin/target" | awk '{print $1}')
+[ "$before" != "$after" ] \
+  && pass "_op_copy replaces the directory entry, not the file contents" \
+  || fail "_op_copy replaces the directory entry, not the file contents" \
+         "inode unchanged ($before) — a running script would be corrupted"
+[ -z "$(ls "$HX/bin/" | grep aether-tmp)" ] \
+  && pass "no temp file is left behind" \
+  || fail "no temp file is left behind" "$(ls "$HX/bin/")"
+
+# The real thing: a script that overwrites itself mid-run must still finish.
+SELF=$(mktemp -d)
+cat > "$SELF/grow.sh" <<'GROWEOF'
+#!/usr/bin/env bash
+. "$AE_LIB" 2>/dev/null
+eval "$(sed '/^COMMAND=/,$d' "$AE_CLI")"
+_op_copy "$AE_BIG" "$0"
+case ok in ok) printf 'survived
+' ;; esac
+GROWEOF
+chmod +x "$SELF/grow.sh"
+out=$(AE_LIB="$REPO/hooks/aether-config.sh" AE_CLI="$REPO/bin/aether" \
+      AE_BIG="$REPO/bin/aether" AETHER_REPO="$REPO" bash "$SELF/grow.sh" 2>&1)
+# Assert the output is *exactly* the expected line. Matching only on "syntax
+# error" was too weak: mid-token resumption can also surface as
+# `lear: command not found`, which is the same corruption wearing another hat.
+assert_eq "survived" "$out" "a script that overwrites itself runs to completion, silently"
+rm -rf "$SELF"
+
 # ── a relocated hook is registered once ──────────────────────────────────────
 # cairn used to install standalone into ~/.local/share/cairn/. A machine that had
 # done that ended up with post-cairn.sh registered twice — the old path and the

@@ -122,6 +122,15 @@ number. Their individual histories are preserved under
   stale-hook cleanup silently did not happen. All three backends now produce
   byte-identical output, and a phase aether does not manage (`SessionStart`) is
   preserved.
+- **`aether update` corrupted itself mid-run.** It executes from
+  `~/.local/bin/aether` and copies a new `bin/aether` over that same path, and
+  `cp` truncates and rewrites in place. bash reads a script incrementally as it
+  executes, so the byte offsets shifted under the interpreter and it resumed
+  mid-token — `syntax error near unexpected token ';;'` from inside the
+  dispatcher's `case`, *after* the install had reported success. Every copy now
+  goes through a temp file in the destination directory and lands with a rename,
+  so a process already executing the old file keeps its inode and runs to
+  completion. Latent before this branch; the file growing made it reliable.
 - **`printf: write error: Broken pipe` on Linux.** `_schema_all | awk '… exit'`
   closed the pipe while the writer was still going. macOS dies from SIGPIPE
   silently, so it passed locally and failed on CI; the tests capture with `2>&1`,

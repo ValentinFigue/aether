@@ -272,14 +272,29 @@ _ok() {
   else printf '  ✓ %s\n' "$*"; fi
 }
 
+# Replaces by rename, never in place.
+#
+# `cp` truncates and rewrites the destination, and bash reads a script
+# incrementally as it executes. So `aether update` — which runs from
+# ~/.local/bin/aether and copies a new bin/aether over it — shifted the byte
+# offsets under the interpreter, and bash resumed mid-token:
+# `syntax error near unexpected token ';;'`, from inside the dispatcher's case,
+# after the install had otherwise finished successfully.
+#
+# A rename swaps the directory entry and leaves the original inode alone, so a
+# process already executing the old file runs to completion on it. This is why
+# every copy goes through a temp file in the destination directory — same
+# filesystem, so the rename is atomic.
 _op_copy() {
-  local src="$1" dst="$2"
+  local src="$1" dst="$2" tmp
   _dry && { printf '  [dry-run] copy %s\n' "$dst"; return 0; }
   mkdir -p "$(dirname "$dst")" 2>/dev/null || true
-  if cp "$src" "$dst" 2>/dev/null; then
-    [ -x "$src" ] && chmod +x "$dst" 2>/dev/null || true
-    return 0
+  tmp="$dst.aether-tmp.$$"
+  if cp "$src" "$tmp" 2>/dev/null; then
+    [ -x "$src" ] && chmod +x "$tmp" 2>/dev/null || true
+    if mv -f "$tmp" "$dst" 2>/dev/null; then return 0; fi
   fi
+  rm -f "$tmp" 2>/dev/null || true
   printf '  ! could not write %s\n' "$dst"; return 1
 }
 

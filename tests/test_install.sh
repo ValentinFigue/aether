@@ -344,6 +344,102 @@ else
   fail "running every plugin's update leaves no pre-rename command behind" "found:$resurrected"
 fi
 
+# ── bonsai's MCP servers ─────────────────────────────────────────────────────
+# This was written once with the spec on a pipe and the python program on a
+# heredoc. `python3 -` reads its program from stdin, so the heredoc claimed
+# stdin, sys.stdin.read() returned nothing, and the engine wrote an empty
+# mcpServers map and reported success. Registration is asserted directly because
+# a full bonsai install needs uv and npm and a minute of build time.
+suite "MCP registration"
+HM=$(new_home)
+# AETHER_REPO is what makes this testable without a real install: sourcing the
+# engine out of an eval leaves BASH_SOURCE pointing at the eval, so _repo_root
+# cannot find the clone on its own.
+mcp_sync() {
+  HOME="$HM" AETHER_REPO="$REPO" bash -c '
+    . "'"$REPO"'/hooks/aether-config.sh" 2>/dev/null
+    eval "$(sed "/^COMMAND=/,\$d" "'"$REPO"'/bin/aether")"
+    _json_mcp_sync bonsai "'"$REPO"'/plugins/bonsai" "$1"' _ "$1" 2>&1
+}
+mcp_sync add
+got=$(python3 - "$HM/.claude.json" <<'PYEOF'
+import json, sys
+try: d = json.load(open(sys.argv[1]))
+except Exception: print("no file"); raise SystemExit
+s = d.get("mcpServers", {})
+print(" ".join(sorted(s)) or "EMPTY")
+PYEOF
+)
+assert_eq "bonsai-py bonsai-ts" "$got" "both MCP servers are registered"
+
+for srv in bonsai-py bonsai-ts; do
+  a=$(python3 - "$HM/.claude.json" "$srv" <<'PYEOF'
+import json, sys
+d = json.load(open(sys.argv[1]))["mcpServers"][sys.argv[2]]
+print(" ".join(d["args"]))
+PYEOF
+)
+  case "$a" in
+    /*|*" /"*) pass "$srv args point at an absolute in-clone path" ;;
+    *) fail "$srv args point at an absolute in-clone path" "args: $a" ;;
+  esac
+  case "$a" in
+    *'${PLUGIN_ROOT}'*) fail "$srv has PLUGIN_ROOT interpolated" "left literal: $a" ;;
+    *) pass "$srv has PLUGIN_ROOT interpolated" ;;
+  esac
+done
+
+# And the guard against writing one that cannot launch: with no clone to resolve
+# against, an entry with an empty command is worse than no entry, because Claude
+# Code would try to run it.
+HM2=$(new_home)
+out=$(HOME="$HM2" bash -c '
+  . "'"$REPO"'/hooks/aether-config.sh" 2>/dev/null
+  eval "$(sed "/^COMMAND=/,\$d" "'"$REPO"'/bin/aether")"
+  _json_mcp_sync bonsai "'"$REPO"'/plugins/bonsai" add || true' 2>&1)
+assert_contains "$out" "not registered" "an unresolvable server is refused, not half-written"
+if [ -f "$HM2/.claude.json" ]; then
+  bad=$(python3 - "$HM2/.claude.json" <<'PYEOF'
+import json, sys
+d = json.load(open(sys.argv[1])).get("mcpServers", {})
+print(" ".join(n for n, c in d.items() if not c.get("command")))
+PYEOF
+)
+  [ -z "$bad" ] && pass "no server with an empty command was written" \
+                || fail "no server with an empty command was written" "$bad"
+else
+  pass "no server with an empty command was written"
+fi
+
+mcp_sync remove
+got=$(python3 - "$HM/.claude.json" <<'PYEOF'
+import json, sys
+print(" ".join(sorted(json.load(open(sys.argv[1])).get("mcpServers", {}))) or "EMPTY")
+PYEOF
+)
+assert_eq "EMPTY" "$got" "uninstall deregisters both"
+
+# The servers themselves, when the build output is already there. Skipped rather
+# than built, so the suite does not depend on uv and npm.
+if [ -f "$REPO/plugins/bonsai/ts/dist/server.js" ] && command -v node >/dev/null 2>&1; then
+  n=$(printf '%s
+' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+    | node "$REPO/plugins/bonsai/ts/dist/server.js" 2>/dev/null \
+    | python3 -c "
+import sys, json
+for l in sys.stdin:
+    try: m = json.loads(l)
+    except Exception: continue
+    if m.get('id') == 2: print(len(m['result']['tools'])); break
+")
+  [ "${n:-0}" -ge 5 ] \
+    && pass "bonsai-ts answers a handshake ($n tools)" \
+    || fail "bonsai-ts answers a handshake" "got: ${n:-no response}"
+fi
+
 # ── a plugin is a manifest plus assets ───────────────────────────────────────
 # trellis exists to prove this: it ships no install.sh and no uninstall.sh, so if
 # the engine needs one, trellis cannot be installed at all.

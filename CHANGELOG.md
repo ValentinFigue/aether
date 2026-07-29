@@ -122,6 +122,14 @@ number. Their individual histories are preserved under
   stale-hook cleanup silently did not happen. All three backends now produce
   byte-identical output, and a phase aether does not manage (`SessionStart`) is
   preserved.
+- **bonsai's MCP servers were never registered by the engine.** The spec was
+  piped to `python3 -`, which reads its *program* from stdin — so the heredoc
+  carrying the program claimed stdin, `sys.stdin.read()` returned nothing, and
+  the engine wrote an empty `mcpServers: {}` and reported success. The spec now
+  travels via argv. A server whose command cannot be resolved is refused outright
+  rather than written with an empty `command`, which Claude Code would try to
+  launch. `AETHER_REPO` was added so the engine can be exercised without a real
+  install, which is what makes this testable.
 - **Trust now fails closed with no SHA-256 available.** The first version fell
   back to `cksum`, which is CRC32 — cheap enough to collide that someone able to
   change a trusted repo's config could keep the checksum and keep the trust.

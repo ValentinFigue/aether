@@ -98,6 +98,10 @@ _manifest_get() {
 # Running installed, the manifest recorded it.
 _repo_root() {
   local here
+  # An explicit override wins: it makes the engine testable without a real
+  # install, and lets a shim name a clone it was not copied out of.
+  [ -n "${AETHER_REPO:-}" ] && [ -d "$AETHER_REPO/plugins" ] \
+    && { printf '%s' "$AETHER_REPO"; return 0; }
   here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   if [ -d "$here/../plugins" ]; then
     (cd "$here/.." && pwd -P); return 0
@@ -1102,13 +1106,28 @@ _json_mcp_sync() {
   names=$(grep -oE '^mcp\.[a-z-]+\.command:' "$proot/aether.plugin" 2>/dev/null \
           | sed 's/^mcp\.//;s/\.command:$//' | sort -u)
   [ -n "$names" ] || return 0
-  local n
+  local n cmd cargs
   for n in $names; do
-    spec="$spec$n"$'\t'"$(_mf "$plugin" "mcp.$n.command")"$'\t'"$(_mf "$plugin" "mcp.$n.args" | sed "s|\${PLUGIN_ROOT}|$proot|g")"$'\n'
+    # `|| true`: _mf returns 1 when the clone cannot be located, and a bare
+    # assignment from a failing substitution aborts the whole shell under set -e.
+    # The explicit check below should be what handles this, not an exit.
+    cmd=$(_mf "$plugin" "mcp.$n.command" || true)
+    cargs=$(_mf "$plugin" "mcp.$n.args" 2>/dev/null | sed "s|\${PLUGIN_ROOT}|$proot|g" || true)
+    # An entry with an empty command is worse in ~/.claude.json than no entry:
+    # Claude Code would try to launch it. Refuse rather than write a broken one.
+    if [ "$action" = add ] && [ -z "$cmd" ]; then
+      printf '  ! could not resolve the command for MCP server %s — not registered\n' "$n"
+      continue
+    fi
+    spec="$spec$n"$'\t'"$cmd"$'\t'"$cargs"$'\n'
   done
-  printf '%s' "$spec" | python3 - "$action" <<'PYEOF'
+  [ -n "$spec" ] || return 0
+  # The spec goes through argv, not a pipe. `python3 -` reads its program from
+  # stdin, so a heredoc here claims stdin and sys.stdin.read() returns nothing —
+  # which is how this silently wrote an empty mcpServers map and reported success.
+  python3 - "$action" "$spec" <<'PYEOF'
 import json, os, sys
-action = sys.argv[1]
+action, spec = sys.argv[1], sys.argv[2]
 path = os.path.expanduser("~/.claude.json")
 data = {}
 if os.path.exists(path):
@@ -1117,7 +1136,7 @@ if os.path.exists(path):
     except json.JSONDecodeError:
         pass
 servers = data.setdefault("mcpServers", {})
-for line in sys.stdin.read().splitlines():
+for line in spec.splitlines():
     if not line.strip(): continue
     name, cmd, args = line.split("\t", 2)
     if action == "remove":

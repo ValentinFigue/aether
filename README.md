@@ -59,14 +59,80 @@ There is no `curl | bash` one-liner. The installer copies files out of the clone
 
 ---
 
+## How it works
+
+Three moving parts, and each has one job.
+
+### 1. A manifest per plugin — what it ships
+
+`plugins/<name>/aether.plugin` declares everything a plugin puts on your machine:
+its slash commands, its hooks, its CLI, its skills, its MCP servers, the
+permissions it needs, its CLAUDE.md block, and its config schema.
+
+```
+name: cairn
+scopes: local global
+commands: draft-commit.md draft-pr.md draft-changelog.md draft-summary.md
+legacy_commands: cairn-commit.md cairn-pr.md ...
+hook.1: PreToolUse  | Bash              | hooks/enforce-cairn.sh | suite_owned
+hook.2: PostToolUse | Bash\|Write\|Edit | hooks/post-cairn.sh
+cli: cairn
+permissions: Bash Read Write
+
+config.style.default: conventional
+config.style.doc:     Commit format — Conventional Commits, or a plain subject
+config.style.used_by: /draft-commit
+```
+
+The format is `key: value`, not JSON, deliberately: bash parses it with no
+interpreter, so a machine without python3, node or jq still gets its commands,
+CLI and templates installed. Only the `settings.json` steps need one.
+
+### 2. The engine — how it gets installed
+
+`bin/aether` reads those manifests and performs five operations: copy a file,
+copy a tree, symlink, upsert a JSON key, splice a sentinel block. Two escape
+hatches cover the rest — `build` for bonsai's `uv`/`npm` step, and `link` for
+the assets it points at the clone instead of copying.
+
+**Uninstall is the same engine reading the same manifest in reverse.** That is
+the point of the design: install and uninstall cannot disagree, because there is
+only one description of what exists.
+
+`install.sh` and every `plugins/*/install.sh` are one-line wrappers around it.
+
+### 3. The suite hook — how the gates run
+
+`enforce-suite.sh` is a dispatcher with no rules of its own. It sources each
+plugin's gate from `gates/` and calls the `gate_<plugin>` function it defines,
+so a rule lives in exactly one file whether the plugin runs standalone or under
+the suite.
+
+```
+manifests  ──▶  bin/aether (engine)  ──▶  ~/.claude/commands/
+                     │                    ~/.claude/settings.json
+                     │                    ~/.claude.json  (MCP)
+                     └──────────────────▶ <hookdir>/enforce-suite.sh
+                                          <hookdir>/gates/enforce-*.sh
+```
+
+### Adding a plugin
+
+Write a manifest and put the assets beside it. There is no installer to write —
+`aether install <name>` and `aether uninstall <name>` work from the manifest
+alone, and the plugin appears in `aether status` because it exists.
+
+---
+
 ## What changes in your environment
 
 | What | Where |
 |---|---|
 | `enforce-suite.sh` | `~/.local/share/aether/enforce-suite.sh` (global) or `.claude/hooks/enforce-suite.sh` (local) |
 | Plugin gates | `<hook dir>/gates/enforce-<plugin>.sh` — sourced by the suite hook |
+| Plugin hooks | `<hook dir>/plugin-hooks/` — PostToolUse scripts the suite has no equivalent for |
 | Hook registration | `settings.json` — one `PreToolUse` entry, matcher `Bash\|Write\|Edit\|MultiEdit` |
-| Permissions | `settings.json` — `Bash`, `Read`, `Write`, `mcp__bonsai-py__*`, `mcp__bonsai-ts__*` |
+| Permissions | `settings.json` — `Bash`, `Read`, `Write`, plus each installed plugin's own (bonsai adds `mcp__bonsai-*__*`) |
 | `aether` CLI | `~/.local/bin/aether` |
 | Slash commands | `~/.claude/commands/` — `critique-*.md`, `draft-*.md` |
 | CLAUDE.md block | injected with `--claude-md` flag |
@@ -120,14 +186,26 @@ Each gate is defined once, in its own plugin's `hooks/enforce-<plugin>.sh`, and 
 ## CLI reference
 
 ```
-aether status                            Show plugin state, gates, clone path, version
+aether install [plugin...] [global] [--claude-md] [--no-bonsai] [--dry-run]
+                                         Install the suite, or just the named plugins
+aether uninstall [plugin...] [global] [--claude-md]
+                                         Remove a plugin, or the suite layer itself
+aether status                            Plugin state, gates, clone path, version
 aether enable  [local|global]            Enable all plugins
 aether disable [local|global]            Disable all plugins
-aether update                            git pull the clone and re-run its installer
+aether hook enable|disable <plugin>      Stop a gate being invoked at all
+aether update                            git pull the clone and re-run the installer
 aether version                           Print the CLI and installed versions
-aether uninstall [global] [--claude-md]  Remove aether; plugins remain installed standalone
 aether help                              Show help
 ```
+
+Every plugin also answers to its own name — `aether cairn status` — and the
+`cairn`, `temper`, `whetstone` and `bonsai` binaries are 24-line shims that exec
+exactly that, so `cairn status` still works and there is one implementation.
+
+`enable`/`disable` and `hook enable`/`disable` are different: the first writes
+`enabled: false` for the gate to read, the second stops the gate being loaded.
+The soft mute is usually what you want; the hard one is for debugging.
 
 **Example output of `aether status`:**
 
@@ -173,11 +251,14 @@ grep -r "TODO" ./src          # bonsai:skip
 Standalone installs remain fully supported — aether is optional coordination, not a requirement for any single plugin. Each plugin's installer lives beside it:
 
 ```bash
-bash plugins/cairn/install.sh global --claude-md
-bash plugins/temper/install.sh global --claude-md
-bash plugins/whetstone/install.sh global --claude-md
-bash plugins/bonsai/install.sh --claude-md        # needs uv, node, npm
+aether install cairn global --claude-md
+aether install temper whetstone global
+bash plugins/cairn/install.sh global              # equivalent; a wrapper
 ```
+
+Installing any plugin also installs the `aether` engine, the way an MCP server
+needs a host. "Standalone" means only that plugin's assets, not a machine
+without aether.
 
 Run without `--suite` (as above) and a plugin registers its own `PreToolUse` hook and its own CLAUDE.md block. The suite installer passes `--suite` to suppress both.
 

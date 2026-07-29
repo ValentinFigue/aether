@@ -135,8 +135,14 @@ _gates_dir()    { printf '%s/gates' "$(_root "$1")"; }
 # Non-fatal by design. These run under `set -e`, partway through an install; a
 # single unwritable file must not abort and leave a half-configured machine.
 
+# DRY_RUN is honoured in the primitives rather than at each call site: all
+# mutation funnels through these five plus the JSON helpers, so one guard each
+# covers the engine.
+_dry() { [ "${DRY_RUN:-false}" = true ]; }
+
 _op_copy() {
   local src="$1" dst="$2"
+  _dry && { printf '  [dry-run] copy %s\n' "$dst"; return 0; }
   mkdir -p "$(dirname "$dst")" 2>/dev/null || true
   if cp "$src" "$dst" 2>/dev/null; then
     [ -x "$src" ] && chmod +x "$dst" 2>/dev/null || true
@@ -147,6 +153,7 @@ _op_copy() {
 
 _op_copy_tree() {
   local src="$1" dst="$2"
+  _dry && { printf '  [dry-run] copy tree %s\n' "$dst"; return 0; }
   mkdir -p "$dst" 2>/dev/null || true
   if command -v rsync >/dev/null 2>&1; then
     rsync -r "$src/" "$dst/" 2>/dev/null && return 0
@@ -158,6 +165,7 @@ _op_copy_tree() {
 
 _op_link() {
   local src="$1" dst="$2"
+  _dry && { printf '  [dry-run] link %s\n' "$dst"; return 0; }
   mkdir -p "$(dirname "$dst")" 2>/dev/null || true
   ln -sf "$src" "$dst" 2>/dev/null && return 0
   printf '  ! could not link %s\n' "$dst"; return 1
@@ -166,6 +174,7 @@ _op_link() {
 _op_rm() {
   local target="$1"
   [ -e "$target" ] || return 0
+  _dry && { printf '  [dry-run] remove %s\n' "$target"; return 0; }
   rm -rf "$target" 2>/dev/null && { printf '  ✓ removed %s\n' "$target"; return 0; }
   printf '  ! could not remove %s\n' "$target"; return 1
 }
@@ -175,6 +184,7 @@ _op_rm() {
 # existing install — skipping froze the block at whatever version wrote it first.
 _op_splice() {
   local file="$1" marker="$2" content_file="$3" wrap="$4"
+  _dry && { printf '  [dry-run] write %s block into %s\n' "$marker" "$file"; return 0; }
   mkdir -p "$(dirname "$file")" 2>/dev/null || true
   [ -f "$file" ] || : > "$file"
   if grep -q "<!-- ${marker}:start -->" "$file" 2>/dev/null; then
@@ -196,6 +206,7 @@ _op_splice() {
 _op_unsplice() {
   local file="$1" marker="$2"
   [ -f "$file" ] || return 0
+  _dry && { printf '  [dry-run] remove %s block from %s\n' "$marker" "$file"; return 0; }
   grep -q "<!-- ${marker}:start -->" "$file" 2>/dev/null || return 0
   awk "/<!-- ${marker}:start -->/{skip=1} !skip{print} /<!-- ${marker}:end -->/{skip=0}" \
     "$file" > "$file.tmp" 2>/dev/null && mv "$file.tmp" "$file"
@@ -209,6 +220,7 @@ _op_unsplice() {
 # silently never fired on a node-or-jq-only machine.
 _json_register_hook() {
   local file="$1" phase="$2" matcher="$3" path="$4" prepend="${5:-}"
+  _dry && return 0
   command -v python3 >/dev/null 2>&1 || { command -v node >/dev/null 2>&1 || return 1; }
   if command -v python3 >/dev/null 2>&1; then
     python3 - "$file" "$phase" "$matcher" "$path" "$prepend" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
@@ -245,6 +257,7 @@ JSEOF
 
 _json_deregister_hook() {
   local file="$1" needle="$2"
+  _dry && return 0
   [ -f "$file" ] || return 0
   command -v python3 >/dev/null 2>&1 || return 1
   python3 - "$file" "$needle" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
@@ -440,6 +453,7 @@ _json_backend() {
 
 _json_remove_stale_hooks() {
   local file="$1"
+  _dry && return 0
   case "$(_json_backend)" in
    python3)
     python3 - "$file" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
@@ -494,6 +508,7 @@ JSEOF
 
 _json_register_suite_hook() {
   local file="$1" hook_path="$2"
+  _dry && return 0
   local matcher="Bash|Write|Edit|MultiEdit"
   case "$(_json_backend)" in
    python3)
@@ -554,6 +569,7 @@ JSEOF
 # spelling matched no tool, so the permission it granted was inert.
 _json_sync_perms() {
   local file="$1" add="$2" drop="$3"
+  _dry && return 0
   case "$(_json_backend)" in
    python3)
     python3 - "$file" "$add" "$drop" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
@@ -949,19 +965,23 @@ cmd_install() {
       global|--global) scope="global" ;;
       --claude-md)     WITH_CLAUDE_MD=true ;;
       --no-bonsai)     no_bonsai=true ;;
+      --dry-run)       DRY_RUN=true ;;
       -*)              printf 'Unknown option: %s\n' "$arg"; return 1 ;;
       *)               want="$want $arg" ;;
     esac
   done
 
   local repo; repo=$(_repo_root) || { printf 'Cannot locate the aether clone.\n'; return 1; }
+  _dry && printf '\n[dry-run] nothing below is written.\n'
   local targets; targets=$(_plugins_available)
   [ -n "$want" ] && targets="$want"
 
   local settings; settings=$(_settings "$scope")
-  mkdir -p "$(dirname "$settings")"
-  [ -f "$settings" ] || printf '{}\n' > "$settings"
-  _backup "$settings"
+  if ! _dry; then
+    mkdir -p "$(dirname "$settings")"
+    [ -f "$settings" ] || printf '{}\n' > "$settings"
+    _backup "$settings"
+  fi
 
   # Per-plugin PreToolUse hooks are superseded by enforce-suite.sh.
   _json_remove_stale_hooks "$settings" || true
@@ -1017,7 +1037,11 @@ cmd_install() {
 
   local shipped=""
   for p in $installed; do shipped="$shipped $(_mf "$p" commands)"; done
-  local mf; mf=$(_manifest_for "$scope"); mkdir -p "$(dirname "$mf")"
+  local mf; mf=$(_manifest_for "$scope")
+  if _dry; then
+    printf '\n[dry-run] complete. Run without --dry-run to apply.\n'; return 0
+  fi
+  mkdir -p "$(dirname "$mf")"
   cat > "$mf" <<MEOF
 version=$VERSION
 scope=$scope

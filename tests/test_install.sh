@@ -244,13 +244,17 @@ grep -q '^commands=' "$HG/.aether/manifest" \
 # Four of the six used to start with "Parse $ARGUMENTS for flags:", which is what
 # the palette showed. Guard against that regressing.
 suite "palette descriptions"
+# The owning plugin is derived from the path rather than listed, so a fifth
+# plugin is covered by existing — the same reason the engine stopped hardcoding
+# PLUGINS=.
 for f in "$REPO"/plugins/*/.claude/commands/*.md; do
   n=$(basename "$f")
+  owner=$(basename "$(dirname "$(dirname "$(dirname "$f")")")")
   first=$(head -1 "$f")
   case "$first" in
     "Parse \$ARGUMENTS"*|"#"*|"")
       fail "$n starts with a real description" "line 1 is: ${first:0:50}" ;;
-    *\(cairn\)*|*\(temper\)*|*\(whetstone\)*|*\(bonsai\)*)
+    *"($owner)"*)
       pass "$n starts with a real description naming its plugin" ;;
     *)
       fail "$n names its owning plugin on line 1" "line 1 is: ${first:0:60}" ;;
@@ -339,6 +343,40 @@ if [ -z "$resurrected" ]; then
 else
   fail "running every plugin's update leaves no pre-rename command behind" "found:$resurrected"
 fi
+
+# ── a plugin is a manifest plus assets ───────────────────────────────────────
+# trellis exists to prove this: it ships no install.sh and no uninstall.sh, so if
+# the engine needs one, trellis cannot be installed at all.
+suite "adding a plugin needs no installer"
+[ -f "$REPO/plugins/trellis/install.sh" ] \
+  && fail "trellis ships no installer" "install.sh exists — the proof is void" \
+  || pass "trellis ships no installer"
+[ -f "$REPO/plugins/trellis/uninstall.sh" ] \
+  && fail "trellis ships no uninstaller" "uninstall.sh exists" \
+  || pass "trellis ships no uninstaller"
+
+HP=$(new_home)
+env HOME="$HP" bash "$REPO/bin/aether" install trellis global >/dev/null 2>&1
+[ -f "$HP/.claude/commands/draft-config.md" ] \
+  && pass "aether install trellis installs its command" \
+  || fail "aether install trellis installs its command"
+assert_contains "$(env HOME="$HP" bash "$REPO/bin/aether" status 2>&1)" "trellis" \
+  "a new plugin appears in status because it exists"
+assert_contains "$(env HOME="$HP" bash "$REPO/bin/aether" config show trellis 2>&1)" "enabled" \
+  "…and its schema is read from the same manifest"
+
+env HOME="$HP" bash "$REPO/bin/aether" uninstall trellis global >/dev/null 2>&1
+[ -f "$HP/.claude/commands/draft-config.md" ] \
+  && fail "aether uninstall trellis removes its command" \
+  || pass "aether uninstall trellis removes its command"
+
+# Its command must not tell a critic to run something that never terminates.
+DC="$REPO/plugins/trellis/.claude/commands/draft-config.md"
+for forbidden in watch serve deploy; do
+  grep -qi "never select" "$DC" && grep -qi "$forbidden" "$DC" \
+    && pass "draft-config forbids '$forbidden' commands" \
+    || fail "draft-config forbids '$forbidden' commands"
+done
 
 # ── --dry-run ────────────────────────────────────────────────────────────────
 # A documented flag that has now regressed twice: once when the installers

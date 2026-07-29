@@ -42,10 +42,13 @@ assert_contains "$out" "Installed version: 1.0.0" "status reports the installed 
 
 # ── enable / disable ─────────────────────────────────────────────────────────
 suite "enable / disable"
+# Counted from the manifests rather than written down, so adding a plugin does
+# not fail a test about enable/disable.
+NPLUGINS=$(ls -d "$REPO"/plugins/*/aether.plugin 2>/dev/null | wc -l | tr -d ' ')
 env HOME="$H" bash "$CLI" disable global >/dev/null 2>&1
 out=$(env HOME="$H" bash "$CLI" status 2>&1)
 n=$(printf '%s' "$out" | grep -c 'disabled' || true)
-assert_eq "4" "$n" "disable global marks all four plugins disabled"
+assert_eq "$NPLUGINS" "$n" "disable global marks every plugin disabled"
 
 # a disabled plugin's gate must actually stop firing
 FIX=$(mktemp -d); cd "$FIX" || exit 1
@@ -61,7 +64,7 @@ cd "$REPO" || exit 1; rm -rf "$FIX"
 env HOME="$H" bash "$CLI" enable global >/dev/null 2>&1
 out=$(env HOME="$H" bash "$CLI" status 2>&1)
 n=$(printf '%s' "$out" | grep -c 'enabled' || true)
-assert_eq "4" "$n" "enable global marks all four plugins enabled"
+assert_eq "$NPLUGINS" "$n" "enable global marks every plugin enabled"
 
 # ── update error paths ───────────────────────────────────────────────────────
 # update is a git pull plus a re-run of the local installer, so it has to fail

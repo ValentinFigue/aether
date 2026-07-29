@@ -12,6 +12,46 @@ whetstone  →  bonsai  →  temper  →  cairn
 Each plugin covers one stage. The hooks fire in this order on `git commit`.
 A single bypass (`# aether:skip`) silences all four.
 
+A fifth plugin, **trellis**, sits outside the lifecycle: it has no hook and no
+gate, and `/draft-config` writes the config the other four read.
+
+---
+
+## Configuration
+
+One file per scope: `~/.aether/config` globally, `.aether/config` in a project,
+with an `[<section>]` per plugin. Values resolve **per key**, so a project that
+sets one threshold keeps the global value of every other.
+
+```bash
+aether config show [<section>]        # resolved values, and where each came from
+aether config explain <section>.<key> # one key in full
+aether config doctor                  # unknown keys, dead paths, trust state
+aether config set temper.auto_nudge_lines 400
+```
+
+Two sections describe the repository rather than a plugin: `[project]` is things
+to run (`test`, `lint`, `typecheck`, `build`, `coverage`), `[git]` is things to
+write (`scopes`, `types`, `ticket`, `trailers`, `base`).
+
+Prose for the critics goes in `rules.md` beside it, one section per command.
+
+### Trust
+
+`[project]` commands and `.aether/rules.md` are **ignored until the project is
+trusted** — the two things a repo can do to a machine, one by being executed and
+one by reaching a critic's context. Everything else applies immediately.
+
+```bash
+aether trust           # shows what you are consenting to, then records it
+aether trust status    # none | ok | changed
+```
+
+Hand-editing either file asks again; `aether config set` re-hashes automatically.
+
+If a critic reports that project rules were skipped, that is this — say so in the
+report rather than reviewing with less context than the file implies.
+
 ---
 
 ## Planning discipline (whetstone)

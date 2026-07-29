@@ -1,6 +1,6 @@
 # aether
 
-Aether binds bonsai, whetstone, temper, and cairn into a single coordinated suite — one repo, one install, one bypass convention, one hook that knows the order of things.
+Aether binds bonsai, whetstone, temper, and cairn into a single coordinated suite — one repo, one install, one config, one bypass convention, one hook that knows the order of things. A fifth plugin, trellis, writes the config the other four read.
 
 ---
 
@@ -27,6 +27,7 @@ Since 1.0.0 all four plugins live in this repository, so setting up a new machin
 | [bonsai](plugins/bonsai/) | Build | Nudges toward AST tools (pyrename, tsmove, pyfindrefs) instead of sed/grep/mv on source files |
 | [temper](plugins/temper/) | Review | Blocks large/critical commits and pushes until `/critique-diff` has been run; `/critique-pr` reviews a whole PR before merge |
 | [cairn](plugins/cairn/) | Ship | Nudges toward `/draft-commit`, `/draft-pr`, and `/draft-changelog` at every git boundary; `/draft-pr --apply` pushes the description to the PR |
+| [trellis](plugins/trellis/) | Setup | `/draft-config` surveys the repo and writes the config the other four read. No hook, no gate — it runs when you ask |
 
 ---
 
@@ -127,6 +128,10 @@ manifests  ──▶  bin/aether (engine)  ──▶  ~/.claude/commands/
 Write a manifest and put the assets beside it. There is no installer to write —
 `aether install <name>` and `aether uninstall <name>` work from the manifest
 alone, and the plugin appears in `aether status` because it exists.
+
+[trellis](plugins/trellis/) is the proof: a manifest and one command file, with
+no `install.sh` and no `uninstall.sh`. If the engine needed one, trellis could
+not be installed at all, which is asserted in the test suite.
 
 ---
 
@@ -275,6 +280,28 @@ project  [temper] auto_nudge_lines: 400
 resolved [temper] auto_nudge_lines: 400   (project)
                   severity: red, yellow   (global)
 ```
+
+### Letting trellis write it
+
+`[project]` is the section that upgrades Coverage from inferring to measuring, and
+it is also the section nobody fills in — writing five shell commands by hand is
+exactly the kind of task that gets postponed.
+
+```bash
+/draft-config          # detect, ask about the gaps, write .aether/config
+```
+
+trellis looks at **CI workflows first**: a `run:` line in
+`.github/workflows/*.yml` is a command that provably works in a clean checkout,
+because someone maintains it and it fails loudly when it rots. Manifest scripts
+come second and are noisier — this repository's own `package.json` offers
+`test:watch`, which a critic must never run. It reads the repo last, for commit
+sizes and the git conventions actually in use.
+
+Every key it writes carries a comment naming where the value came from, so a
+detected command is distinguishable from a guess. It never overwrites a key you
+have set, never selects a watch-mode or deploy script, and never runs what it
+detects — that is what `aether trust` is for, and the report says so.
 
 ### Knowing what to change
 

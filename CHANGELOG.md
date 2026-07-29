@@ -54,6 +54,16 @@ number. Their individual histories are preserved under
   `/critique-pr` stops treating `gh pr checks` as a proxy for having verified
   anything — an empty check list is not a passing one — and runs `build` itself
   when the branch is checked out.
+- **trellis** — a fifth plugin, and the proof that adding one now needs a
+  manifest and assets: it ships no `install.sh` and no `uninstall.sh`, so if the
+  engine needed one it could not be installed at all. Asserted in the tests.
+  Its one command, `/draft-config`, surveys the repo and writes the config the
+  other four read — CI workflows first, because a `run:` line provably works in
+  a clean checkout, then manifests, then the repo itself for commit sizes and
+  the git conventions actually in use. Every key carries a comment naming its
+  source, existing values are never overwritten, and watch-mode, server and
+  deploy scripts are never selected — a watch script would hang a critic
+  indefinitely. It writes commands but never runs them, and says so.
 - `aether rules` — prints the prose the critics will read, global then project,
   with its own trust state stated in the output.
 - `tests/test_config.sh` — 70 assertions on per-key merge, schema completeness,
@@ -76,6 +86,10 @@ number. Their individual histories are preserved under
 - The install manifest moves from `~/.claude/aether.manifest` to
   `<root>/manifest`.
 - `aether enable`/`disable` write one sectioned file instead of four.
+- Two tests stopped hardcoding the four plugin names — the palette check now
+  derives a command's owning plugin from its path, and the enable/disable checks
+  count the manifests. Adding a plugin should not fail a test about something
+  else.
 
 ### Fixed
 

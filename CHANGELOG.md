@@ -116,6 +116,18 @@ number. Their individual histories are preserved under
 - The gate count printed after install used `ls`; it now uses a glob, so the
   message is right on a machine stripped down to bash and coreutils.
 - `aether uninstall` left `aether-config.sh` orphaned in the hook directory.
+- **The jq backend errored on a `settings.json` with no `hooks` key** —
+  `with_entries` on null is an error, not a no-op — so a jq-only user with a
+  permissions-only settings.json got `null (null) has no keys` on stderr and the
+  stale-hook cleanup silently did not happen. All three backends now produce
+  byte-identical output, and a phase aether does not manage (`SessionStart`) is
+  preserved.
+- **Trust now fails closed with no SHA-256 available.** The first version fell
+  back to `cksum`, which is CRC32 — cheap enough to collide that someone able to
+  change a trusted repo's config could keep the checksum and keep the trust.
+  `openssl dgst` was added as a third option, and where none exists the project
+  reads as untrusted and says why. Losing the feature is the right trade against
+  losing the guarantee.
 
 ### Notes
 

@@ -621,14 +621,17 @@ console.log(JSON.stringify(s, null, 2));
 JSEOF
     ;;
    jq)
+    # `.hooks` is absent in a settings.json that has only permissions, and
+    # with_entries on null is an error, not a no-op — so guard on the type and
+    # rewrite the two phases in place rather than rebuilding the object.
     jq --arg n "$needle" '
-      .hooks |= (
-        with_entries(
-          select(.key == "PreToolUse" or .key == "PostToolUse")
-          | .value |= ([ .[] | .hooks |= [ .[] | select((.command // "") | contains($n) | not) ] ]
-                       | [ .[] | select((.hooks | length) > 0) ])
-        ) + (with_entries(select(.key != "PreToolUse" and .key != "PostToolUse")))
-      )' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+      if (.hooks | type) == "object" then
+        .hooks |= with_entries(
+          if (.key == "PreToolUse" or .key == "PostToolUse")
+          then .value |= ([ .[] | .hooks |= [ .[] | select((.command // "") | contains($n) | not) ] ]
+                          | map(select((.hooks | length) > 0)))
+          else . end)
+      else . end' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
     ;;
    *) return 1 ;;
   esac
@@ -1325,6 +1328,10 @@ EOKEYS
 
   if [ -f .aether/config ] || [ -f .aether/rules.md ]; then
     case "$(aether_trust_state)" in
+      nohash)
+        problems=$((problems + 1))
+        printf '  ! no SHA-256 on this machine — nothing can be trusted\n'
+        printf '      install shasum, sha256sum or openssl\n' ;;
       changed)
         problems=$((problems + 1))
         printf '  ! .aether/ changed since it was trusted\n'
@@ -1476,11 +1483,16 @@ cmd_trust() {
       case "$st" in
         ok)      printf '  [project] commands and rules.md are in use.\n' ;;
         changed) printf '  Edited since it was trusted — both are being IGNORED.\n' ;;
+        nohash)  printf '  No SHA-256 available (shasum, sha256sum or openssl).\n'
+                 printf '  Trust cannot be verified, so nothing is trusted.\n' ;;
         *)       printf '  Untrusted — [project] commands and rules.md are being ignored.\n' ;;
       esac ;;
     *)
       [ -f .aether/config ] || [ -f .aether/rules.md ] || {
         printf 'Nothing to trust: this project has no .aether/config or .aether/rules.md.\n'; return 1; }
+      [ "$(aether_trust_state)" = nohash ] && {
+        printf 'Cannot trust: no SHA-256 available (shasum, sha256sum or openssl).\n'
+        printf 'Trust is a content hash, and a weaker one would not be trust.\n'; return 1; }
       printf 'Trusting %s\n' "$(pwd -P)"
       _trust_preview
       printf '\n'

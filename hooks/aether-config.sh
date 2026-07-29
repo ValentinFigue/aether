@@ -108,9 +108,13 @@ aether_cfg_keys() {
 
 aether_trust_file() { printf '%s/trusted' "$(aether_root global)"; }
 
-# Content hash of everything a project can say to us. Three hashers so this
-# works on a machine with none of the usual ones; the value only ever has to be
-# compared with itself.
+# Content hash of everything a project can say to us.
+#
+# Deliberately no cksum fallback. cksum is CRC32, and the whole point of the hash
+# is that an edit cannot pass for the version you approved — a 32-bit checksum is
+# cheap to collide, so someone able to change a trusted repo's config could keep
+# the checksum and keep the trust. Returning empty here fails CLOSED: the project
+# reads as untrusted, which loses a feature rather than the guarantee.
 aether_hash_project() {
   local data
   data=$( { cat .aether/config .aether/rules.md 2>/dev/null; } )
@@ -119,8 +123,10 @@ aether_hash_project() {
     printf '%s' "$data" | shasum -a 256 | cut -d' ' -f1
   elif command -v sha256sum >/dev/null 2>&1; then
     printf '%s' "$data" | sha256sum | cut -d' ' -f1
+  elif command -v openssl >/dev/null 2>&1; then
+    printf '%s' "$data" | openssl dgst -sha256 | sed 's/^.*= //'
   else
-    printf '%s' "$data" | cksum | tr -d ' '
+    return 0
   fi
 }
 
@@ -130,6 +136,7 @@ aether_hash_project() {
 #           downgrading to global would hide the fact that something changed.
 aether_trust_state() {
   [ -f .aether/config ] || [ -f .aether/rules.md ] || { printf 'none'; return 0; }
+  [ -n "$(aether_hash_project)" ] || { printf 'nohash'; return 0; }
   local f recorded here
   f=$(aether_trust_file)
   [ -f "$f" ] || { printf 'none'; return 0; }

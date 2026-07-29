@@ -274,6 +274,24 @@ assert_eq "touch PWNED" "$(at config get project.test)" "…and [project] still 
 at trust forget >/dev/null
 assert_eq "" "$(at config get project.test)" "trust forget revokes it"
 
+# With no SHA-256 available, trust must fail CLOSED. The alternative considered
+# was a cksum fallback, but cksum is CRC32: someone able to change a trusted
+# repo's config could keep the checksum and keep the trust. Losing the feature is
+# the right trade against losing the guarantee.
+NOHASH=$(mk); mkdir -p "$NOHASH/bin"
+for t in bash awk sed grep cat cut ls mkdir rm mv cp find printf tr wc head sort uniq basename dirname; do
+  src=$(command -v "$t" 2>/dev/null) && [ -x "$src" ] && ln -sf "$src" "$NOHASH/bin/$t"
+done
+out=$( cd "$PT" && env -i HOME="$HT" PATH="$NOHASH/bin" bash "$CLI" trust status 2>&1 )
+assert_contains "$out" "nohash"    "no SHA-256 is a distinct trust state"
+out=$( cd "$PT" && env -i HOME="$HT" PATH="$NOHASH/bin" bash "$CLI" trust 2>&1 )
+assert_contains "$out" "Cannot trust" "trust refuses rather than using a weak hash"
+got=$( cd "$PT" && env -i HOME="$HT" PATH="$NOHASH/bin" bash "$CLI" config get project.test 2>&1 )
+case "$got" in
+  *"touch PWNED"*) fail "no hash means nothing is trusted" "[project] resolved anyway" ;;
+  *) pass "no hash means nothing is trusted" ;;
+esac
+
 # A project that only sets thresholds has nothing to consent to.
 HT2=$(mk); PT2=$(mk); mkdir -p "$HT2/.aether" "$PT2/.aether"
 printf '[temper]\nseverity: red\n' > "$PT2/.aether/config"

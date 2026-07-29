@@ -633,16 +633,58 @@ cmd_version() {
   return 0
 }
 
+# ── aether hook enable|disable <plugin> ──────────────────────────────────────
+# The suite had two disable models: `enable`/`disable` writes `enabled: false`
+# to a config file the gate then reads, while bonsai's enable-hook/disable-hook
+# deregistered the hook outright. Both are useful — one is a soft mute, the
+# other stops the hook being invoked at all — so both exist, for every plugin.
+cmd_hook() {
+  local action="${1:-}" plugin="${2:-}" scope="${3:-global}"
+  case "$action" in
+    enable|disable) ;;
+    *) printf 'Usage: aether hook enable|disable <plugin>\n'; return 1 ;;
+  esac
+  [ -n "$plugin" ] || { printf 'Which plugin?\n'; return 1; }
+  local gates; gates=$(_gates_dir "$scope")
+  local g="$gates/enforce-$plugin.sh"
+  if [ "$action" = disable ]; then
+    [ -f "$g" ] || { printf '  %s gate is already not installed\n' "$plugin"; return 0; }
+    mv "$g" "$g.disabled" && printf '  ✓ %s gate disabled (enforce-suite.sh will skip it)\n' "$plugin"
+  else
+    if [ -f "$g.disabled" ]; then
+      mv "$g.disabled" "$g" && printf '  ✓ %s gate re-enabled\n' "$plugin"
+    else
+      local repo; repo=$(_repo_root) || return 1
+      _op_copy "$repo/plugins/$plugin/hooks/enforce-$plugin.sh" "$g" \
+        && printf '  ✓ %s gate enabled\n' "$plugin"
+    fi
+  fi
+}
+
 cmd_uninstall() {
   local scope="local"
   local clean_claude_md=false
+  local want=""
 
   for arg in "$@"; do
     case "$arg" in
       global|--global) scope="global" ;;
       --claude-md)     clean_claude_md=true ;;
+      -*)              ;;
+      *)               want="$want $arg" ;;
     esac
   done
+
+  # Named plugins: remove just those, through the engine, leaving the suite in
+  # place. `aether uninstall` with no plugin removes the suite itself, below.
+  if [ -n "$want" ]; then
+    local p
+    for p in $want; do
+      printf 'Removing %s (%s)...\n' "$p" "$scope"
+      _engine_uninstall "$p" "$scope"
+    done
+    return 0
+  fi
 
   # Every path below is derived from the scope. The hook, gates, CLI and
   # manifest paths used to be hardcoded to the global locations regardless of
@@ -882,11 +924,38 @@ shift || true
 case "$COMMAND" in
   install)   cmd_install "$@" ;;
   status)    cmd_status ;;
+  hook)      cmd_hook "$@" ;;
   enable)    cmd_enable "$@" ;;
   disable)   cmd_disable "$@" ;;
   update)    cmd_update ;;
   version|--version|-V) cmd_version ;;
   uninstall) cmd_uninstall "$@" ;;
   help|--help|-h) usage ;;
-  *) printf 'Unknown command: %s\n\n' "$COMMAND"; usage; exit 1 ;;
+  *)
+    # `aether cairn status` — the shims exec this, so one implementation serves
+    # both `cairn status` and `aether cairn status`.
+    if _plugins_available 2>/dev/null | grep -qx "$COMMAND"; then
+      _PLUGIN="$COMMAND"; sub="${1:-status}"; shift || true
+      case "$sub" in
+        status)    cmd_status "$_PLUGIN" ;;
+        enable)    cmd_enable "$@" ;;
+        disable)   cmd_disable "$@" ;;
+        install)   cmd_install "$_PLUGIN" "$@" ;;
+        uninstall) cmd_uninstall "$_PLUGIN" "$@" ;;
+        # Updating one plugin means reinstalling it from the clone, which also
+        # prunes any command file it no longer ships. `aether update` (no
+        # plugin) is the suite-level git pull.
+        #
+        # The recorded scope is passed explicitly. Defaulting to local meant
+        # `cairn update` run from any directory quietly performed a *local*
+        # install there — the same scope-inheritance bug that hit
+        # `aether uninstall` and the three plugin updates before it.
+        update)    cmd_install "$_PLUGIN" "$(_manifest_get scope)" "$@" ;;
+        hook)      cmd_hook "$@" "$_PLUGIN" ;;
+        help|--help|-h) usage ;;
+        *) printf 'Unknown %s subcommand: %s\n' "$_PLUGIN" "$sub"; exit 1 ;;
+      esac
+      exit $?
+    fi
+    printf 'Unknown command: %s\n\n' "$COMMAND"; usage; exit 1 ;;
 esac

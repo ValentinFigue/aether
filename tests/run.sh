@@ -11,6 +11,20 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$REPO" || exit 1
 
+# A local install inside the repo silently corrupts every test. _manifest_get
+# prefers the local manifest and resolves it against CWD, not $HOME, so a stray
+# .claude/aether.manifest here overrides each test's throwaway HOME — which is
+# how `aether status` and `aether update` assertions started reading the
+# developer's own install. Fail loudly rather than produce quiet nonsense.
+for stray in .claude/aether.manifest .bin/aether .claude/hooks/enforce-suite.sh; do
+  if [ -e "$stray" ]; then
+    printf '\033[31mrefusing to run: %s exists\033[0m\n' "$stray" >&2
+    printf 'A local aether install in this repo overrides the tests fake HOME.\n' >&2
+    printf 'Remove it first:  rm -rf .bin .claude/aether.manifest .claude/hooks\n' >&2
+    exit 1
+  fi
+done
+
 filter="${1:-}"
 failed=0
 ran=0

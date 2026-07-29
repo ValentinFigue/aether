@@ -45,7 +45,7 @@ version, one installer, no network access at install time.
   CLIs and hooks from `raw.githubusercontent.com`; everything now resolves from
   the clone. This also removes a `curl | bash` pipeline from the install path
 - **`hooks/enforce-suite.sh` is a dispatcher, not a rulebook** — 467 lines down
-  to 148. It carried its own copy of all four gates, so every rule existed
+  to 155. It carried its own copy of all four gates, so every rule existed
   twice; it now sources each plugin's hook with `SUITE_MODE=1` and calls the
   `gate_<plugin>` function it defines
 - Each plugin hook is dual-mode: one gate function, invoked either by its own

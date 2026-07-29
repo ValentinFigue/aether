@@ -39,7 +39,24 @@ number. Their individual histories are preserved under
   every gate. There were six independent readers of this format; two of the four
   plugin copies were missing `head -1`, so a duplicated key resolved to a
   multi-line value in half the suite.
-- `tests/test_config.sh` — 52 assertions on per-key merge, schema completeness,
+- **Trust, on direnv's model.** `~/.aether/trusted` maps a project path to a
+  content hash of its `config` plus `rules.md`. Until a project is trusted its
+  `[project]` run-commands and its `rules.md` are ignored — the two things in a
+  repo that can act on your machine, one by being executed and one by reaching a
+  critic's context. Everything else in a project's config applies immediately.
+  `aether trust` prints the commands and the prose before recording anything.
+  Hand-editing either file asks again, loudly, rather than silently downgrading
+  to global; `aether config set` re-hashes automatically.
+- **Critics that measure instead of infer.** `/critique-diff` gains a measurement
+  pass that runs the configured `typecheck`, `lint`, `test` and `coverage`, and
+  Correctness and Coverage start from that output. Each names the command it ran
+  and its exit status, and says plainly when nothing was configured.
+  `/critique-pr` stops treating `gh pr checks` as a proxy for having verified
+  anything — an empty check list is not a passing one — and runs `build` itself
+  when the branch is checked out.
+- `aether rules` — prints the prose the critics will read, global then project,
+  with its own trust state stated in the output.
+- `tests/test_config.sh` — 70 assertions on per-key merge, schema completeness,
   `doctor`, comment-preserving writes, pre-migration fallback, and migration
   including its idempotence.
 

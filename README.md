@@ -229,7 +229,9 @@ plugin, and they split on a clear line: **`[project]` is things to run,
 ### `[project]` — commands the critics execute
 
 Shell commands. This is what upgrades Coverage from *inferring* that tests exist
-to actually running them.
+to actually running them — so it needs `aether trust` before it takes effect.
+Each critic names the command it ran and its exit status, and says plainly when
+it could not run anything rather than implying a check happened.
 
 | Key | What changes if you set it |
 |---|---|
@@ -348,6 +350,50 @@ Prose **concatenates** rather than overriding: global first, then project.
 That differs from `config` deliberately — losing your global writing rules
 because a repo added one line would be the wrong default.
 
+### Trust
+
+A project's config can set thresholds and pick critics the moment you clone it —
+none of that can execute anything. Two things can, and both wait for your
+consent:
+
+| What | Why it waits |
+|---|---|
+| `[project]` run-commands | a critic would execute them |
+| `rules.md` prose | it reaches a critic's context, which is an injection vector with no log |
+
+Until you trust a project, those two are ignored, global config and global prose
+are used instead, and **the critic says so in its report header** — a review with
+less context than the file suggests is worse than one with no rules at all.
+
+```bash
+aether trust           # show what you are consenting to, then record it
+aether trust status    # none | ok | changed
+aether trust forget    # revoke
+```
+
+`aether trust` prints the commands and the prose *before* recording anything,
+because otherwise it is a formality:
+
+```
+$ aether trust
+Trusting /Users/you/Code/thing
+
+  Commands the critics would run:
+    test        uv run pytest
+    typecheck   npx tsc --noEmit
+
+  Prose that would reach a critic (.aether/rules.md, 4 line(s)):
+    [critique-diff]
+    We use event sourcing — flag anything that bypasses the event log.
+```
+
+Trust is a content hash, so **hand-editing either file asks again** — loudly,
+rather than silently falling back to global, which would hide that anything
+changed. Edits made through `aether config set` re-hash automatically, because
+you made them through the tool. This is direnv's model and the reason it is safe.
+
+Global config and global prose are always trusted: you wrote them.
+
 ### Editing by hand
 
 ```bash
@@ -416,6 +462,9 @@ aether config explain <section>.<key>    One key in full
 aether config doctor                     Validate: unknown keys, dead paths
 aether config set|unset <section>.<key> [value] [global]
 aether config path|edit [global]         Print or open the config file
+aether trust [status|forget]             Allow this project's [project] commands
+                                         and rules.md to be used
+aether rules                             Print the prose the critics will read
 aether migrate                           Move a pre-1.0 layout into ~/.aether/
 aether enable  [local|global]            Enable all plugins
 aether disable [local|global]            Disable all plugins

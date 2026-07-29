@@ -28,6 +28,9 @@ Usage:
   aether config set <section>.<key> <v> [global]
   aether config path|edit [global]      Print or open the config file
   aether migrate                        Move a pre-1.0 layout into ~/.aether/
+  aether trust [status|forget]          Allow this project's [project] commands
+                                        and rules.md to be used
+  aether rules                          Print the prose the critics will read
   aether enable  [local|global]         Enable all plugins (default: local)
   aether disable [local|global]         Disable all plugins
   aether update                         git pull the clone and re-run its installer
@@ -1320,6 +1323,19 @@ EOKEYS
     printf '  ✗ aether-config.sh not found — every value is falling back to its default\n'
   }
 
+  if [ -f .aether/config ] || [ -f .aether/rules.md ]; then
+    case "$(aether_trust_state)" in
+      changed)
+        problems=$((problems + 1))
+        printf '  ! .aether/ changed since it was trusted\n'
+        printf '      [project] commands and rules.md are being ignored — review, then: aether trust\n' ;;
+      none)
+        problems=$((problems + 1))
+        printf '  ! .aether/ is untrusted\n'
+        printf '      [project] commands and rules.md are being ignored — review, then: aether trust\n' ;;
+    esac
+  fi
+
   printf '  ✓ %s key(s) resolved\n' "$resolved"
   [ "$problems" -eq 0 ] && printf '\nNo problems found.\n'
   return 0
@@ -1358,13 +1374,20 @@ cmd_config() {
       [ -n "$plugin" ] || printf 'Warning: no plugin declares %s.%s — it will be ignored.\n' "$section" "$key"
       _cfg_set "$(_cfg_file "$scope")" "$section" "$key" "$value" \
                "$([ -n "$plugin" ] && _mf "$plugin" "config.$key.doc")"
-      printf '  ✓ %s.%s = %s  (%s)\n' "$section" "$key" "$value" "$(_cfg_file "$scope")" ;;
+      printf '  ✓ %s.%s = %s  (%s)\n' "$section" "$key" "$value" "$(_cfg_file "$scope")"
+      # You made this change through aether, so it does not cost a re-prompt.
+      # Hand-editing does, which is the whole point of the hash.
+      [ "$scope" = local ] && [ "$(aether_trust_state)" != none ] && _trust_record
+      return 0 ;;
     unset)
       local raw="${1:-}"; [ -n "$raw" ] || { printf 'Usage: aether config unset <section>.<key> [global]\n'; return 1; }
       shift
       local parsed; parsed=$(_split_key "$raw")
-      _cfg_unset "$(_cfg_file "$(_cfg_scope_from_args "$@")")" "${parsed%% *}" "${parsed#* }"
-      printf '  ✓ unset %s\n' "$raw" ;;
+      local uscope; uscope=$(_cfg_scope_from_args "$@")
+      _cfg_unset "$(_cfg_file "$uscope")" "${parsed%% *}" "${parsed#* }"
+      printf '  ✓ unset %s\n' "$raw"
+      [ "$uscope" = local ] && [ "$(aether_trust_state)" != none ] && _trust_record
+      return 0 ;;
     *) printf 'Unknown: aether config %s\n\nTry: show, explain, doctor, path, edit, get, set, unset\n' "$sub"; return 1 ;;
   esac
 }
@@ -1392,6 +1415,79 @@ _seed_config() {
 $(_schema_all)
 EOSEED
   } > "$dest"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TRUST
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _trust_record — write (or refresh) this project's hash
+_trust_record() {
+  local f here h tmp
+  f=$(aether_trust_file); here=$(pwd -P); h=$(aether_hash_project)
+  _dry && { printf '  [dry-run] would trust %s\n' "$here"; return 0; }
+  mkdir -p "$(dirname "$f")"; [ -f "$f" ] || : > "$f"
+  tmp="$f.tmp"
+  awk -v p="$here" '{ i = index($0, " "); if (substr($0, i + 1) != p) print }' "$f" > "$tmp"
+  printf '%s %s\n' "$h" "$here" >> "$tmp"
+  mv "$tmp" "$f"
+}
+
+_trust_forget() {
+  local f here tmp
+  f=$(aether_trust_file); here=$(pwd -P)
+  [ -f "$f" ] || return 0
+  _dry && { printf '  [dry-run] would untrust %s\n' "$here"; return 0; }
+  tmp="$f.tmp"
+  awk -v p="$here" '{ i = index($0, " "); if (substr($0, i + 1) != p) print }' "$f" > "$tmp"
+  mv "$tmp" "$f"
+}
+
+# What the user is consenting to, shown before they consent to it. Anything else
+# would make `aether trust` a formality.
+_trust_preview() {
+  local any=0 v k
+  if [ -f .aether/config ]; then
+    for k in test lint format typecheck build coverage; do
+      v=$(aether_cfg_read .aether/config project "$k")
+      [ -n "$v" ] || continue
+      [ "$any" -eq 0 ] && { printf '\n  Commands the critics would run:\n'; any=1; }
+      printf '    %-11s %s\n' "$k" "$v"
+    done
+  fi
+  if [ -f .aether/rules.md ]; then
+    printf '\n  Prose that would reach a critic (.aether/rules.md, %s line(s)):\n' \
+      "$(awk 'END{print NR}' .aether/rules.md)"
+    awk 'NR <= 12 { printf "    %s\n", $0 } END { if (NR > 12) printf "    … %d more line(s)\n", NR - 12 }' .aether/rules.md
+    any=1
+  fi
+  [ "$any" -eq 0 ] && printf '\n  Nothing executable and no prose — this project only sets thresholds.\n'
+  return 0
+}
+
+cmd_trust() {
+  local sub="${1:-set}"
+  case "$sub" in
+    --forget|forget|remove)
+      _trust_forget; printf '  ✓ %s is no longer trusted\n' "$(pwd -P)" ;;
+    status)
+      local st; st=$(aether_trust_state)
+      printf '  %s: %s\n' "$(pwd -P)" "$st"
+      case "$st" in
+        ok)      printf '  [project] commands and rules.md are in use.\n' ;;
+        changed) printf '  Edited since it was trusted — both are being IGNORED.\n' ;;
+        *)       printf '  Untrusted — [project] commands and rules.md are being ignored.\n' ;;
+      esac ;;
+    *)
+      [ -f .aether/config ] || [ -f .aether/rules.md ] || {
+        printf 'Nothing to trust: this project has no .aether/config or .aether/rules.md.\n'; return 1; }
+      printf 'Trusting %s\n' "$(pwd -P)"
+      _trust_preview
+      printf '\n'
+      _trust_record
+      printf '  ✓ trusted. Re-run `aether trust` after editing either file by hand;\n'
+      printf '    changes made with `aether config set` re-hash automatically.\n' ;;
+  esac
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1706,6 +1802,8 @@ case "$COMMAND" in
   enable)    cmd_enable "$@" ;;
   disable)   cmd_disable "$@" ;;
   config)    cmd_config "$@" ;;
+  trust)     cmd_trust "$@" ;;
+  rules)     aether_rules ;;
   migrate)   for _s in global local; do _migrate_layout "$_s"; _retire_legacy_hooks "$_s"; done
              printf 'Migration complete.\n' ;;
   update)    cmd_update ;;

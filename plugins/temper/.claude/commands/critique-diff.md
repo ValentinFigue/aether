@@ -90,11 +90,58 @@ If patterns are found, print a warning block at the top of the output and includ
 
 ---
 
+## Measurement pass (run before the critics)
+
+Everything below this line is optional and depends on `[project]` config. When
+none of it is set, say so once in the report and fall back to reading the diff —
+never pretend a check ran.
+
+`[project]` holds shell commands, so it is only in effect once the project is
+trusted. Resolve it the normal way; an untrusted project yields nothing here:
+
+```bash
+aether config show project --raw 2>/dev/null || true
+```
+
+Also load the prose rules, which reports its own trust state:
+
+```bash
+aether rules 2>/dev/null || true
+```
+
+If the output says project `rules.md` was **not** read, put that in the report
+header verbatim — the user is getting less context than the file suggests, and a
+critic that stays silent about it is worse than one that has no rules at all.
+
+Then run what is configured, each in its own Bash call, and keep the output:
+
+| Key | Run it as | Feeds |
+|---|---|---|
+| `typecheck` | as given | Correctness |
+| `lint` / `format` | as given | Correctness |
+| `test` | as given | Coverage |
+| `coverage` | as given, compare against `coverage_min` | Coverage |
+
+Rules for this pass:
+
+- **Report what you ran.** Name the command and its exit status. A critic that
+  says "tests pass" without naming the command it ran is guessing.
+- A command that fails to start (binary missing) is **not** a finding about the
+  diff. Report it once as a configuration problem and move on.
+- Never invent a command. If `test` is unset, Coverage reads the diff as before
+  and the report says the suite was not run.
+- Never run anything not listed above, and never a watch-mode script.
+
+---
+
 ## Critic 1 — Correctness (run if: `correctness` selected or no arguments)
 
 You are a senior engineer focused on logic and runtime safety.
 
-Review the diff for:
+**If the measurement pass ran `typecheck`, `lint` or `format`, start from their
+output.** A real violation with a file and line beats an inferred one. Report
+each with the command that produced it. Then review the diff for what a tool
+cannot see:
 - Logic errors, incorrect conditionals, off-by-one mistakes
 - Null/undefined dereferences and missing nil checks
 - Unhandled error paths and exception cases
@@ -138,6 +185,11 @@ Rate each finding: 🔴 blocker / 🟡 significant / 🟢 minor
 ## Critic 4 — Coverage (run if: `coverage` selected or no arguments)
 
 You are a QA engineer and testing advocate.
+
+**If the measurement pass ran `test`, start from the result.** A failing test is
+a 🔴 with the failure output quoted — not a judgement call. If `coverage` ran and
+`coverage_min` is set, a figure below it is 🟡 with both numbers stated. If
+neither was configured, say so in one line and infer from the diff as below.
 
 Review the diff for:
 - New code paths not covered by tests (functions, branches, error handlers)

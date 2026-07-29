@@ -331,6 +331,7 @@ _engine_install() {
   fi
 
   local cdir; cdir=$(_commands_dir "$scope")
+  local asset_failed=0
 
   # Commands, and the ones this plugin used to ship. An orphaned command file is
   # not inert: it stays in the palette and still runs the stale copy.
@@ -339,10 +340,10 @@ _engine_install() {
     [ -f "$cdir/$c" ] || continue
     cp "$cdir/$c" "$cdir/$c.bak" 2>/dev/null && _op_rm "$cdir/$c" >/dev/null \
       && printf '  ✓ removed superseded %s (kept a .bak)\n' "$cdir/$c" \
-      || printf '  ! could not remove superseded %s\n' "$cdir/$c"
+      || printf '  ! Could not remove superseded %s\n' "$cdir/$c"
   done
   for c in $(_mf "$plugin" commands); do
-    _op_copy "$proot/.claude/commands/$c" "$cdir/$c" || true
+    _op_copy "$proot/.claude/commands/$c" "$cdir/$c" || asset_failed=1
   done
 
   # Skills.
@@ -357,9 +358,9 @@ _engine_install() {
     local cli_scopes; cli_scopes=$(_mf "$plugin" cli.scopes); cli_scopes="${cli_scopes:-local global}"
     case " $cli_scopes " in *" $scope "*)
       if [ "$(_mf "$plugin" cli.strategy)" = link ]; then
-        _op_link "$proot/bin/$cli" "$(_cli_dir "$scope")/$cli" || true
+        _op_link "$proot/bin/$cli" "$(_cli_dir "$scope")/$cli" || asset_failed=1
       else
-        _op_copy "$proot/bin/$cli" "$(_cli_dir "$scope")/$cli" || true
+        _op_copy "$proot/bin/$cli" "$(_cli_dir "$scope")/$cli" || asset_failed=1
       fi ;;
     esac
   fi
@@ -377,6 +378,13 @@ _engine_install() {
 
   _engine_hooks "$plugin" "$scope" "$suite_mode" "$proot"
 
+  # A missing command file or CLI is a real failure, not a warning. The old
+  # installers reported success unconditionally, which is how a total failure
+  # still printed a green tick.
+  if [ "$asset_failed" -ne 0 ]; then
+    printf '  ✗ %s failed to install — an asset could not be written\n' "$plugin"
+    return 1
+  fi
   printf '  ✓ %s installed\n' "$plugin"
   return 0
 }
@@ -863,6 +871,8 @@ PYEOF
 
   # Tidy up directories the install created, but only if nothing else is in
   # them — a local install shares .claude/hooks/ with anything the user put there.
+  # plugin-hooks/ is created by the engine, so it is removed before its parent.
+  rmdir "$(_root "$scope")/plugin-hooks" 2>/dev/null || true
   rmdir "$(dirname "$hook_file")" 2>/dev/null || true
   [ "$scope" = "global" ] || rmdir .bin 2>/dev/null || true
 
@@ -964,6 +974,7 @@ cmd_install() {
       installed="$installed $p"
       [ -n "$(_mf "$p" mcp.bonsai-py.command)" ] && _json_mcp_sync "$p" "$repo/plugins/$p" add || true
     else
+      # 2 means "prerequisites missing, skipped" — not a failure.
       [ $? -eq 2 ] || failed=1
     fi
   done
@@ -986,10 +997,10 @@ cmd_install() {
 
   # Permissions, aggregated from the manifests of what actually installed.
   local add="Bash Read Write" drop=""
-  for p in $installed; do
-    add="$add $(_mf "$p" permissions)"
-    drop="$drop $(_mf "$p" legacy_permissions)"
-  done
+  for p in $installed; do add="$add $(_mf "$p" permissions)"; done
+  # Cleanup is unconditional: a stale permission outlives the plugin that wrote
+  # it, so scoping this to what installed *this run* would strand it forever.
+  for p in $(_plugins_available); do drop="$drop $(_mf "$p" legacy_permissions)"; done
   _json_sync_perms "$settings" "$add" "$drop" && printf '  ✓ permissions synced\n'
 
   _op_copy "$repo/bin/aether" "$(_cli_dir "$scope")/aether"

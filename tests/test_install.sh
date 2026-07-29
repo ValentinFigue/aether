@@ -83,8 +83,13 @@ suite "permissions"
 allow=$(jsonq "$S" '
 import json,sys
 print(" ".join(json.load(open(sys.argv[1])).get("permissions",{}).get("allow",[])))')
-assert_contains "$allow" "mcp__bonsai-py__*" "MCP permission uses the hyphen spelling"
-assert_contains "$allow" "mcp__bonsai-ts__*" "MCP permission uses the hyphen spelling (ts)"
+# Permissions come from the manifests of the plugins that actually installed.
+# This run used --no-bonsai, so bonsai's MCP permissions must be absent — the
+# old installer granted them unconditionally, for a plugin that was not there.
+case "$allow" in
+  *mcp__bonsai-py__*) fail "no MCP permission when bonsai is skipped" "granted anyway: $allow" ;;
+  *) pass "no MCP permission when bonsai is skipped" ;;
+esac
 case "$allow" in
   *mcp__bonsai_py__*) fail "underscore MCP permission is not written" "found in: $allow" ;;
   *) pass "underscore MCP permission is not written" ;;
@@ -128,7 +133,7 @@ assert_eq "1" "$n" "still exactly one aether CLAUDE.md block after re-install"
 allow=$(jsonq "$S" '
 import json,sys
 print(" ".join(json.load(open(sys.argv[1])).get("permissions",{}).get("allow",[])))')
-n=$(printf '%s' "$allow" | tr ' ' '\n' | grep -c 'mcp__bonsai-py__\*' || true)
+n=$(printf '%s' "$allow" | tr ' ' '\n' | grep -c '^Bash$' || true)
 assert_eq "1" "$n" "permissions are not duplicated on re-install"
 
 # ── migration from a pre-suite install ───────────────────────────────────────
@@ -196,7 +201,7 @@ env HOME="$H4" PATH="/usr/bin:/bin" bash "$REPO/install.sh" --global >"$H4/out.l
 e=$?
 assert_exit 0 "$e" "missing uv/node/npm skips bonsai without failing the suite"
 assert_contains "$(cat "$H4/out.log")" "bonsai: skipped" "the skip is reported"
-assert_contains "$(cat "$H4/out.log")" "plugins/bonsai/install.sh" "the skip explains how to finish later"
+assert_contains "$(cat "$H4/out.log")" "aether install bonsai" "the skip explains how to finish later"
 
 # ── no network ───────────────────────────────────────────────────────────────
 suite "offline"
@@ -495,7 +500,7 @@ if [ "${#RESULTS[@]}" -ge 2 ]; then
   # And the shared result must actually be correct, not merely consistent.
   assert_contains "$first_val" "enforce-suite.sh"  "all backends register the suite hook"
   assert_contains "$first_val" "post-cairn.sh"     "all backends preserve the PostToolUse hook"
-  assert_contains "$first_val" "mcp__bonsai-py__*" "all backends write the hyphen permission"
+  assert_contains "$first_val" "\"Bash\"" "all backends write the base permissions"
   assert_contains "$first_val" "/keep/me.sh"       "all backends leave unrelated hooks alone"
   case "$first_val" in
     *enforce-cairn*) fail "all backends strip the superseded PreToolUse hook" ;;

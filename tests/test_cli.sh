@@ -174,7 +174,17 @@ assert_exit 0 "$e" "local uninstall exits 0"
 for p in .claude/hooks/enforce-suite.sh .claude/hooks/gates .bin/aether .claude/aether.manifest; do
   [ -e "$p" ] && fail "local uninstall removed $p" || pass "local uninstall removed $p"
 done
-[ -d .claude/hooks ] && fail "empty .claude/hooks/ is tidied away" || pass "empty .claude/hooks/ is tidied away"
+# .claude/hooks/ is NOT expected to vanish. `aether uninstall` removes the suite
+# layer and deliberately leaves the plugins installed, so cairn's PostToolUse
+# hook is still registered and its file must survive under plugin-hooks/. What
+# must be gone is everything the suite itself owned.
+[ -e .claude/hooks/enforce-suite.sh ] && fail "suite hook removed from .claude/hooks/" \
+                                      || pass "suite hook removed from .claude/hooks/"
+[ -e .claude/hooks/gates ] && fail "gates/ removed from .claude/hooks/" \
+                           || pass "gates/ removed from .claude/hooks/"
+[ -f .claude/hooks/plugin-hooks/post-cairn.sh ] \
+  && pass "cairn's PostToolUse hook survives a suite uninstall" \
+  || fail "cairn's PostToolUse hook survives a suite uninstall"
 [ -d .bin ]          && fail "empty .bin/ is tidied away"          || pass "empty .bin/ is tidied away"
 
 [ -f "$H4/.claude/aether.manifest" ] \

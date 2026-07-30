@@ -35,8 +35,10 @@ scopes: cli, config, engine, hooks, install, manifests, readme, trellis, trust
 # Commit types in use → /draft-commit /critique-pr
 types: docs, feat, fix, perf, refactor, test
 # Trailers every commit carries → /draft-commit
-# 23 of the last 40 commits; the git-subtree-* trailers are import artefacts, not a convention.
-trailers: Co-Authored-By
+# Deliberately empty. Older commits here carry Co-Authored-By, which is why
+# /draft-config detected it — but the convention going forward is no attribution
+# trailer at all. See [draft-commit] in rules.md.
+trailers:
 # base is unset: origin/HEAD is already main, and /draft-pr auto-detects main and
 # master, so naming it here would only be noise.
 

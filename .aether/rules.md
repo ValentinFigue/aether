@@ -30,8 +30,18 @@ are what a user cannot easily undo. For any change to them, check that uninstall
 still reverses install, and that re-running install twice is a no-op — both have
 regressed here before.
 
+[draft-pr]
+Never add generation or attribution footers to a PR description — no "Generated
+with", no tool name, no bot emoji. The description is about the change, and a
+reader looking for why the code is the way it is does not need to be told what
+typed it.
+
 [draft-commit]
 Explain the mechanism, not the symptom. "X was broken, now fixed" is not useful;
 say what the code did, why that produced the observed behaviour, and why the fix
 addresses the cause. Bugs that produced plausible output rather than an error are
 worth saying so explicitly, because those are the ones tests miss.
+
+Never add attribution trailers — no `Co-Authored-By`, no "Generated with", no tool
+name. `[git] trailers` is empty for the same reason, so if a trailer appears, it did
+not come from this project's convention.

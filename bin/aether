@@ -24,6 +24,10 @@ Usage:
   aether status                         Show install state for all plugins
   aether config show [section]          Resolved values, where each came from
   aether config explain <section>.<key> One key in full
+  aether check [path...] [--all] [--raw]
+                                        Run this project's [project] commands,
+                                        per monorepo area
+  aether project for <file...>          Which areas those files belong to
   aether doctor [--fix] [--deep]        Check the install, config and trust
                                         against what the manifests declare
   aether config doctor                  Just the config and trust half
@@ -1317,8 +1321,44 @@ EOSCHEMA
 # `printf: write error: Broken pipe` on stderr — which then lands in whatever the
 # caller captured. macOS dies from SIGPIPE silently, so this passed locally and
 # failed in CI on both platforms' terms.
+# A `[project:<path>]` area declares the same keys as `[project]`, and `check.<name>`
+# is a command by construction rather than something a manifest can enumerate. Both
+# normalise here so `config show` and `config doctor` see one schema, not one per area.
+_schema_section() { case "$1" in project:*) printf project ;; *) printf '%s' "$1" ;; esac; }
+
+# The schema as displayed: every `project` row repeated once per declared area, plus
+# the `check.<name>` keys an area actually sets. `_schema_all` reads manifests and
+# cannot know about areas, which is why this is a layer on top rather than a change
+# to it — the manifests stay the single source for what a key means.
+_schema_expanded() {
+  local areas a section key plugin f rows checks
+  areas=$(_project_areas)
+  rows=$(_schema_all)
+  checks=$( for f in "${AETHER_HOME:-$HOME/.aether}/config" .aether/config; do
+      [ -f "$f" ] || continue
+      aether_cfg_keys "$f" | awk -F'|' '$1 ~ /^project(:|$)/ && $2 ~ /^check\./ { print $1 "|" $2 }'
+    done | sort -u )
+
+  # Everything that is not a project section, unchanged.
+  printf '%s\n' "$rows" | awk -F'|' '$1 != "project"'
+
+  # Then one complete block per area, so the display groups by area rather than
+  # interleaving areas within every key.
+  [ -n "$areas" ] || { printf '%s\n' "$rows" | awk -F'|' '$1 == "project"'; return 0; }
+  while IFS= read -r a; do
+    [ -n "$a" ] || continue
+    printf '%s\n' "$rows" | awk -F'|' -v a="$a" '$1 == "project" { print a "|" $2 "|" $3 }'
+    printf '%s\n' "$checks" | awk -F'|' -v a="$a" '$1 == a { print a "|" $2 "|temper" }'
+  done <<EOAREAS
+$areas
+EOAREAS
+  return 0
+}
+
 _schema_plugin_for() {   # section|key -> owning plugin
-  _schema_all | awk -F'|' -v s="$1" -v k="$2" '$1 == s && $2 == k && !f { print $3; f = 1 }'
+  local sec; sec=$(_schema_section "$1")
+  case "$sec|$2" in project\|check.*) printf temper; return 0 ;; esac
+  _schema_all | awk -F'|' -v s="$sec" -v k="$2" '$1 == s && $2 == k && !f { print $3; f = 1 }'
 }
 
 # Which layer supplied the live value: "layer|file|line", or "default||".
@@ -1344,6 +1384,19 @@ _split_key() {           # temper.auto_nudge_lines -> "temper auto_nudge_lines"
 
 _cfg_scope_from_args() { case " $* " in *" global "*|*" --global "*) printf global ;; *) printf local ;; esac; }
 
+# Is this section wanted? `project` selects every area in the human view, because
+# asking about the section should show the whole picture — but not in --raw, where
+# keys from two areas would collide in a flat key: value list.
+_cfg_show_wanted() {
+  local want="$1" section="$2" raw="$3"
+  [ -z "$want" ] && return 0
+  [ "$want" = "$section" ] && return 0
+  if [ "$want" = project ] && [ "$raw" != true ]; then
+    case "$section" in project:*) return 0 ;; esac
+  fi
+  return 1
+}
+
 cmd_config_show() {
   local want="${1:-}" values=false raw=false
   case " $* " in *" --values "*) values=true ;; esac
@@ -1357,23 +1410,23 @@ cmd_config_show() {
   if [ "$raw" = true ]; then
     local section key plugin val
     while IFS='|' read -r section key plugin; do
-      [ -n "$want" ] && [ "$want" != "$section" ] && continue
-      val=$(_cfg_get "$section" "$key")
+      _cfg_show_wanted "$want" "$section" "$raw" || continue
+      val=$(_cfg_area "$section" "$key")
       [ -z "$val" ] && val=$(_mf "$plugin" "config.$key.default")
       [ -n "$val" ] && printf '%s: %s\n' "$key" "$val"
     done <<EORAW
-$(_schema_all)
+$(_schema_expanded)
 EORAW
     return 0
   fi
 
   local last="" section key plugin val def origin layer file line doc used
   while IFS='|' read -r section key plugin; do
-    [ -n "$want" ] && [ "$want" != "$section" ] && continue
+    _cfg_show_wanted "$want" "$section" "$raw" || continue
     if [ "$section" != "$last" ]; then
       printf '\n[%s]\n' "${section:-suite}"; last="$section"
     fi
-    val=$(_cfg_get "$section" "$key")
+    val=$(_cfg_area "$section" "$key")
     def=$(_mf "$plugin" "config.$key.default")
     origin=$(_cfg_origin "$section" "$key")
     layer="${origin%%|*}"; file="${origin#*|}"; line="${file#*|}"; file="${file%%|*}"
@@ -1392,7 +1445,7 @@ EORAW
       [ -n "$used" ] && printf '      used by: %s\n' "$used"
     fi
   done <<EOSHOW
-$(_schema_all)
+$(_schema_expanded)
 EOSHOW
   printf '\n'
   [ "$values" = false ] && printf 'Edit with: aether config set <section>.<key> <value> [global]\n'
@@ -1443,7 +1496,9 @@ _doctor_config() {
     while IFS='|' read -r section key; do
       [ -n "$key" ] || continue
       # Reads to EOF for the same reason as _schema_plugin_for.
-      known=$(printf '%s\n' "$schema" | awk -F'|' -v s="$section" -v k="$key" '$1 == s && $2 == k && !f { print 1; f = 1 }')
+      known=$(printf '%s\n' "$schema" | awk -F'|' -v s="$(_schema_section "$section")" -v k="$key" \
+                '$1 == s && $2 == k && !f { print 1; f = 1 }')
+      case "$(_schema_section "$section")|$key" in project\|check.*) known=1 ;; esac
       if [ -n "$known" ]; then
         resolved=$((resolved + 1))
       else
@@ -1467,44 +1522,61 @@ EOKEYS
 
   # A [project] command whose binary is absent runs as nothing at all.
   #
+  # Walks every area, not just the root: in a monorepo the missing binary is usually
+  # one toolchain's — `bun` on a machine that only has node — and reporting it
+  # against `[project]` would name the wrong place. `check.*` is covered too, since
+  # those are commands by construction.
+  #
   # Every command position is checked, not just the first word. `git ls-files … |
   # xargs shellcheck` starts with `git`, which is always present, so checking only
   # the first word reported "no problems" on a machine with no shellcheck — the
   # exact silent skip this is here to catch. Runner prefixes have the same shape
   # in reverse: `uv run pytest` needs `uv`, and that *is* the first word.
-  local cmdkey val bin seg missing
-  for cmdkey in test lint format typecheck build coverage; do
-    val=$(_cfg_get project "$cmdkey"); [ -n "$val" ] || continue
-    missing=""
-    # Split on pipeline and list separators; the first word of each is a command.
-    while IFS= read -r seg; do
-      seg="${seg#"${seg%%[![:space:]]*}"}"        # strip leading whitespace
-      bin="${seg%% *}"
-      # A few wrappers put the real command in argument position, so the first
-      # word is never the thing that can be missing. `git ls-files | xargs
-      # shellcheck` is the shape that matters here: without this, the check saw
-      # `git`, said nothing, and shellcheck was silently skipped. Only wrappers
-      # whose next word must already be an executable are unwrapped — `npx tsc`
-      # and `uv run pytest` are deliberately not, since those fetch or resolve it.
-      while :; do
-        case "$bin" in
-          xargs|env|nice|nohup|sudo|time)
-            seg="${seg#"$bin"}"; seg="${seg#"${seg%%[![:space:]]*}"}"
-            while :; do case "$seg" in -*) seg="${seg#* }"; seg="${seg#"${seg%%[![:space:]]*}"}" ;; *) break ;; esac; done
-            bin="${seg%% *}"; [ -n "$bin" ] || break ;;
-          *) break ;;
-        esac
-      done
-      case "$bin" in ''|-*|*=*|'('*) continue ;; esac
-      command -v "$bin" >/dev/null 2>&1 || missing="$missing $bin"
-    done <<EOSEG
+  local dsec cmdkey val bin seg missing
+  while IFS= read -r dsec; do
+    [ -n "$dsec" ] || continue
+    while IFS= read -r cmdkey; do
+      [ -n "$cmdkey" ] || continue
+      val=$(_cfg_area "$dsec" "$cmdkey"); [ -n "$val" ] || continue
+      missing=""
+      # Split on pipeline and list separators; the first word of each is a command.
+      while IFS= read -r seg; do
+        seg="${seg#"${seg%%[![:space:]]*}"}"        # strip leading whitespace
+        bin="${seg%% *}"
+        # A few wrappers put the real command in argument position, so the first
+        # word is never the thing that can be missing. Only wrappers whose next word
+        # must already be an executable are unwrapped — `npx tsc` and `uv run pytest`
+        # are deliberately not, since those fetch or resolve it.
+        while :; do
+          case "$bin" in
+            xargs|env|nice|nohup|sudo|time)
+              seg="${seg#"$bin"}"; seg="${seg#"${seg%%[![:space:]]*}"}"
+              while :; do case "$seg" in -*) seg="${seg#* }"; seg="${seg#"${seg%%[![:space:]]*}"}" ;; *) break ;; esac; done
+              bin="${seg%% *}"; [ -n "$bin" ] || break ;;
+            *) break ;;
+          esac
+        done
+        case "$bin" in ''|-*|*=*|'('*) continue ;; esac
+        command -v "$bin" >/dev/null 2>&1 || missing="$missing $bin"
+      done <<EOSEG
 $(printf '%s' "$val" | tr '|;' '\n\n' | sed 's/&&/\n/g')
 EOSEG
-    [ -n "$missing" ] && {
-      _dr_warn "[project] $cmdkey: $val"
-      _dr_note "not on PATH:$missing — that step will be skipped"
-    }
-  done
+      [ -n "$missing" ] && {
+        _dr_warn "[$dsec] $cmdkey: $val"
+        _dr_note "not on PATH:$missing — that step will be skipped"
+      }
+    done <<EOKEYS
+$(_check_keys "$dsec")
+EOKEYS
+    # An area pointing at a directory that no longer exists can never run.
+    case "$dsec" in
+      project:*) [ -d "${dsec#project:}" ] || {
+        _dr_warn "[$dsec] ${dsec#project:}/ does not exist"
+        _dr_note "aether check will skip it"; } ;;
+    esac
+  done <<EODSEC
+$(_project_areas)
+EODSEC
 
   command -v aether_cfg_get >/dev/null 2>&1 \
     || _dr_bad "aether-config.sh not found — every value is falling back to its default"
@@ -1541,6 +1613,233 @@ cmd_config_doctor() {
     "$_DR_BAD" "$_DR_WARN"
   [ "$_DR_BAD" -gt 0 ] && return 1
   return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PROJECT AREAS
+#
+# `[project:<path>]` describes one area of a monorepo. Every real monorepo has more
+# than one toolchain, and before this the only way to say so was to install aether
+# inside a subfolder — which left the rest of the repo unconfigured and made the
+# gates fire only when the shell happened to be in that directory.
+#
+# The area rules live here rather than in hooks/aether-config.sh on purpose: no gate
+# needs them, and that library is sourced on every single tool call.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# A key whose value is a shell command, per the schema — `config.<key>.type: command`
+# is already declared for test, lint, format, typecheck, build and coverage, while
+# coverage_min is `int`. Derived rather than listed, so the two cannot drift.
+_cfg_is_command() {
+  case "$1" in check.*) return 0 ;; esac
+  local plugin; plugin=$(_schema_plugin_for project "$1")
+  [ -n "$plugin" ] || return 1
+  [ "$(_mf "$plugin" "config.$1.type")" = command ]
+}
+
+# Resolve a key for one area. Command keys never inherit: a command in [project] is
+# written relative to the repo root, so running it inside an area would be wrong and
+# running it at the root would not be inheritance. Everything else falls back.
+_cfg_area() {
+  local section="$1" key="$2" v
+  v=$(_cfg_get "$section" "$key")
+  [ -n "$v" ] && { printf '%s' "$v"; return 0; }
+  case "$section" in project) return 0 ;; esac
+  _cfg_is_command "$key" && return 0
+  _cfg_get project "$key"
+}
+
+# Every project area the config actually declares, deepest path first so a
+# longest-prefix search can stop at its first hit. `project` itself sorts last.
+_project_areas() {
+  local f
+  { for f in "${AETHER_HOME:-$HOME/.aether}/config" .aether/config; do
+      [ -f "$f" ] || continue
+      aether_cfg_keys "$f" | awk -F'|' '$1 ~ /^project(:|$)/ { print $1 }'
+    done; } | sort -u | awk '
+      { n = gsub(/\//, "/", $0); print n "\t" $0 }' | sort -rn -k1,1 | cut -f2- | awk '
+      $0 == "project" { root = $0; next } { print } END { if (root != "") print root }'
+}
+
+# Which areas do these files belong to? Longest matching path prefix, the way CI's
+# paths filter works. A file under no declared area belongs to `project`.
+_project_sections() {
+  local file area hit out="" root=""
+  local areas; areas=$(_project_areas)
+  [ -n "$areas" ] || { printf 'project\n'; return 0; }
+  for file in "$@"; do
+    file="${file#./}"
+    hit=""
+    while IFS= read -r area; do
+      [ -n "$area" ] || continue
+      [ "$area" = project ] && continue
+      case "$file/" in "${area#project:}"/*) hit="$area"; break ;; esac
+    done <<EOAREAS
+$areas
+EOAREAS
+    if [ -n "$hit" ]; then
+      case " $out " in *" $hit "*) ;; *) out="$out $hit" ;; esac
+    else
+      root=project
+    fi
+  done
+  # Deepest first, then the root area if anything fell through to it.
+  while IFS= read -r area; do
+    [ -n "$area" ] || continue
+    case " $out " in *" $area "*) printf '%s\n' "$area" ;; esac
+  done <<EOAREAS
+$areas
+EOAREAS
+  [ -n "$root" ] && printf 'project\n'
+  return 0
+}
+
+cmd_project() {
+  case "${1:-}" in
+    for) shift; _project_sections "$@" ;;
+    areas) _project_areas ;;
+    *) printf 'Usage: aether project for <file...> | aether project areas\n'; return 1 ;;
+  esac
+}
+
+# ── aether check ─────────────────────────────────────────────────────────────
+
+_check_keys() {   # every command key an area sets, in a stable order
+  local section="$1" k f
+  for k in test lint format typecheck build coverage; do
+    [ -n "$(_cfg_get "$section" "$k")" ] && printf '%s\n' "$k"
+  done
+  for f in "${AETHER_HOME:-$HOME/.aether}/config" .aether/config; do
+    [ -f "$f" ] || continue
+    aether_cfg_keys "$f" | awk -F'|' -v s="$section" '$1 == s && $2 ~ /^check\./ { print $2 }'
+  done | sort -u
+}
+
+cmd_check() {
+  local raw=false all=false want="" a
+  for a in "$@"; do
+    case "$a" in
+      --raw) raw=true ;;
+      --all) all=true ;;
+      -*)    printf 'Unknown option: %s\n' "$a"; return 1 ;;
+      *)     want="$want $a" ;;
+    esac
+  done
+
+  # [project] holds shell commands, so this is the one command in the suite that
+  # executes what a repository told it to. It refuses outright rather than falling
+  # back to global, because "ran nothing" and "ran the wrong thing" look identical
+  # afterwards.
+  if [ -f .aether/config ] || [ -f .aether/rules.md ]; then
+    case "$(aether_trust_state)" in
+      ok) ;;
+      changed)
+        printf 'This project is untrusted: .aether/ changed since you trusted it.\n'
+        printf 'Review the change, then: aether trust\n'; return 1 ;;
+      *)
+        printf 'This project is untrusted, so aether check will not run its commands.\n'
+        printf 'Review .aether/config, then: aether trust\n'; return 1 ;;
+    esac
+  fi
+
+  local sections
+  if [ "$all" = true ] || [ -z "$want" ] && [ "$all" = true ]; then
+    sections=$(_project_areas)
+  elif [ -n "$want" ]; then
+    # An argument naming a declared area selects it; anything else is treated as a
+    # changed path.
+    local arg matched="" paths=""
+    for arg in $want; do
+      arg="${arg%/}"; arg="${arg#./}"
+      if _project_areas | grep -qx "project:$arg"; then matched="$matched project:$arg"
+      elif [ "$arg" = project ]; then matched="$matched project"
+      else paths="$paths $arg"; fi
+    done
+    sections="$(printf '%s\n' $matched | grep -v '^$' || true)"
+    [ -n "$paths" ] && sections="$sections
+$(_project_sections $paths)"
+    sections=$(printf '%s\n' "$sections" | grep -v '^$' | awk '!seen[$0]++')
+  else
+    local changed; changed=$(_check_changed_files)
+    if [ -z "$changed" ]; then
+      printf 'Nothing changed against the base branch. `aether check --all` runs everything.\n'
+      return 0
+    fi
+    sections=$(_project_sections $changed)
+  fi
+
+  [ -n "$sections" ] || { printf 'No [project] configuration. `/draft-config` writes one.\n'; return 0; }
+
+  local ran=0 failed=0 section key cmd dir rc out started elapsed
+  local selected=" $(printf '%s' "$sections" | tr '\n' ' ') "
+  while IFS= read -r section; do
+    [ -n "$section" ] || continue
+    dir="."; case "$section" in project:*) dir="${section#project:}" ;; esac
+    if [ ! -d "$dir" ]; then
+      failed=$((failed + 1))
+      if [ "$raw" = true ]; then printf '%s\t-\tmissing\t\n' "$section"
+      else printf '  %-24s directory %s does not exist\n' "$section" "$dir"; fi
+      continue
+    fi
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      cmd=$(_cfg_area "$section" "$key"); [ -n "$cmd" ] || continue
+      started=$(date +%s)
+      # `&& rc=0 || rc=$?`, not `; rc=$?`: an assignment from a failing command
+      # substitution aborts the shell under `set -e`, so the first failing check
+      # ended the run and every later one was never reported — on the primary path.
+      out=$( cd "$dir" && eval "$cmd" 2>&1 ) && rc=0 || rc=$?
+      elapsed=$(( $(date +%s) - started ))
+      ran=$((ran + 1))
+      [ "$rc" -eq 0 ] || failed=$((failed + 1))
+      if [ "$raw" = true ]; then
+        printf '%s\t%s\t%s\t%s\n' "$section" "$key" \
+          "$([ "$rc" -eq 0 ] && printf ok || printf fail)" "$cmd"
+      elif [ "$rc" -eq 0 ]; then
+        printf '  %-24s %-16s ✓   %ss\n' "$section" "$key" "$elapsed"
+      else
+        printf '  %-24s %-16s ✗   %s\n' "$section" "$key" "$cmd"
+        printf '%s\n' "$out" | sed -n '1,8p' | sed 's/^/        /'
+      fi
+    done <<EOKEYS
+$(_check_keys "$section")
+EOKEYS
+  done <<EOSECTIONS
+$sections
+EOSECTIONS
+
+  # Areas that exist but were not touched are reported, not omitted: "skipped"
+  # and "absent" are different facts and a reader needs to tell them apart.
+  while IFS= read -r section; do
+    [ -n "$section" ] || continue
+    case "$selected" in *" $section "*) continue ;; esac
+    if [ "$raw" = true ]; then printf '%s\t-\tskipped\t\n' "$section"
+    else printf '  %-24s not touched — skipped\n' "$section"; fi
+  done <<EOALL
+$(_project_areas)
+EOALL
+
+  [ "$raw" = true ] && { [ "$failed" -eq 0 ] || return 1; return 0; }
+  printf '\n'
+  if [ "$failed" -eq 0 ]; then printf '%s check(s) passed.\n' "$ran"; return 0; fi
+  printf '%s of %s failed.\n' "$failed" "$ran"
+  return 1
+}
+
+# Files changed against the base branch, for the default invocation. Reuses cairn's
+# base resolution; on a detached HEAD or a repo with no base there is nothing to diff
+# against, so the caller falls back to --all and says so.
+_check_changed_files() {
+  local base; base=$(_cfg_get cairn pr.base)
+  [ -n "$base" ] && [ "$base" != auto ] || {
+    base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+    [ -n "$base" ] || { for b in main master; do
+        git rev-parse --verify "origin/$b" >/dev/null 2>&1 && { base="$b"; break; }; done; }
+  }
+  [ -n "$base" ] || return 0
+  { git diff --name-only "origin/$base"...HEAD 2>/dev/null
+    git diff --name-only 2>/dev/null
+    git diff --name-only --staged 2>/dev/null; } | sort -u
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1945,7 +2244,8 @@ cmd_config() {
       # actually in effect rather than "" for anything left unset.
       local parsed section key val plugin
       parsed=$(_split_key "${1:-}"); section="${parsed%% *}"; key="${parsed#* }"
-      val=$(_cfg_get "$section" "$key")
+      case "$section" in project:*) val=$(_cfg_area "$section" "$key") ;;
+                         *)         val=$(_cfg_get  "$section" "$key") ;; esac
       if [ -z "$val" ]; then
         plugin=$(_schema_plugin_for "$section" "$key")
         [ -n "$plugin" ] && val=$(_mf "$plugin" "config.$key.default")
@@ -2051,14 +2351,31 @@ _trust_forget() {
 # What the user is consenting to, shown before they consent to it. Anything else
 # would make `aether trust` a formality.
 _trust_preview() {
-  local any=0 v k
+  local any=0 v k sec
   if [ -f .aether/config ]; then
-    for k in test lint format typecheck build coverage; do
-      v=$(aether_cfg_read .aether/config project "$k")
-      [ -n "$v" ] || continue
-      [ "$any" -eq 0 ] && { printf '\n  Commands the critics would run:\n'; any=1; }
-      printf '    %-11s %s\n' "$k" "$v"
-    done
+    # Every area, not just the root. In a monorepo all the commands live in
+    # [project:<path>] sections, so reading only [project] showed nothing at all
+    # while authorising a dozen — which turns the preview into a formality, the
+    # exact thing it exists to prevent.
+    while IFS= read -r sec; do
+      [ -n "$sec" ] || continue
+      # Keys come straight from the file, not from _check_keys — that resolves
+      # through the trust gate, and during a preview the project is untrusted by
+      # definition, so it would show almost nothing. Showing you the file is the point.
+      while IFS= read -r k; do
+        [ -n "$k" ] || continue
+        _cfg_is_command "$k" || continue
+        v=$(aether_cfg_read .aether/config "$sec" "$k")
+        [ -n "$v" ] || continue
+        [ "$any" -eq 0 ] && { printf '\n  Commands the critics would run:\n'; any=1; }
+        if [ "$sec" = project ]; then printf '    %-24s %s\n' "$k" "$v"
+        else printf '    %-24s %s\n' "${sec#project:}/$k" "$v"; fi
+      done <<EOTK
+$(aether_cfg_keys .aether/config | awk -F'|' -v s="$sec" '$1 == s { print $2 }')
+EOTK
+    done <<EOTS
+$(_project_areas)
+EOTS
   fi
   if [ -f .aether/rules.md ]; then
     printf '\n  Prose that would reach a critic (.aether/rules.md, %s line(s)):\n' \
@@ -2244,6 +2561,71 @@ _migrate_manifest() {
   return 0
 }
 
+# A nested install becomes an area of its parent.
+#
+# Before `[project:<path>]` existed, the only way to give a subfolder its own
+# toolchain was to run `aether install` inside it — which is what pimento did for
+# backend/. That leaves the rest of the repo unconfigured and makes the gates fire
+# only when the shell happens to be in that directory.
+#
+# Conservative on two counts. It only touches a directory in the *same git work
+# tree*, because a vendored repository in a subdirectory is not an area of a
+# monorepo. And it moves `[project]` keys only: any other section is reported and
+# left alone, because the parent may already set the same key differently and
+# guessing which wins is worse than saying so.
+_migrate_nested() {
+  local parent_cfg top nested dir sub key val pval moved=0
+  [ "$1" = local ] || return 0
+  top=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
+  [ "$top" = "$(pwd -P)" ] || return 0
+  parent_cfg=$(_cfg_file local)
+
+  while IFS= read -r nested; do
+    [ -n "$nested" ] || continue
+    dir=$(dirname "$(dirname "$nested")")          # foo/.aether/config -> foo
+    dir="${dir#./}"
+    [ "$dir" = "." ] && continue
+    [ "$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" = "$top" ] || {
+      printf '    %s/.aether/ is a separate git work tree — left alone\n' "$dir"; continue; }
+    sub="project:$dir"
+
+    while IFS='|' read -r nsec nkey; do
+      [ -n "$nkey" ] || continue
+      val=$(aether_cfg_read "$nested" "$nsec" "$nkey")
+      if [ "$nsec" = project ]; then
+        if [ -n "$(aether_cfg_read "$parent_cfg" "$sub" "$nkey")" ]; then
+          printf '    [%s] %s already set in the parent — nested value not used\n' "$sub" "$nkey"
+        else
+          _cfg_set "$parent_cfg" "$sub" "$nkey" "$val" \
+                   "$(_mf temper "config.$nkey.doc")"
+        fi
+      else
+        pval=$(aether_cfg_read "$parent_cfg" "$nsec" "$nkey")
+        if [ -z "$pval" ]; then
+          _cfg_set "$parent_cfg" "$nsec" "$nkey" "$val"
+        elif [ "$pval" != "$val" ]; then
+          printf '    [%s] %s differs — kept the parent\n' "$nsec" "$nkey"
+          printf '      parent: %s\n      %s: %s\n' "$pval" "$dir" "$val"
+        fi
+      fi
+    done <<EONK
+$(aether_cfg_keys "$nested")
+EONK
+
+    if [ -f "$dir/.aether/rules.md" ] && [ ! -f "$(_rules_file local)" ]; then
+      _op_copy "$dir/.aether/rules.md" "$(_rules_file local)" >/dev/null 2>&1 || true
+      printf '    %s/.aether/rules.md → %s\n' "$dir" "$(_rules_file local)"
+    fi
+    _retire "$dir/.aether"
+    printf '    %s/.aether/ → [%s]  (backup at %s/.aether.bak)\n' "$dir" "$sub" "$dir"
+    moved=$((moved + 1))
+  done <<EONESTED
+$(find . -mindepth 3 -maxdepth 4 -type f -path '*/.aether/config' 2>/dev/null | sort)
+EONESTED
+  [ "$moved" -gt 0 ] && printf '    %s nested install(s) folded in. Re-run `aether trust`.\n' "$moved"
+  return 0
+}
+
 _migrate_layout() {
   local scope="$1" any=""
   # Cheap check first: say nothing at all on a machine with nothing to move.
@@ -2259,12 +2641,14 @@ _migrate_layout() {
   done
   [ "$scope" = local ] && { [ -f ./whetstone.config.md ] || [ -f .claude/plans/CRITIQUE.md ] \
     || [ -f .claude/plans/TEMPER.md ]; } && any=1
+  [ "$scope" = local ] && [ -n "$(find . -mindepth 3 -maxdepth 4 -type f -path '*/.aether/config' 2>/dev/null)" ] && any=1
   [ -n "$any" ] || return 0
 
   printf '  Migrating to %s/\n' "$(_root "$scope")"
   _migrate_rules    "$scope"   # before configs: it reads pr.rules_file from them
   _migrate_configs  "$scope"
   _migrate_out      "$scope"
+  _migrate_nested   "$scope"
   _migrate_manifest "$scope"
   return 0
 }
@@ -2428,6 +2812,8 @@ case "$COMMAND" in
   disable)   cmd_disable "$@" ;;
   config)    cmd_config "$@" ;;
   doctor)    cmd_doctor "$@" ;;
+  check)     cmd_check "$@" ;;
+  project)   cmd_project "$@" ;;
   trust)     cmd_trust "$@" ;;
   rules)     aether_rules ;;
   migrate)   for _s in global local; do _migrate_layout "$_s"; _retire_legacy_hooks "$_s"; done

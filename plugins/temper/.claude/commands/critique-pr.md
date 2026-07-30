@@ -61,11 +61,14 @@ workflows reports nothing at all — an empty check list is not a passing one. S
 which it is.
 
 If the branch is checked out locally, run the measurement pass from
-`/critique-diff` as well — `aether config show project --raw` and `aether rules`,
-then the configured `test`, `lint`, `typecheck` and `build`. `build` matters most
-here: it is the difference between "the description says it compiles" and knowing.
-Name every command you ran and its exit status. If the branch is not checked out,
-say that instead of implying the checks were yours.
+`/critique-diff`: `aether check $(gh pr diff <n> --name-only) --raw`, plus
+`aether rules`. `aether check` is the only thing that executes `[project]` commands —
+it resolves each changed file to its monorepo area and runs that area's commands in
+its own directory. `build` matters most here: it is the difference between "the
+description says it compiles" and knowing.
+
+Name every area you checked **and every area you skipped**. If the branch is not
+checked out, say that instead of implying the checks were yours.
 
 Report this as a short context block above the findings table — it is context, not
 findings:
@@ -81,7 +84,9 @@ PR #<n> — <title>
 Add a line for anything you ran yourself, kept separate from CI's result:
 
 ```
-  ran here: test ✓ (uv run pytest, exit 0)   build ✗ (npm run build, exit 1)
+  ran here: project:backend  test ✓  build ✗ (npm run build)
+            project:web      lint ✓  typecheck ✓
+            project:canvas_processor  not touched — skipped
 ```
 
 If checks are failing or the PR is not mergeable, say so plainly here. A red CI is

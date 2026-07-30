@@ -50,7 +50,17 @@ aether_cfg_dump() {
     { sub(/\r$/, "") }
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*$/ { next }
-    /^\[.*\]$/ { cur = substr($0, 2, length($0) - 2); next }
+    /^\[.*\]$/ {
+      cur = substr($0, 2, length($0) - 2)
+      # A path area written [project:./web] or [project:web/] is the same area as
+      # [project:web]; normalise here so three spellings cannot behave differently.
+      if (cur ~ /^project:/) {
+        p = substr(cur, 9)
+        sub(/^\.\//, "", p); sub(/\/+$/, "", p)
+        cur = (p == "" ? "project" : "project:" p)
+      }
+      next
+    }
     {
       line = $0; sub(/^[[:space:]]+/, "", line)
       i = index(line, ":")
@@ -95,7 +105,7 @@ aether_cfg_invalidate() { unset AETHER_CFG_PRELOADED AETHER_CFG_ALL; }
 
 # Resolve from the preloaded dump: project beats global, per key, with no forks.
 _aether_cfg_from_dump() {
-  local section="$1" key="$2" line trusted=unknown won=""
+  local section="$1" key="$2" line trusted=unknown won="" _gated=""
   AETHER_CFG_VALUE=""
   while IFS= read -r line; do
     case "$line" in
@@ -106,7 +116,12 @@ _aether_cfg_from_dump() {
     [ "${rest%%|*}" = "$section" ] || continue
     rest="${rest#*|}"
     [ "${rest%%|*}" = "$key" ] || continue
-    if [ "$section" = project ] && [ "$layer" = project ]; then
+    # `project` AND every `project:<path>` area. This was an equality test, so a
+    # path section bypassed trust entirely and returned its commands from an
+    # untrusted repo — harmless only while nothing read them, and `aether check`
+    # is exactly something that reads them.
+    case "$section" in project|project:*) _gated=1 ;; *) _gated="" ;; esac
+    if [ -n "$_gated" ] && [ "$layer" = project ]; then
       [ "$trusted" = unknown ] && { aether_trusted && trusted=yes || trusted=no; }
       [ "$trusted" = yes ] || continue
     fi

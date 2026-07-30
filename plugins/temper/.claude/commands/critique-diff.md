@@ -92,45 +92,56 @@ If patterns are found, print a warning block at the top of the output and includ
 
 ## Measurement pass (run before the critics)
 
-Everything below this line is optional and depends on `[project]` config. When
-none of it is set, say so once in the report and fall back to reading the diff —
-never pretend a check ran.
+Everything below is optional and depends on `[project]` config. With none set, say so
+once and fall back to reading the diff — never imply a check ran.
 
-`[project]` holds shell commands, so it is only in effect once the project is
-trusted. Resolve it the normal way; an untrusted project yields nothing here:
-
-```bash
-aether config show project --raw 2>/dev/null || true
-```
-
-Also load the prose rules, which reports its own trust state:
+`[project]` holds shell commands, so **you do not run them yourself.** `aether check`
+is the only thing that executes them: it resolves which monorepo area each changed
+file belongs to, runs each area's commands in that area's directory, and refuses
+outright if the project is untrusted.
 
 ```bash
+git diff --name-only --staged            # or --diff=all / the target
+aether check <changed files…> --raw 2>/dev/null || true
 aether rules 2>/dev/null || true
 ```
 
-If the output says project `rules.md` was **not** read, put that in the report
-header verbatim — the user is getting less context than the file suggests, and a
-critic that stays silent about it is worse than one that has no rules at all.
+`--raw` gives one line per check, tab-separated — `area`, `key`, `status`, `command`:
 
-Then run what is configured, each in its own Bash call, and keep the output:
+```
+project:web	lint	ok	bun run lint-ci
+project:web	typecheck	fail	bun run tsc
+project:backend	-	skipped
+```
 
-| Key | Run it as | Feeds |
-|---|---|---|
-| `typecheck` | as given | Correctness |
-| `lint` / `format` | as given | Correctness |
-| `test` | as given | Coverage |
-| `coverage` | as given, compare against `coverage_min` | Coverage |
+| status | meaning |
+|---|---|
+| `ok` | it ran and passed |
+| `fail` | it ran and failed — feed the output to the critic named below |
+| `skipped` | that area exists but this diff does not touch it |
+| `missing` | the area's directory is gone; a configuration problem, not a finding |
+
+Re-run one area without `--raw` to see the failure output: `aether check <area>`.
+
+Feed each result to its critic: `typecheck`, `lint` and `format` → **Correctness**;
+`test` and `coverage` → **Coverage**; `check.*` → **Correctness**, named as the
+project-specific invariant it is.
 
 Rules for this pass:
 
-- **Report what you ran.** Name the command and its exit status. A critic that
-  says "tests pass" without naming the command it ran is guessing.
-- A command that fails to start (binary missing) is **not** a finding about the
-  diff. Report it once as a configuration problem and move on.
-- Never invent a command. If `test` is unset, Coverage reads the diff as before
-  and the report says the suite was not run.
-- Never run anything not listed above, and never a watch-mode script.
+- **Report what ran, per area.** Name the command and its status. "Tests pass"
+  without naming the command is a guess, and in a monorepo it is also ambiguous
+  about *which* tests.
+- **Name the areas you skipped.** A reviewer needs to know that the backend was not
+  checked because the diff did not touch it — not to assume it was.
+- A command that could not start is a configuration problem, not a finding about the
+  diff. Report it once and move on; `aether config doctor` diagnoses it.
+- If `aether check` says the project is untrusted, say so in the report header and
+  read the diff instead. Do not work around it.
+- Never invent a command, and never run one yourself.
+
+If `aether rules` says project `rules.md` was **not** read, put that in the header
+verbatim — the user is getting less context than the file suggests.
 
 ---
 

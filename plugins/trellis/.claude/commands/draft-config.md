@@ -31,65 +31,84 @@ aether config path 2>/dev/null; aether config path global 2>/dev/null
 
 ---
 
-**Step 1 — Detect the project's commands (`[project]`)**
+**Step 1 — Is this one project or several?**
 
-Search in this order and stop at the first source that yields a usable command
-for a given key. Record which source it came from — every key you write carries a
-comment naming its origin, so the user can tell a detected command from a guess.
-
-**1a. CI workflows — the strongest evidence.**
+Decide this before detecting any command, because it changes what you write.
 
 ```bash
-ls .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null
-grep -hE '^\s*(run|- run):' .github/workflows/*.y*ml 2>/dev/null | sed 's/^[[:space:]]*//'
+ls .github/workflows/*.y*ml 2>/dev/null
+grep -n 'working-directory:' .github/workflows/*.y*ml 2>/dev/null
+grep -nA8 'filters:' .github/workflows/*.y*ml 2>/dev/null
+find . -maxdepth 3 \( -name package.json -o -name pyproject.toml -o -name go.mod -o -name Cargo.toml \) \
+  -not -path '*/node_modules/*' -not -path '*/.venv/*' 2>/dev/null
 ```
 
-A `run:` line in CI is a command that provably works in a clean checkout: someone
-maintains it, and it fails loudly when it rots. Prefer these over anything else.
+Two signals mean this repo has **areas**, each with its own toolchain:
 
-Also check other CI systems if present: `.gitlab-ci.yml`, `.circleci/config.yml`,
-`azure-pipelines.yml`, `Jenkinsfile`.
+- CI jobs with different `working-directory:` values — the strongest signal, because
+  it is CI telling you where each command must run.
+- A paths filter (`web/**`, `backend/**`) deciding which jobs run — CI already scopes
+  by path, and that is exactly the scoping to copy.
+- Failing both: a manifest in more than one subdirectory.
 
-Skip `run:` lines that are setup rather than verification — `actions/checkout`,
-`pip install`, `npm ci`, `uv sync`, cache warming, artifact upload, anything with
-`git push` or a deploy step in it.
+**One area → one `[project]` section, exactly as before.** Do not invent areas for a
+single-language repo; a plain `[project]` is the right answer and adding sections
+would make it worse.
 
-**1b. Manifest scripts.**
+**Several → one `[project:<path>]` per area**, where `<path>` is the directory the
+commands must run in. Write no commands in the bare `[project]` section: a command
+there is root-relative and is not inherited by an area, so it would be dead config.
+
+**Step 1b — Detect each area's commands**
+
+For each area, in this order, and record which source each key came from.
+
+**CI first.** A `run:` line under a job with `working-directory: <area>` is a command
+that provably works in a clean checkout — someone maintains it and it fails loudly
+when it rots.
 
 ```bash
-cat pyproject.toml 2>/dev/null | head -80
-cat package.json 2>/dev/null | head -60
-cat Makefile justfile Taskfile.yml 2>/dev/null | head -40
+sed -n '/<job-name>:/,/^  [a-z]/p' .github/workflows/ci.yml
 ```
 
-**1c. Convention, only if nothing above matched.** A Python project with a
-`tests/` directory and pytest in its dependencies implies `pytest`. Mark it as a
-guess in the comment, because it is one.
+Also check `.gitlab-ci.yml`, `.circleci/config.yml`, `azure-pipelines.yml`,
+`Jenkinsfile`. Skip `run:` lines that are setup rather than verification —
+`actions/checkout`, `pip install`, `npm ci`, `bun install`, `uv sync`, cache warming,
+artifact upload — and anything that deploys or pushes.
+
+**Then that area's manifest**, read from inside the area: its `package.json`,
+`pyproject.toml`, `Makefile`, `justfile`.
+
+**Then convention**, only if nothing above matched, and marked as a guess.
 
 **Map to keys:**
 
 | Key | Looks like |
 |---|---|
-| `test` | pytest, jest, vitest, go test, cargo test, `make test`, `npm test` |
+| `test` | pytest, jest, vitest, `go test`, `cargo test`, `make test`, `npm test` |
 | `lint` | ruff check, eslint, flake8, golangci-lint, clippy |
-| `format` | ruff format --check, prettier --check, gofmt -l, `cargo fmt --check` |
-| `typecheck` | mypy, pyright, tsc --noEmit |
-| `build` | npm run build, cargo build, go build, `make` |
-| `coverage` | pytest --cov, jest --coverage, `go test -cover` |
+| `format` | `ruff format --check`, `prettier --check`, `gofmt -l`, `cargo fmt --check` |
+| `typecheck` | mypy, pyright, `tsc --noEmit` |
+| `build` | `npm run build`, `cargo build`, `go build`, `make` |
+| `coverage` | `pytest --cov`, `jest --coverage`, `go test -cover` |
+| `check.<name>` | a CI step that fits none of the above but is a real check — a lockfile check (`uv lock --check`), a single-migration-head check, a dependency dedupe check. Name it after what it verifies |
+
+Several commands under one key: join them with `&&`. Four lint-ish CI steps usually
+split naturally across `lint`, `format` and `typecheck` — only genuinely paired ones
+share a key.
 
 **Never select any of these, whatever the source:**
 
 - anything with `watch`, `--watch`, `-w`, `serve`, `dev`, `start`, `nodemon`
 - anything that deploys, publishes, releases, or pushes
 - anything interactive, or that reads stdin
-- anything with `-u`, `--update-snapshots`, `--fix`, `--write` — a critic must
-  not modify the working tree it is reviewing
+- anything with `-u`, `--update-snapshots`, `--fix`, `--write` — a critic must not
+  modify the working tree it is reviewing
+- an aggregate script that begins with an install (`"ci": "bun install && …"`)
 
 A watch-mode script never terminates. Selecting one would hang a critic
-indefinitely, so this rule holds even when it is the only candidate: leave the
-key unset and say so.
-
----
+indefinitely, so this rule holds even when it is the only candidate: leave the key
+unset and say so.
 
 **Step 2 — Detect the git conventions (`[git]`)**
 
@@ -158,8 +177,14 @@ Write each key with `aether config set`, which preserves comments and ordering
 and adds the schema's own doc line above the key:
 
 ```bash
-aether config set project.test "uv run pytest"
+aether config set project.test "uv run pytest"                      # single-area repo
+aether config set project:backend.test "uv run --frozen pytest"     # one area of several
+aether config set project:web.typecheck "bun run tsc"
 ```
+
+`aether config set` takes `<section>.<key>`, and a path area is just a section — so
+`project:web.typecheck` is unambiguous even though the path itself contains no dot.
+For a path containing a dot, edit the file directly and say you did.
 
 Then append the source comment for each key you wrote, so the file records where
 the value came from:

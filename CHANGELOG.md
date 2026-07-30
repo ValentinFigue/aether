@@ -7,6 +7,67 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
+## [Unreleased]
+
+### Added
+
+- **`[project:<path>]` — one config for a monorepo.** `[project]` assumed one test
+  command for one tree, so the only way to give a subfolder its own toolchain was to
+  run `aether install` inside it. A real repo doing that had two thirds of itself
+  unconfigured, gates that fired only when the shell was in that directory, and trust
+  granted to a subfolder rather than the repo. Areas are named for the directory their
+  commands run in, and files map to areas by longest matching path prefix — the way a
+  CI paths filter does.
+- **`aether check [path…] [--all] [--raw]`** — runs each area's commands in that
+  area's directory, defaulting to files changed against the base branch. It is the
+  **only** thing that executes `[project]` commands: `/critique-diff` and
+  `/critique-pr` now call it instead of running commands themselves, so trust has one
+  enforcement point rather than three.
+- **`check.<name>`** for the CI steps that fit no standard key — a lockfile check, a
+  single-migration-head check. Without it those were silently dropped from any config.
+- **`aether project for <file…>`** — which areas those files belong to, the primitive
+  the critics and `aether check` share.
+- `aether migrate` folds a nested install into an area: `backend/.aether/` becomes
+  `[project:backend]`. Only within the same git work tree, since a vendored repo in a
+  subdirectory is not an area; where a non-`[project]` key differs it keeps the
+  parent's value and reports the conflict rather than merging silently; the old
+  directory is left at `backend/.aether.bak`.
+- trellis learns areas: `working-directory:` and paths-filter blocks in CI become one
+  `[project:<path>]` per area. A single-language repo still gets a plain `[project]`.
+- `tests/test_project.sh` — 56 assertions.
+
+### Fixed
+
+- **`aether trust` showed no commands at all on a monorepo.** The preview read only
+  `[project]`, so a repo whose commands all live in areas authorised thirteen of them
+  while displaying none — turning the preview into a formality, which is the one thing
+  it exists to prevent. It now walks every area, and reads the keys straight from the
+  file rather than through the trust-gated resolver, which during a preview returns
+  almost nothing by definition. Found by running it on a real repo, not by a test.
+- **A path section bypassed the trust gate entirely.** The check was
+  `[ "$section" = project ]`, an equality test, so `[project:web]` returned its
+  commands from an untrusted repo. Harmless only while nothing read them — and
+  `aether check` is exactly something that reads them, which is why the fix and its
+  assertion landed before the syntax was usable.
+- **The first failing check aborted the whole run.** `out=$( … ); rc=$?` is an
+  assignment from a failing command substitution, which under `set -e` exits the
+  shell — so every check after the first failure went unreported, on the primary path.
+- Command keys no longer inherit from `[project]` into an area. A command written for
+  the repo root has no correct working directory inside a subdirectory; the first draft
+  of this design got that wrong in both directions.
+
+### Changed
+
+- `aether config show project` lists every area, grouped by area; `config show
+  project:web` lists one. `config doctor` walks every area, so a missing binary is
+  reported against the toolchain that needs it rather than against the root, and it
+  flags an area whose directory no longer exists.
+- Section names are normalised on read, so `[project:web]`, `[project:./web]` and
+  `[project:web/]` are one area.
+- This repo declares `[project:plugins/bonsai/py]` and `[project:plugins/bonsai/ts]`,
+  so `typecheck` is no longer unset — the tree is bash at the top with Python and
+  TypeScript inside one plugin, which is the case that motivated this.
+
 ## [1.2.0] — 2026-07-30
 
 ### Added

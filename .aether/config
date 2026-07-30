@@ -21,10 +21,20 @@ lint: git ls-files '*.sh' 'bin/*' 'plugins/*/bin/*' | xargs shellcheck --severit
 # bonsai is the only plugin with build output; this is the same script install runs.
 # It takes about a minute, which is why only /critique-pr uses it.
 build: bash plugins/bonsai/scripts/build.sh
-# typecheck is deliberately unset. This tree is bash at the top level and Python
-# plus TypeScript inside plugins/bonsai, each with its own checks in bonsai's
-# workflow. [project] holds one command for one tree, so there is nothing honest
-# to put here — see the monorepo item in the README roadmap.
+# typecheck is deliberately unset for the ROOT area: the top level is bash, which has
+# no type checker. The two bonsai areas below have their own.
+
+[project:plugins/bonsai/py]
+# from plugins/bonsai/.github or its own scripts; run from inside the area
+test: uv run pytest
+lint: uvx ruff check .
+typecheck: uv run mypy .
+
+[project:plugins/bonsai/ts]
+test: npm test
+lint: npm run lint
+typecheck: npm run typecheck
+build: npm run build
 
 [git]
 # Conventional Commits scopes → /draft-commit /critique-pr

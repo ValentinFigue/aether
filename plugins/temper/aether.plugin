@@ -65,6 +65,17 @@ config.critical_paths.used_by: enforce-temper.sh
 # Declared here rather than in a suite-wide schema file because temper's critics
 # are what run them. `section:` puts the key in [project] instead of [temper].
 # Nothing here runs until the project is trusted.
+#
+# A monorepo declares one `[project:<path>]` area per toolchain, and every key below
+# applies to an area exactly as it does to the root. Command keys — everything with
+# `type: command` — are NOT inherited from `[project]` by an area, because a command
+# written for the repo root has no correct meaning inside a subdirectory. Non-command
+# keys such as coverage_min do inherit.
+#
+# `check.<name>` is an additional command key an area may set for a project-specific
+# invariant that fits none of the six below — a lockfile check, a single-migration-head
+# check. It has no declaration here because the name is the user's; `aether check`
+# runs it and reports it under that name.
 
 config.test.section: project
 config.test.default:

@@ -296,6 +296,50 @@ the file explains itself. [This repo's own `.aether/config`](.aether/config) is 
 worked example — every value records where it came from, and two keys are
 deliberately *unset* with a note on why the obvious value would be wrong.
 
+### Monorepos — `[project:<path>]`
+
+`[project]` assumes one test command for one tree. A monorepo has several, so it gets
+one area per toolchain, named for the directory its commands run in:
+
+```
+[project:backend]
+test:             uv run --frozen pytest
+lint:             uv run --frozen ruff check ./
+typecheck:        uv run --frozen mypy ./
+check.lockfile:   uv lock --check          # a real CI check that fits no standard key
+
+[project:web]
+lint:             bun run lint-ci
+typecheck:        bun run tsc             # no `test` key — web has no test script
+```
+
+Files map to areas by **longest matching path prefix**, the way a CI paths filter
+does, so a diff touching only `web/` never runs backend's pytest:
+
+```
+$ aether check web/src/App.tsx backend/src/api.py
+  project:backend    test        ✓   41s
+  project:web        lint        ✓   2s
+  project:web        typecheck   ✗   bun run tsc
+        src/App.tsx(14,3): error TS2345: …
+  project:canvas_processor  not touched — skipped
+```
+
+`aether check` is the **only** thing that runs these commands — `/critique-diff` and
+`/critique-pr` call it rather than running them themselves, so trust has one
+enforcement point. It defaults to files changed against the base branch; `--all` runs
+every area, `--raw` is the machine-readable form the critics parse.
+
+**Command keys are not inherited from `[project]`.** A command written for the repo
+root has no correct meaning inside a subdirectory, so each area states its own.
+Non-command keys like `coverage_min` do inherit. Which is which comes from the
+schema — anything declared `type: command`.
+
+Already installed aether inside a subfolder to get this? `aether migrate` folds it in:
+`backend/.aether/` becomes `[project:backend]`, only within the same git work tree, and
+where a non-`[project]` key differs it keeps the parent's and tells you. The old
+directory is left at `backend/.aether.bak`.
+
 ### Trust
 
 A project's config can set thresholds the moment you clone it; none of that can
@@ -574,6 +618,8 @@ aether config explain <section>.<key>
 aether config doctor                     Just the config and trust half
 aether config set|unset <section>.<key> [value] [global]
 aether config path|edit [global]
+aether check [path...] [--all] [--raw]   Run this project's [project] commands
+aether project for <file...>             Which monorepo areas those files touch
 aether trust [status|list|forget|prune]
 aether rules                             The prose the critics will read
 aether migrate                           Move a pre-1.0 layout into ~/.aether/
@@ -741,9 +787,13 @@ pass, so the same commands a critic uses are one keystroke for a human too.
 for — critique run, description accurate, CI green on the actual head — rather
 than leaving them to whoever remembers.
 
-**Multi-repo config.** `[project]` assumes one test command for one tree. A
-monorepo needs per-path sections, and that is a real design question rather than
-a small change.
+**The plan critique cannot record itself.** Two independent mismatches:
+`enforce-whetstone.sh` looks for plans in `.claude/plans/`, but plan mode writes to
+`~/.claude/plans/` — so the gate never sees the plan you actually wrote. And the
+critique's last step writes `.aether/out/CRITIQUE.md`, which plan mode forbids, so
+the automatic critique cannot persist. Fix: glob both directories, and let the
+critique live *inside* the plan file — the one file plan mode can write — stamped
+with a hash of the plan body so staleness is content-based rather than mtime-based.
 
 **Work with any agent, not just Claude Code.** The checking is already portable:
 bonsai's tools are plain MCP, the config and prose are plain text, the CLI is bash,

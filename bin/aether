@@ -3,13 +3,15 @@ set -e
 
 VERSION="1.0.0"
 
-GLOBAL_HOOK_DIR="$HOME/.local/share/aether"
-GLOBAL_HOOK="$GLOBAL_HOOK_DIR/enforce-suite.sh"
-GLOBAL_GATES="$GLOBAL_HOOK_DIR/gates"
-GLOBAL_SETTINGS="$HOME/.claude/settings.json"
-GLOBAL_MANIFEST="$HOME/.claude/aether.manifest"
-LOCAL_MANIFEST=".claude/aether.manifest"
+# Pre-1.0 locations. Kept only so migration and uninstall can find and clear
+# what an older install left behind; nothing writes here any more.
+LEGACY_HOOK_DIR="$HOME/.local/share/aether"
+LEGACY_GLOBAL_MANIFEST="$HOME/.claude/aether.manifest"
+LEGACY_LOCAL_MANIFEST=".claude/aether.manifest"
+LEGACY_LOCAL_HOOKS=".claude/hooks"
 
+# Fallback only. The live list comes from _plugins_available(), which reads the
+# manifests, so a new plugin appears in `aether status` by existing.
 PLUGINS="bonsai whetstone temper cairn"
 
 usage() {
@@ -17,7 +19,18 @@ usage() {
 aether — manage your aether suite install
 
 Usage:
+  aether install [plugin...] [global] [--claude-md] [--no-bonsai]
+                                        Install the suite, or named plugins
   aether status                         Show install state for all plugins
+  aether config show [section]          Resolved values, where each came from
+  aether config explain <section>.<key> One key in full
+  aether config doctor                  Validate: unknown keys, dead paths
+  aether config set <section>.<key> <v> [global]
+  aether config path|edit [global]      Print or open the config file
+  aether migrate                        Move a pre-1.0 layout into ~/.aether/
+  aether trust [status|forget]          Allow this project's [project] commands
+                                        and rules.md to be used
+  aether rules                          Print the prose the critics will read
   aether enable  [local|global]         Enable all plugins (default: local)
   aether disable [local|global]         Disable all plugins
   aether update                         git pull the clone and re-run its installer
@@ -27,6 +40,8 @@ Usage:
 
 Examples:
   aether status
+  aether config show temper
+  aether config set temper.auto_nudge_lines 400 global
   aether disable global
   aether enable local
   aether uninstall global --claude-md
@@ -50,31 +65,812 @@ _config_set() {
 }
 
 _hook_registered() {
-  [ -f "$GLOBAL_SETTINGS" ] && grep -q "enforce-suite" "$GLOBAL_SETTINGS" 2>/dev/null
+  [ -f "$(_settings global)" ] && grep -q "enforce-suite" "$(_settings global)" 2>/dev/null
 }
 
 _manifest_get() {
   local key="$1"
   local manifest=""
-  [ -f "$GLOBAL_MANIFEST" ] && manifest="$GLOBAL_MANIFEST"
-  [ -f "$LOCAL_MANIFEST"  ] && manifest="$LOCAL_MANIFEST"
+  for m in "$LEGACY_GLOBAL_MANIFEST" "$(_manifest_for global)" \
+           "$LEGACY_LOCAL_MANIFEST"  "$(_manifest_for local)"; do
+    [ -f "$m" ] && manifest="$m"
+  done
   [ -z "$manifest" ] && return 0
   grep "^$key=" "$manifest" | sed "s/^$key=//" | head -1 || true
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ENGINE
+#
+# One implementation of install and uninstall, driven by plugins/<name>/
+# aether.plugin. Replaces five installers and five uninstallers that expressed
+# the same five operations — copy a file, copy a tree, symlink, upsert a JSON
+# key, splice a sentinel block — over per-plugin data.
+#
+# Uninstall reads the same manifest in reverse, which is what makes the
+# install/uninstall asymmetries structurally impossible rather than merely
+# fixed. Four had drifted: temper's uninstaller never removed its commands,
+# cairn's never removed its permissions.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Where the clone is ───────────────────────────────────────────────────────
+# Running from the clone (install.sh execs us) the repo is two levels up.
+# Running installed, the manifest recorded it.
+_repo_root() {
+  local here
+  # An explicit override wins: it makes the engine testable without a real
+  # install, and lets a shim name a clone it was not copied out of.
+  [ -n "${AETHER_REPO:-}" ] && [ -d "$AETHER_REPO/plugins" ] \
+    && { printf '%s' "$AETHER_REPO"; return 0; }
+  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  if [ -d "$here/../plugins" ]; then
+    (cd "$here/.." && pwd -P); return 0
+  fi
+  local recorded; recorded=$(_manifest_get "repo") || recorded=""
+  [ -n "$recorded" ] && [ -d "$recorded/plugins" ] && { printf '%s' "$recorded"; return 0; }
+  return 1
+}
+
+# ── Manifest reader ──────────────────────────────────────────────────────────
+# Plain grep/sed, deliberately: no python3, node or jq is needed to work out
+# what to install. Only the settings.json steps need an interpreter, which is
+# the same degradation the hand-written installers had.
+# Plain awk per lookup. A variant that loaded every manifest into one shell
+# variable and answered with parameter expansion was tried and reverted: it cut
+# awk invocations from 225 to 73 for `aether config show` and made it 2.5×
+# SLOWER, because `${all#*"$needle"}` over a 400-line string, ~150 times, is
+# quadratic in bash. Fewer processes is not the same as less work.
+_mf() {
+  local plugin="$1" key="$2" repo
+  repo=$(_repo_root) || return 1
+  local f="$repo/plugins/$plugin/aether.plugin"
+  [ -f "$f" ] || return 1
+  awk -v k="$key" 'index($0, k ":") == 1 {
+    v = substr($0, length(k) + 2); sub(/^[[:space:]]+/, "", v); print v; exit }' "$f"
+}
+
+
+# Every plugin with a manifest in the clone. Replaces the hardcoded
+# PLUGINS="bonsai whetstone temper cairn", so a new plugin appears in
+# `aether status` by existing.
+_plugins_available() {
+  local repo; repo=$(_repo_root) || return 0
+  local d
+  for d in "$repo"/plugins/*/aether.plugin; do
+    [ -f "$d" ] || continue
+    basename "$(dirname "$d")"
+  done
+}
+
+# ── Scope resolver ───────────────────────────────────────────────────────────
+# The single place a scope becomes a path. Scope handling was got wrong twice
+# in the previous release — `aether uninstall` and all three plugin `update`s —
+# because every call site re-derived these by hand.
+# ── Sectioned config ─────────────────────────────────────────────────────────
+# The reader lives in hooks/aether-config.sh because the gates need it too, and
+# they cannot source anything out of the clone. One parser, two callers.
+for _lib in "$(dirname "${BASH_SOURCE[0]}")/../hooks/aether-config.sh" \
+            "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh" \
+            ".aether/hooks/aether-config.sh"; do
+  # shellcheck source=/dev/null
+  [ -f "$_lib" ] && { . "$_lib"; break; }
+done
+if ! command -v aether_cfg_get >/dev/null 2>&1; then
+  # Degrade rather than die: an install can still place files, it just cannot
+  # read anyone's settings. The paths must still resolve or nothing works.
+  printf 'aether: cannot find aether-config.sh; config values fall back to defaults.\n' >&2
+  aether_root()       { [ "$1" = global ] && printf '%s' "${AETHER_HOME:-$HOME/.aether}" || printf '.aether'; }
+  aether_cfg_file()   { printf '%s/config' "$(aether_root "$1")"; }
+  aether_rules_file() { printf '%s/rules.md' "$(aether_root "$1")"; }
+  aether_cfg_read()   { :; }
+  aether_cfg_get()    { :; }
+fi
+# Preload once, here, in the top-level shell. Every _cfg_get call site wraps it
+# in $( ), which forks — so without this the dump was rebuilt for every key, and
+# `aether config show` re-read both files ~36 times. Subshells inherit the
+# variables, so one preload here serves all of them; a write invalidates it and
+# the next read rebuilds.
+command -v aether_cfg_preload >/dev/null 2>&1 && aether_cfg_preload
+
+_cfg_read() { aether_cfg_read "$@"; }
+_cfg_get()  { aether_cfg_get  "$@"; }
+
+# Two roots, same name and same shape: ~/.aether globally, .aether in a project.
+# $AETHER_HOME overrides the global one, for anyone who prefers ~/.config/aether.
+#
+# The split is deliberate. .claude/ holds what Claude Code itself reads —
+# commands it globs, settings.json, skills, CLAUDE.md, and plan mode's plans/.
+# .aether/ holds what aether owns. Hook *scripts* move here because settings.json
+# references them by absolute path, so they can live anywhere; that also retires
+# ~/.local/share/aether and fixes an asymmetry where the global hook and the
+# local hook had different parents.
+_root()         { aether_root "$1"; }
+_hook_dir()     { printf '%s/hooks' "$(_root "$1")"; }
+_gates_dir()    { printf '%s/hooks/gates' "$(_root "$1")"; }
+_plugin_hooks() { printf '%s/hooks/plugin-hooks' "$(_root "$1")"; }
+_cfg_file()     { aether_cfg_file "$1"; }
+_rules_file()   { aether_rules_file "$1"; }
+_out_dir()      { printf '%s/out' "$(_root "$1")"; }
+_manifest_for() { printf '%s/manifest' "$(_root "$1")"; }
+_trust_file()   { printf '%s/trusted' "$(_root global)"; }
+
+# Claude Code's own directories, unchanged.
+_claude_dir()   { [ "$1" = global ] && printf '%s' "$HOME/.claude"        || printf '.claude'; }
+_commands_dir() { printf '%s/commands' "$(_claude_dir "$1")"; }
+_settings()     { printf '%s/settings.json' "$(_claude_dir "$1")"; }
+_claude_md()    { [ "$1" = global ] && printf '%s' "$HOME/.claude/CLAUDE.md" || printf './CLAUDE.md'; }
+_cli_dir()      { [ "$1" = global ] && printf '%s' "$HOME/.local/bin"     || printf '.bin'; }
+
+
+# _cfg_set <file> <section> <key> <value> [doc]
+# Rewrites only the line it targets, so comments, ordering and unrelated
+# sections survive. Creates the section if absent. When creating a key (never
+# when updating one) it writes the doc line above it, so a file explains itself
+# to whoever opens it next.
+_cfg_set() {
+  command -v aether_cfg_invalidate >/dev/null 2>&1 && aether_cfg_invalidate
+  local file="$1" section="$2" key="$3" value="$4" doc="${5:-}"
+  _dry && { printf '    would set %s%s: %s in %s\n' \
+    "${section:+[$section] }" "$key" "$value" "$file"; return 0; }
+  mkdir -p "$(dirname "$file")"
+  [ -f "$file" ] || : > "$file"
+  # v and doc come through the environment, not -v. `awk -v` performs escape
+  # processing on its argument, so a value containing a backslash was silently
+  # rewritten: critical_paths lost the backslash from `\.sql` and `\.env`, and a
+  # regex like `\d+` in [git] ticket became `d+`. That corrupted `config set` and,
+  # worse, migration — which carries the pre-1.0 critical_paths across verbatim.
+  AETHER_V="$value" AETHER_DOC="$doc" \
+  awk -v sec="$section" -v k="$key" '
+    BEGIN { v = ENVIRON["AETHER_V"]; doc = ENVIRON["AETHER_DOC"] }
+    function emit() {
+      if (doc != "") print "# " doc
+      print k ": " v
+      done = 1
+    }
+    # One line of lookahead. A comment is only a key\x27s documentation if it sits
+    # directly above it, so it is held for exactly one line before being flushed.
+    function flush() { if (prev != "") { print prev; prev = "" } }
+    { sub(/\r$/, "") }            # normalise CRLF, as the reader does
+    # Blank lines are held so an inserted key lands at the end of its section
+    # rather than after the blank line that separates it from the next one.
+    /^[[:space:]]*$/ { flush(); if (!done) { held = held $0 "\n"; next } }
+    /^\[.*\]$/ {
+      flush()
+      if (cur == sec && !done) emit()
+      printf "%s", held; held = ""
+      cur = substr($0, 2, length($0) - 2)
+      print; next
+    }
+    {
+      printf "%s", held; held = ""
+      line = $0; sub(/^[[:space:]]+/, "", line)
+      if (line ~ /^#/) { flush(); prev = $0; next }
+      if (!done && cur == sec && index(line, k ":") == 1) {
+        # Replace the old doc line rather than stranding it above the next key.
+        if (doc != "") { print "# " doc; prev = "" } else flush()
+        print k ": " v; done = 1; next
+      }
+      flush()
+      print
+    }
+    END {
+      flush()
+      if (!done && cur == sec) { emit(); printf "%s", held; held = "" }
+      printf "%s", held
+      if (!done) {
+        if (sec != "") { if (NR > 0) print ""; print "[" sec "]" }
+        emit()
+      }
+    }' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+}
+
+# _cfg_unset <file> <section> <key> — delete one line, leave the rest alone
+_cfg_unset() {
+  command -v aether_cfg_invalidate >/dev/null 2>&1 && aether_cfg_invalidate
+  local file="$1" section="$2" key="$3"
+  [ -f "$file" ] || return 0
+  _dry && { printf '    would unset %s%s in %s\n' "${section:+[$section] }" "$key" "$file"; return 0; }
+  awk -v sec="$section" -v k="$key" '
+    { sub(/\r$/, "") }
+    /^\[.*\]$/ { cur = substr($0, 2, length($0) - 2); print; next }
+    {
+      line = $0; sub(/^[[:space:]]+/, "", line)
+      if (cur == sec && index(line, k ":") == 1 && line !~ /^#/) next
+      print
+    }' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+}
+
+# ── Primitives ───────────────────────────────────────────────────────────────
+# Non-fatal by design. These run under `set -e`, partway through an install; a
+# single unwritable file must not abort and leave a half-configured machine.
+
+# DRY_RUN is honoured in the primitives rather than at each call site: all
+# mutation funnels through these five plus the JSON helpers, so one guard each
+# covers the engine.
+_dry() { [ "${DRY_RUN:-false}" = true ]; }
+
+# Announce a completed step. Under --dry-run the same message is marked as not
+# applied, because "✓ hook registered" in a dry run is simply untrue.
+_ok() {
+  if _dry; then printf '  · %s — not applied\n' "$*"
+  else printf '  ✓ %s\n' "$*"; fi
+}
+
+# Replaces by rename, never in place.
+#
+# `cp` truncates and rewrites the destination, and bash reads a script
+# incrementally as it executes. So `aether update` — which runs from
+# ~/.local/bin/aether and copies a new bin/aether over it — shifted the byte
+# offsets under the interpreter, and bash resumed mid-token:
+# `syntax error near unexpected token ';;'`, from inside the dispatcher's case,
+# after the install had otherwise finished successfully.
+#
+# A rename swaps the directory entry and leaves the original inode alone, so a
+# process already executing the old file runs to completion on it. This is why
+# every copy goes through a temp file in the destination directory — same
+# filesystem, so the rename is atomic.
+_op_copy() {
+  local src="$1" dst="$2" tmp
+  _dry && { printf '  [dry-run] copy %s\n' "$dst"; return 0; }
+  mkdir -p "$(dirname "$dst")" 2>/dev/null || true
+  tmp="$dst.aether-tmp.$$"
+  if cp "$src" "$tmp" 2>/dev/null; then
+    [ -x "$src" ] && chmod +x "$tmp" 2>/dev/null || true
+    if mv -f "$tmp" "$dst" 2>/dev/null; then return 0; fi
+  fi
+  rm -f "$tmp" 2>/dev/null || true
+  printf '  ! could not write %s\n' "$dst"; return 1
+}
+
+_op_copy_tree() {
+  local src="$1" dst="$2"
+  _dry && { printf '  [dry-run] copy tree %s\n' "$dst"; return 0; }
+  mkdir -p "$dst" 2>/dev/null || true
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -r "$src/" "$dst/" 2>/dev/null && return 0
+  else
+    cp -R "$src/." "$dst/" 2>/dev/null && return 0
+  fi
+  printf '  ! could not copy tree to %s\n' "$dst"; return 1
+}
+
+_op_link() {
+  local src="$1" dst="$2"
+  _dry && { printf '  [dry-run] link %s\n' "$dst"; return 0; }
+  mkdir -p "$(dirname "$dst")" 2>/dev/null || true
+  ln -sf "$src" "$dst" 2>/dev/null && return 0
+  printf '  ! could not link %s\n' "$dst"; return 1
+}
+
+_op_rm() {
+  local target="$1"
+  [ -e "$target" ] || return 0
+  _dry && { printf '  [dry-run] remove %s\n' "$target"; return 0; }
+  rm -rf "$target" 2>/dev/null && { printf '  ✓ removed %s\n' "$target"; return 0; }
+  printf '  ! could not remove %s\n' "$target"; return 1
+}
+
+# Splice a sentinel-delimited block into a markdown file, replacing any existing
+# one. Replacing rather than skipping is what lets a template change reach an
+# existing install — skipping froze the block at whatever version wrote it first.
+_op_splice() {
+  local file="$1" marker="$2" content_file="$3" wrap="$4"
+  _dry && { printf '  [dry-run] write %s block into %s\n' "$marker" "$file"; return 0; }
+  mkdir -p "$(dirname "$file")" 2>/dev/null || true
+  [ -f "$file" ] || : > "$file"
+  if grep -q "<!-- ${marker}:start -->" "$file" 2>/dev/null; then
+    awk "/<!-- ${marker}:start -->/{skip=1} !skip{print} /<!-- ${marker}:end -->/{skip=0}" \
+      "$file" > "$file.tmp" 2>/dev/null && mv "$file.tmp" "$file"
+  fi
+  # Drop trailing blank lines before re-appending. The removal above takes the
+  # block but not the blank line that separated it, and the append below adds a
+  # fresh one — so every re-install grew CLAUDE.md by exactly one line, forever.
+  # Stripping first makes the whole operation idempotent.
+  awk '{ l[NR] = $0 }
+       END { last = NR
+             while (last > 0 && l[last] ~ /^[[:space:]]*$/) last--
+             for (i = 1; i <= last; i++) print l[i] }' \
+    "$file" > "$file.tmp" 2>/dev/null && mv "$file.tmp" "$file"
+  {
+    # One separating blank line, and only when there is something to separate from.
+    [ -s "$file" ] && printf '\n'
+    if [ "$wrap" = wrap ]; then
+      printf '<!-- %s:start -->\n' "$marker"
+      cat "$content_file"
+      printf '<!-- %s:end -->\n' "$marker"
+    else
+      cat "$content_file"
+    fi
+  } >> "$file"
+}
+
+_op_unsplice() {
+  local file="$1" marker="$2"
+  [ -f "$file" ] || return 0
+  _dry && { printf '  [dry-run] remove %s block from %s\n' "$marker" "$file"; return 0; }
+  grep -q "<!-- ${marker}:start -->" "$file" 2>/dev/null || return 0
+  awk "/<!-- ${marker}:start -->/{skip=1} !skip{print} /<!-- ${marker}:end -->/{skip=0}" \
+    "$file" > "$file.tmp" 2>/dev/null && mv "$file.tmp" "$file"
+  printf '  ✓ removed %s block from %s\n' "$marker" "$file"
+}
+
+# ── Hook registration ────────────────────────────────────────────────────────
+# Generalised from _json_register_suite_hook: any phase, any matcher. The old
+# installers each had their own variant with the phase and matcher hardcoded,
+# which is how cairn ended up with a python3-only _json_add_post_hook that
+# silently never fired on a node-or-jq-only machine.
+_json_register_hook() {
+  local file="$1" phase="$2" matcher="$3" path="$4" prepend="${5:-}"
+  _dry && return 0
+  # Deregister any other registration of a script with this basename first.
+  # A hook that moved leaves its old entry behind, and both then fire: a machine
+  # that once had cairn installed standalone ended up running post-cairn.sh
+  # twice, from ~/.local/share/cairn/ and from the new location. Keying on the
+  # basename makes registration idempotent across every relocation, rather than
+  # needing a list of the places a script has ever lived.
+  _json_drop_hooks_matching "$file" "/$(basename "$path")" 2>/dev/null || true
+  command -v python3 >/dev/null 2>&1 || { command -v node >/dev/null 2>&1 || return 1; }
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$file" "$phase" "$matcher" "$path" "$prepend" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+import json, sys
+f, phase, matcher, path, prepend = sys.argv[1:6]
+with open(f) as fh: s = json.load(fh)
+lst = s.setdefault("hooks", {}).setdefault(phase, [])
+# Drop any previous registration of this exact script, whatever its matcher —
+# a plugin that changes its matcher must not leave the old entry behind.
+for e in lst:
+    e["hooks"] = [h for h in e.get("hooks", []) if h.get("command") != path]
+lst[:] = [e for e in lst if e.get("hooks")]
+entry = next((e for e in lst if e.get("matcher") == matcher), None)
+if entry is None:
+    entry = {"matcher": matcher, "hooks": []}
+    lst.insert(0, entry) if prepend else lst.append(entry)
+entry["hooks"].append({"type": "command", "command": path})
+print(json.dumps(s, indent=2))
+PYEOF
+  else
+    node - "$file" "$phase" "$matcher" "$path" "$prepend" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+const [f, phase, matcher, path, prepend] = process.argv.slice(2);
+const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
+s.hooks = s.hooks || {}; const lst = s.hooks[phase] = s.hooks[phase] || [];
+for (const e of lst) e.hooks = (e.hooks || []).filter(h => h.command !== path);
+s.hooks[phase] = lst.filter(e => e.hooks.length);
+let entry = s.hooks[phase].find(e => e.matcher === matcher);
+if (!entry) { entry = { matcher, hooks: [] }; prepend ? s.hooks[phase].unshift(entry) : s.hooks[phase].push(entry); }
+entry.hooks.push({ type: "command", command: path });
+process.stdout.write(JSON.stringify(s, null, 2) + "\n");
+JSEOF
+  fi
+}
+
+_json_deregister_hook() {
+  local file="$1" needle="$2"
+  _dry && return 0
+  [ -f "$file" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$file" "$needle" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+import json, sys
+f, needle = sys.argv[1], sys.argv[2]
+with open(f) as fh: s = json.load(fh)
+for phase in ("PreToolUse", "PostToolUse"):
+    lst = s.get("hooks", {}).get(phase, [])
+    for e in lst:
+        e["hooks"] = [h for h in e.get("hooks", []) if needle not in h.get("command", "")]
+    if phase in s.get("hooks", {}):
+        s["hooks"][phase] = [e for e in lst if e.get("hooks")]
+print(json.dumps(s, indent=2))
+PYEOF
+}
+
+# Install and register every hook a manifest declares.
+# A suite_owned hook is skipped under the suite: enforce-suite.sh sources that
+# gate instead, so registering it too would double-fire every check.
+_engine_hooks() {
+  local plugin="$1" scope="$2" suite_mode="$3" proot="$4"
+  local settings; settings=$(_settings "$scope")
+  local hookdir;  hookdir="$(_plugin_hooks "$scope")"
+  local strategy; strategy=$(_mf "$plugin" hooks.strategy); strategy="${strategy:-copy}"
+  local n line
+  for n in 1 2 3 4; do
+    line=$(_mf "$plugin" "hook.$n") || true
+    [ -n "$line" ] || continue
+    # Split on " | ". The separator is a bracket expression, not \| — BSD awk
+    # reads a backslash-escaped pipe in -F as alternation and returns five
+    # fields instead of three. Spacing is variable in the manifests, so the
+    # separator requires at least one space on each side: a matcher's escaped
+    # pipes (Bash\|Write) have none, so they survive. The matcher keeps them until
+    # the sed below unescapes them.
+    local phase matcher script flags _fs=' +[|] +'
+    phase=$(printf   '%s' "$line" | awk -v FS="$_fs" '{print $1}')
+    matcher=$(printf '%s' "$line" | awk -v FS="$_fs" '{print $2}' | sed 's/\\|/|/g')
+    script=$(printf  '%s' "$line" | awk -v FS="$_fs" '{print $3}')
+    flags=$(printf   '%s' "$line" | awk -v FS="$_fs" '{print $4}')
+    case " $flags " in *" suite_owned "*) [ "$suite_mode" = 1 ] && continue ;; esac
+    local target
+    if [ "$strategy" = link ]; then
+      target="$proot/$script"
+      chmod +x "$target" 2>/dev/null || true
+    else
+      target="$hookdir/$(basename "$script")"
+      _op_copy "$proot/$script" "$target" || continue
+    fi
+    local prepend=""; case " $flags " in *" prepend "*) prepend=1 ;; esac
+    _json_register_hook "$settings" "$phase" "$matcher" "$target" "$prepend" \
+      && _ok "$(printf '%s %s hook registered' "$plugin" "$phase")"
+  done
+}
+
+# ── Per-plugin install ───────────────────────────────────────────────────────
+# suite_mode=1 means enforce-suite.sh will source this plugin's gate, so its own
+# PreToolUse registration and its own CLAUDE.md block are both skipped.
+_engine_install() {
+  local plugin="$1" scope="$2" suite_mode="${3:-0}" repo
+  repo=$(_repo_root) || { printf '  ✗ cannot locate the aether clone\n'; return 1; }
+  local proot="$repo/plugins/$plugin"
+
+  # Scope support — bonsai is global-only; every path it writes is $HOME-rooted.
+  local scopes; scopes=$(_mf "$plugin" scopes)
+  case " $scopes " in *" $scope "*) ;; *)
+    printf '  %s: skipped — no %s scope\n' "$plugin" "$scope"; return 0 ;;
+  esac
+
+  # Prerequisites, before anything is written.
+  local req; req=$(_mf "$plugin" requires)
+  local missing=""
+  for r in $req; do command -v "$r" >/dev/null 2>&1 || missing="$missing $r"; done
+  if [ -n "$missing" ]; then
+    printf '  %s: skipped — needs%s\n' "$plugin" "$missing"
+    printf '          install them, then: aether install %s\n' "$plugin"
+    return 2
+  fi
+
+  # Build.
+  local build; build=$(_mf "$plugin" build)
+  if [ -n "$build" ] && [ -f "$proot/$build" ]; then
+    # The one escape hatch that runs arbitrary commands, so it needs its own
+    # guard: --dry-run was invoking bonsai's `uv sync` and `npm run build` for
+    # real, which writes to ~/.cache and ~/.npm. The five primitives are guarded
+    # centrally; this is not one of them.
+    if _dry; then
+      printf '  [dry-run] would run %s\n' "$build"
+    else
+      printf '  %s: building, this takes a minute...\n' "$plugin"
+      bash "$proot/$build" >/dev/null 2>&1 \
+        || { printf '  ✗ %s build failed\n' "$plugin"; return 1; }
+    fi
+  fi
+
+  local cdir; cdir=$(_commands_dir "$scope")
+  local asset_failed=0
+
+  # Commands, and the ones this plugin used to ship. An orphaned command file is
+  # not inert: it stays in the palette and still runs the stale copy.
+  local c
+  for c in $(_mf "$plugin" legacy_commands); do
+    [ -f "$cdir/$c" ] || continue
+    cp "$cdir/$c" "$cdir/$c.bak" 2>/dev/null && _op_rm "$cdir/$c" >/dev/null \
+      && printf '  ✓ removed superseded %s (kept a .bak)\n' "$cdir/$c" \
+      || printf '  ! Could not remove superseded %s\n' "$cdir/$c"
+  done
+  for c in $(_mf "$plugin" commands); do
+    _op_copy "$proot/.claude/commands/$c" "$cdir/$c" || asset_failed=1
+  done
+
+  # Skills.
+  local s
+  for s in $(_mf "$plugin" skills); do
+    _op_copy_tree "$proot/skills/$s" "$(_claude_dir "$scope")/skills/$s" || true
+  done
+
+  # CLI.
+  local cli; cli=$(_mf "$plugin" cli)
+  if [ -n "$cli" ]; then
+    local cli_scopes; cli_scopes=$(_mf "$plugin" cli.scopes); cli_scopes="${cli_scopes:-local global}"
+    case " $cli_scopes " in *" $scope "*)
+      if [ "$(_mf "$plugin" cli.strategy)" = link ]; then
+        _op_link "$proot/bin/$cli" "$(_cli_dir "$scope")/$cli" || asset_failed=1
+      else
+        _op_copy "$proot/bin/$cli" "$(_cli_dir "$scope")/$cli" || asset_failed=1
+      fi ;;
+    esac
+  fi
+
+  # CLAUDE.md — skipped under the suite, whose unified block supersedes it.
+  if [ "$suite_mode" = 0 ] && [ "${WITH_CLAUDE_MD:-false}" = true ]; then
+    local tpl; tpl=$(_mf "$plugin" template)
+    if [ -n "$tpl" ] && [ -f "$proot/$tpl" ]; then
+      local wrap=nowrap
+      [ "$(_mf "$plugin" template.has_own_sentinels)" = false ] && wrap=wrap
+      _op_splice "$(_claude_md "$scope")" "$(_mf "$plugin" template.sentinel)" "$proot/$tpl" "$wrap"
+      _ok "$(printf '%s CLAUDE.md block written' "$plugin")"
+    fi
+  fi
+
+  _engine_hooks "$plugin" "$scope" "$suite_mode" "$proot"
+
+  # A missing command file or CLI is a real failure, not a warning. The old
+  # installers reported success unconditionally, which is how a total failure
+  # still printed a green tick.
+  if [ "$asset_failed" -ne 0 ]; then
+    printf '  ✗ %s failed to install — an asset could not be written\n' "$plugin"
+    return 1
+  fi
+  _ok "$(printf '%s installed' "$plugin")"
+  return 0
+}
+
+# ── Per-plugin uninstall ─────────────────────────────────────────────────────
+# Same manifest, read in reverse.
+_engine_uninstall() {
+  local plugin="$1" scope="$2" repo
+  repo=$(_repo_root) || return 1
+  local cdir; cdir=$(_commands_dir "$scope")
+  local c
+
+  for c in $(_mf "$plugin" commands) $(_mf "$plugin" legacy_commands); do
+    _op_rm "$cdir/$c" >/dev/null 2>&1 && printf '  ✓ removed %s\n' "$cdir/$c"
+  done
+  for s in $(_mf "$plugin" skills); do
+    _op_rm "$(_claude_dir "$scope")/skills/$s"
+  done
+  local cli; cli=$(_mf "$plugin" cli)
+  [ -n "$cli" ] && _op_rm "$(_cli_dir "$scope")/$cli"
+  _json_deregister_hook "$(_settings "$scope")" "enforce-$plugin.sh" 2>/dev/null || true
+  _json_deregister_hook "$(_settings "$scope")" "post-$plugin.sh" 2>/dev/null || true
+  _op_rm "$(_plugin_hooks "$scope")/enforce-$plugin.sh" >/dev/null 2>&1 || true
+  _op_rm "$(_plugin_hooks "$scope")/post-$plugin.sh" >/dev/null 2>&1 || true
+
+  local sentinel; sentinel=$(_mf "$plugin" template.sentinel)
+  [ -n "$sentinel" ] && _op_unsplice "$(_claude_md "$scope")" "$sentinel"
+  for sentinel in $(_mf "$plugin" template.legacy_sentinels); do
+    _op_unsplice "$(_claude_md "$scope")" "$sentinel"
+  done
+  return 0
+}
+
+# ── settings.json helpers ────────────────────────────────────────────────────
+# Ported verbatim from install.sh. _json_backend / AETHER_JSON_BACKEND is the
+# only 3-interpreter chain in the suite with test coverage — the per-plugin
+# installers each had their own, and cairn's was python3-only, so its
+# PostToolUse hook silently never registered on a node-or-jq-only machine.
+
+_backup() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+  cp "$file" "$file.bak"
+}
+
+_json_backend() {
+  if [ -n "${AETHER_JSON_BACKEND:-}" ]; then printf '%s' "$AETHER_JSON_BACKEND"; return 0; fi
+  if   command -v python3 &>/dev/null; then printf 'python3'
+  elif command -v node    &>/dev/null; then printf 'node'
+  elif command -v jq      &>/dev/null; then printf 'jq'
+  else printf 'none'; fi
+}
+
+# _json_drop_hooks_matching <settings> <substring>
+#
+# Removes any hook, in EITHER phase, whose command contains the substring, and
+# drops entries left with no hooks. _json_remove_stale_hooks only ever cleaned
+# PreToolUse, so upgrading left a PostToolUse entry pointing into the retired
+# ~/.local/share/aether/ — a script Claude Code would then try to run on every
+# Bash, Write and Edit call.
+_json_drop_hooks_matching() {
+  local file="$1" needle="$2"
+  _dry && return 0
+  [ -f "$file" ] || return 0
+  case "$(_json_backend)" in
+   python3)
+    python3 - "$file" "$needle" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+import json, sys
+f, needle = sys.argv[1], sys.argv[2]
+with open(f) as fh: s = json.load(fh)
+for phase in ("PreToolUse", "PostToolUse"):
+    entries = s.get("hooks", {}).get(phase)
+    if not entries: continue
+    for e in entries:
+        e["hooks"] = [h for h in e.get("hooks", []) if needle not in h.get("command", "")]
+    s["hooks"][phase] = [e for e in entries if e.get("hooks")]
+print(json.dumps(s, indent=2))
+PYEOF
+    ;;
+   node)
+    node - "$file" "$needle" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+const [f, needle] = process.argv.slice(2);
+const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
+for (const phase of ["PreToolUse", "PostToolUse"]) {
+  const entries = (s.hooks || {})[phase];
+  if (!entries) continue;
+  for (const e of entries) e.hooks = (e.hooks || []).filter(h => !(h.command || "").includes(needle));
+  s.hooks[phase] = entries.filter(e => e.hooks && e.hooks.length);
+}
+console.log(JSON.stringify(s, null, 2));
+JSEOF
+    ;;
+   jq)
+    # `.hooks` is absent in a settings.json that has only permissions, and
+    # with_entries on null is an error, not a no-op — so guard on the type and
+    # rewrite the two phases in place rather than rebuilding the object.
+    jq --arg n "$needle" '
+      if (.hooks | type) == "object" then
+        .hooks |= with_entries(
+          if (.key == "PreToolUse" or .key == "PostToolUse")
+          then .value |= ([ .[] | .hooks |= [ .[] | select((.command // "") | contains($n) | not) ] ]
+                          | map(select((.hooks | length) > 0)))
+          else . end)
+      else . end' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+    ;;
+   *) return 1 ;;
+  esac
+}
+
+_json_remove_stale_hooks() {
+  local file="$1"
+  _dry && return 0
+  case "$(_json_backend)" in
+   python3)
+    python3 - "$file" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+import json, sys
+f = sys.argv[1]
+with open(f) as fh: s = json.load(fh)
+STALE = ["enforce-cairn", "enforce-temper", "enforce-whetstone",
+         "enforce-bonsai", "enforce-suite"]
+entries = s.get("hooks", {}).get("PreToolUse", [])
+for entry in entries:
+    entry["hooks"] = [
+        h for h in entry.get("hooks", [])
+        if not any(kw in h.get("command", "") for kw in STALE)
+    ]
+if "hooks" in s and "PreToolUse" in s["hooks"]:
+    s["hooks"]["PreToolUse"] = [e for e in entries if e.get("hooks")]
+print(json.dumps(s, indent=2))
+PYEOF
+    ;;
+   node)
+    node - "$file" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+const f = process.argv[2];
+const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
+const STALE = ["enforce-cairn", "enforce-temper", "enforce-whetstone",
+               "enforce-bonsai", "enforce-suite"];
+if (s.hooks && s.hooks.PreToolUse) {
+  s.hooks.PreToolUse = s.hooks.PreToolUse
+    .map(e => ({ ...e, hooks: (e.hooks || []).filter(
+      h => !STALE.some(kw => (h.command || "").includes(kw))) }))
+    .filter(e => e.hooks.length);
+}
+process.stdout.write(JSON.stringify(s, null, 2) + "\n");
+JSEOF
+    ;;
+   jq)
+    jq '
+      def stale: ["enforce-cairn","enforce-temper","enforce-whetstone","enforce-bonsai","enforce-suite"];
+      if (.hooks.PreToolUse | type) == "array" then
+        .hooks.PreToolUse |= (
+          map(.hooks |= (map(select(.command as $c | (stale | any(. as $k | $c | contains($k))) | not))))
+          | map(select((.hooks | length) > 0))
+        )
+      else . end
+    ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+    ;;
+   *)
+    printf '  Could not clean stale hooks (install python3, node, or jq).\n'
+    return 1
+    ;;
+  esac
+}
+
+_json_register_suite_hook() {
+  local file="$1" hook_path="$2"
+  _dry && return 0
+  local matcher="Bash|Write|Edit|MultiEdit"
+  case "$(_json_backend)" in
+   python3)
+    python3 - "$file" "$hook_path" "$matcher" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+import json, sys
+f, hook_path, matcher = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(f) as fh: s = json.load(fh)
+hooks = s.setdefault("hooks", {})
+pre = hooks.setdefault("PreToolUse", [])
+entry = next((e for e in pre if e.get("matcher") == matcher), None)
+if entry is None:
+    entry = {"matcher": matcher, "hooks": []}
+    pre.append(entry)
+if not any(h.get("command") == hook_path for h in entry["hooks"]):
+    entry["hooks"].append({"type": "command", "command": hook_path})
+print(json.dumps(s, indent=2))
+PYEOF
+    ;;
+   node)
+    node - "$file" "$hook_path" "$matcher" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+const [f, hookPath, matcher] = process.argv.slice(2);
+const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
+s.hooks = s.hooks || {};
+s.hooks.PreToolUse = s.hooks.PreToolUse || [];
+let entry = s.hooks.PreToolUse.find(e => e.matcher === matcher);
+if (!entry) { entry = { matcher, hooks: [] }; s.hooks.PreToolUse.push(entry); }
+entry.hooks = entry.hooks || [];
+if (!entry.hooks.some(h => h.command === hookPath)) {
+    entry.hooks.push({ type: "command", command: hookPath });
+}
+process.stdout.write(JSON.stringify(s, null, 2) + "\n");
+JSEOF
+    ;;
+   jq)
+    jq --arg p "$hook_path" --arg m "$matcher" '
+      .hooks.PreToolUse |= (
+        if . == null then [{"matcher":$m,"hooks":[{"type":"command","command":$p}]}]
+        else
+          if any(.[]; .matcher == $m) then
+            map(if .matcher == $m then
+              .hooks |= if any(.[]; .command == $p) then . else . + [{"type":"command","command":$p}] end
+            else . end)
+          else . + [{"matcher":$m,"hooks":[{"type":"command","command":$p}]}]
+          end
+        end
+      )' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+    ;;
+   *)
+    printf '  Could not register hook (install python3, node, or jq).\n'
+    printf '  Add a PreToolUse hook pointing to %s manually.\n' "$hook_path"
+    return 1
+    ;;
+  esac
+}
+
+# Permissions, aggregated from the manifests of the plugins actually installed,
+# plus the suite's own. legacy_permissions are removed — bonsai's underscore
+# spelling matched no tool, so the permission it granted was inert.
+_json_sync_perms() {
+  local file="$1" add="$2" drop="$3"
+  _dry && return 0
+  case "$(_json_backend)" in
+   python3)
+    python3 - "$file" "$add" "$drop" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+import json, sys
+f, add, drop = sys.argv[1], sys.argv[2].split(), sys.argv[3].split()
+with open(f) as fh: s = json.load(fh)
+allow = s.setdefault("permissions", {}).setdefault("allow", [])
+for p in add:
+    if p not in allow: allow.append(p)
+for d in drop:
+    while d in allow: allow.remove(d)
+print(json.dumps(s, indent=2))
+PYEOF
+    ;;
+   node)
+    node - "$file" "$add" "$drop" <<'JSEOF' > "$file.tmp" && mv "$file.tmp" "$file"
+const [f, add, drop] = process.argv.slice(2);
+const s = JSON.parse(require("fs").readFileSync(f, "utf8"));
+s.permissions = s.permissions || {};
+s.permissions.allow = s.permissions.allow || [];
+for (const p of add.split(/\s+/).filter(Boolean))
+  if (!s.permissions.allow.includes(p)) s.permissions.allow.push(p);
+const dead = new Set(drop.split(/\s+/).filter(Boolean));
+s.permissions.allow = s.permissions.allow.filter(p => !dead.has(p));
+process.stdout.write(JSON.stringify(s, null, 2) + "\n");
+JSEOF
+    ;;
+   jq)
+    jq --arg a "$add" --arg d "$drop" '
+      .permissions.allow = (
+        ((.permissions.allow // []) + ($a | split(" ") | map(select(. != ""))))
+        | map(select(. as $p | ($d | split(" ") | index($p)) | not))
+        | reduce .[] as $x ([]; if index($x) then . else . + [$x] end)
+      )' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+    ;;
+   *)
+    printf '  Could not update permissions (install python3, node, or jq).\n'
+    return 1 ;;
+  esac
 }
 
 cmd_status() {
   printf 'aether v%s\n\n' "$VERSION"
 
-  for plugin in $PLUGINS; do
-    local global_cfg="$HOME/.claude/${plugin}.config"
-    local local_cfg="./${plugin}.config"
-    local enabled_val=""
-
-    [ -f "$global_cfg" ] && enabled_val=$(_config_get "$global_cfg" "enabled") || true
-    [ -f "$local_cfg"  ] && {
-      local lv; lv=$(_config_get "$local_cfg" "enabled")
-      [ -n "$lv" ] && enabled_val="$lv"
-    } || true
+  for plugin in $(_plugins_available); do
+    local section enabled_val
+    section=$(_mf "$plugin" config_section); section="${section:-$plugin}"
+    enabled_val=$(_cfg_get "$section" "enabled")
 
     local state="enabled"
     [ "$enabled_val" = "false" ] && state="disabled"
@@ -107,7 +903,7 @@ cmd_status() {
   # a corrupt gate is reported.
   local gates_dir gate_count bad_gates
   gates_dir=$(_manifest_get "gates") || gates_dir=""
-  gates_dir="${gates_dir:-$GLOBAL_GATES}"
+  gates_dir="${gates_dir:-$(_gates_dir global)}"
   if [ -d "$gates_dir" ]; then
     gate_count=0; bad_gates=""
     for g in "$gates_dir"/enforce-*.sh; do
@@ -141,33 +937,22 @@ cmd_status() {
   printf '\n'
 }
 
-cmd_enable() {
-  local scope="${1:-local}"
-  for plugin in $PLUGINS; do
-    local target
-    if [ "$scope" = "global" ]; then
-      target="$HOME/.claude/${plugin}.config"
-    else
-      target="./${plugin}.config"
-    fi
-    _config_set "$target" "enabled" "true"
-    printf '  ✓ %s enabled (%s)\n' "$plugin" "$target"
+# The value written is true/false — the word in the message is cosmetic. Keeping
+# them one variable wrote `enabled: disable`, which is not `false`, so nothing
+# was disabled and status still reported every plugin as on.
+_set_enabled_all() {
+  local scope="$1" value="$2" target plugin section
+  target="$(_cfg_file "$scope")"
+  for plugin in $(_plugins_available); do
+    section=$(_mf "$plugin" config_section); section="${section:-$plugin}"
+    _cfg_set "$target" "$section" "enabled" "$value" "$(_mf "$plugin" config.enabled.doc)"
+    printf '  ✓ %s %s (%s)\n' "$plugin" \
+      "$([ "$value" = true ] && printf enabled || printf disabled)" "$target"
   done
 }
 
-cmd_disable() {
-  local scope="${1:-local}"
-  for plugin in $PLUGINS; do
-    local target
-    if [ "$scope" = "global" ]; then
-      target="$HOME/.claude/${plugin}.config"
-    else
-      target="./${plugin}.config"
-    fi
-    _config_set "$target" "enabled" "false"
-    printf '  ✓ %s disabled (%s)\n' "$plugin" "$target"
-  done
-}
+cmd_enable()  { _set_enabled_all "${1:-local}" true; }
+cmd_disable() { _set_enabled_all "${1:-local}" false; }
 
 # All four plugins now live in the aether clone, so updating is a git pull plus
 # a re-run of the local installer — no per-plugin downloads, and the four
@@ -212,16 +997,58 @@ cmd_version() {
   return 0
 }
 
+# ── aether hook enable|disable <plugin> ──────────────────────────────────────
+# The suite had two disable models: `enable`/`disable` writes `enabled: false`
+# to a config file the gate then reads, while bonsai's enable-hook/disable-hook
+# deregistered the hook outright. Both are useful — one is a soft mute, the
+# other stops the hook being invoked at all — so both exist, for every plugin.
+cmd_hook() {
+  local action="${1:-}" plugin="${2:-}" scope="${3:-global}"
+  case "$action" in
+    enable|disable) ;;
+    *) printf 'Usage: aether hook enable|disable <plugin>\n'; return 1 ;;
+  esac
+  [ -n "$plugin" ] || { printf 'Which plugin?\n'; return 1; }
+  local gates; gates=$(_gates_dir "$scope")
+  local g="$gates/enforce-$plugin.sh"
+  if [ "$action" = disable ]; then
+    [ -f "$g" ] || { printf '  %s gate is already not installed\n' "$plugin"; return 0; }
+    mv "$g" "$g.disabled" && printf '  ✓ %s gate disabled (enforce-suite.sh will skip it)\n' "$plugin"
+  else
+    if [ -f "$g.disabled" ]; then
+      mv "$g.disabled" "$g" && printf '  ✓ %s gate re-enabled\n' "$plugin"
+    else
+      local repo; repo=$(_repo_root) || return 1
+      _op_copy "$repo/plugins/$plugin/hooks/enforce-$plugin.sh" "$g" \
+        && printf '  ✓ %s gate enabled\n' "$plugin"
+    fi
+  fi
+}
+
 cmd_uninstall() {
   local scope="local"
   local clean_claude_md=false
+  local want=""
 
   for arg in "$@"; do
     case "$arg" in
       global|--global) scope="global" ;;
       --claude-md)     clean_claude_md=true ;;
+      -*)              ;;
+      *)               want="$want $arg" ;;
     esac
   done
+
+  # Named plugins: remove just those, through the engine, leaving the suite in
+  # place. `aether uninstall` with no plugin removes the suite itself, below.
+  if [ -n "$want" ]; then
+    local p
+    for p in $want; do
+      printf 'Removing %s (%s)...\n' "$p" "$scope"
+      _engine_uninstall "$p" "$scope"
+    done
+    return 0
+  fi
 
   # Every path below is derived from the scope. The hook, gates, CLI and
   # manifest paths used to be hardcoded to the global locations regardless of
@@ -231,18 +1058,18 @@ cmd_uninstall() {
   # global install that had nothing to do with it.
   local settings_file claude_file manifest hook_file gates_dir cli_file
   if [ "$scope" = "global" ]; then
-    settings_file="$GLOBAL_SETTINGS"
+    settings_file="$(_settings global)"
     claude_file="$HOME/.claude/CLAUDE.md"
-    manifest="$GLOBAL_MANIFEST"
-    hook_file="$GLOBAL_HOOK"
-    gates_dir="$GLOBAL_GATES"
+    manifest="$(_manifest_for global)"
+    hook_file="$(_hook_dir global)/enforce-suite.sh"
+    gates_dir="$(_gates_dir global)"
     cli_file="$HOME/.local/bin/aether"
   else
     settings_file=".claude/settings.json"
     claude_file="./CLAUDE.md"
-    manifest="$LOCAL_MANIFEST"
-    hook_file=".claude/hooks/enforce-suite.sh"
-    gates_dir=".claude/hooks/gates"
+    manifest="$(_manifest_for local)"
+    hook_file="$(_hook_dir local)/enforce-suite.sh"
+    gates_dir="$(_gates_dir local)"
     cli_file=".bin/aether"
   fi
 
@@ -289,6 +1116,11 @@ PYEOF
     rm -rf "$gates_dir"
     printf '  ✓ Removed %s\n' "$gates_dir"
   fi
+  # The shared config reader goes with the gates: the PostToolUse hooks that
+  # survive a suite uninstall do not read config, and installing any plugin
+  # reinstalls it.
+  local cfg_lib; cfg_lib="$(dirname "$hook_file")/aether-config.sh"
+  [ -f "$cfg_lib" ] && { rm "$cfg_lib"; printf '  ✓ Removed %s\n' "$cfg_lib"; }
   if [ -f "$hook_file" ]; then
     rm "$hook_file"
     printf '  ✓ Removed %s\n' "$hook_file"
@@ -296,6 +1128,8 @@ PYEOF
 
   # Tidy up directories the install created, but only if nothing else is in
   # them — a local install shares .claude/hooks/ with anything the user put there.
+  # plugin-hooks/ is created by the engine, so it is removed before its parent.
+  rmdir "$(_plugin_hooks "$scope")" 2>/dev/null || true
   rmdir "$(dirname "$hook_file")" 2>/dev/null || true
   [ "$scope" = "global" ] || rmdir .bin 2>/dev/null || true
 
@@ -322,16 +1156,816 @@ PYEOF
   printf 'Restart Claude Code to apply changes.\n'
 }
 
+# MCP servers go in ~/.claude.json, not settings.json. Declared flat in the
+# manifest as mcp.<name>.command / .args, with ${PLUGIN_ROOT} expanded here —
+# which is why moving the clone breaks bonsai and nothing else.
+_json_mcp_sync() {
+  local plugin="$1" proot="$2" action="$3"
+  # ~/.claude.json is Claude Code's own file and is created if absent, so this
+  # needs the guard even though it only ever adds keys.
+  _dry && { printf '  [dry-run] would %s %s MCP servers in ~/.claude.json\n' "$action" "$plugin"; return 0; }
+  command -v python3 >/dev/null 2>&1 || { printf '  ! MCP registration needs python3\n'; return 1; }
+  local names spec=""
+  names=$(grep -oE '^mcp\.[a-z-]+\.command:' "$proot/aether.plugin" 2>/dev/null \
+          | sed 's/^mcp\.//;s/\.command:$//' | sort -u)
+  [ -n "$names" ] || return 0
+  local n cmd cargs
+  for n in $names; do
+    # `|| true`: _mf returns 1 when the clone cannot be located, and a bare
+    # assignment from a failing substitution aborts the whole shell under set -e.
+    # The explicit check below should be what handles this, not an exit.
+    cmd=$(_mf "$plugin" "mcp.$n.command" || true)
+    cargs=$(_mf "$plugin" "mcp.$n.args" 2>/dev/null | sed "s|\${PLUGIN_ROOT}|$proot|g" || true)
+    # An entry with an empty command is worse in ~/.claude.json than no entry:
+    # Claude Code would try to launch it. Refuse rather than write a broken one.
+    if [ "$action" = add ] && [ -z "$cmd" ]; then
+      printf '  ! could not resolve the command for MCP server %s — not registered\n' "$n"
+      continue
+    fi
+    spec="$spec$n"$'\t'"$cmd"$'\t'"$cargs"$'\n'
+  done
+  [ -n "$spec" ] || return 0
+  # The spec goes through argv, not a pipe. `python3 -` reads its program from
+  # stdin, so a heredoc here claims stdin and sys.stdin.read() returns nothing —
+  # which is how this silently wrote an empty mcpServers map and reported success.
+  python3 - "$action" "$spec" <<'PYEOF'
+import json, os, sys
+action, spec = sys.argv[1], sys.argv[2]
+path = os.path.expanduser("~/.claude.json")
+data = {}
+if os.path.exists(path):
+    try:
+        with open(path) as f: data = json.load(f)
+    except json.JSONDecodeError:
+        pass
+servers = data.setdefault("mcpServers", {})
+for line in spec.splitlines():
+    if not line.strip(): continue
+    name, cmd, args = line.split("\t", 2)
+    if action == "remove":
+        servers.pop(name, None)
+    else:
+        servers[name] = {"type": "stdio", "command": cmd, "args": args.split()}
+os.makedirs(os.path.dirname(path), exist_ok=True)
+tmp = path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump(data, f, indent=2); f.write("\n")
+os.replace(tmp, path)
+PYEOF
+}
+
+# ── aether install ───────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# CONFIG
+#
+# The schema lives in the manifests, beside the assets each plugin declares, so
+# a key is documented by being declared and there is no map to keep in sync.
+# Before this, the only list of keys in the suite was a hardcoded DEFAULTS map
+# inside bin/cairn, and the other three plugins resolved their keys with
+# hand-written one-liners.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# One line per declared key: section|key|plugin
+_schema_all() {
+  local repo plugin f default_section section key
+  repo=$(_repo_root) || return 0
+  for plugin in $(_plugins_available); do
+    f="$repo/plugins/$plugin/aether.plugin"
+    [ -f "$f" ] || continue
+    default_section=$(_mf "$plugin" config_section); default_section="${default_section:-$plugin}"
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      section=$(_mf "$plugin" "config.$key.section")
+      printf '%s|%s|%s\n' "${section:-$default_section}" "$key" "$plugin"
+    done <<EOSCHEMA
+$(sed -n 's/^config\.\(.*\)\.doc:.*/\1/p' "$f")
+EOSCHEMA
+  done
+}
+
+# No `exit` in the awk: it would close the pipe while _schema_all is still
+# writing, and bash on Linux reports the resulting EPIPE as
+# `printf: write error: Broken pipe` on stderr — which then lands in whatever the
+# caller captured. macOS dies from SIGPIPE silently, so this passed locally and
+# failed in CI on both platforms' terms.
+_schema_plugin_for() {   # section|key -> owning plugin
+  _schema_all | awk -F'|' -v s="$1" -v k="$2" '$1 == s && $2 == k && !f { print $3; f = 1 }'
+}
+
+# Which layer supplied the live value: "layer|file|line", or "default||".
+_cfg_origin() {
+  local section="$1" key="$2" f ln
+  for pair in "project|$(_cfg_file local)" "global|$(_cfg_file global)"; do
+    f="${pair#*|}"; ln=$(aether_cfg_lineno "$f" "$section" "$key")
+    [ -n "$ln" ] && { printf '%s|%s|%s' "${pair%%|*}" "$f" "$ln"; return 0; }
+  done
+  for pair in "legacy project|./$section.config" "legacy global|$HOME/.claude/$section.config"; do
+    f="${pair#*|}"; ln=$(aether_cfg_lineno "$f" "" "$key")
+    [ -n "$ln" ] && { printf '%s|%s|%s' "${pair%%|*}" "$f" "$ln"; return 0; }
+  done
+  printf 'default||'
+}
+
+_split_key() {           # temper.auto_nudge_lines -> "temper auto_nudge_lines"
+  case "$1" in
+    *.*) printf '%s %s' "${1%%.*}" "${1#*.}" ;;
+    *)   printf ' %s' "$1" ;;
+  esac
+}
+
+_cfg_scope_from_args() { case " $* " in *" global "*|*" --global "*) printf global ;; *) printf local ;; esac; }
+
+cmd_config_show() {
+  local want="${1:-}" values=false raw=false
+  case " $* " in *" --values "*) values=true ;; esac
+  # --raw emits exactly the config file format, defaults applied, one key per
+  # line and nothing else. The slash commands consume this: a value like
+  # "red, yellow" contains spaces, so the aligned human output is ambiguous to
+  # parse and this is not.
+  case " $* " in *" --raw "*) raw=true; values=true ;; esac
+  case "$want" in --*) want="" ;; esac
+
+  if [ "$raw" = true ]; then
+    local section key plugin val
+    while IFS='|' read -r section key plugin; do
+      [ -n "$want" ] && [ "$want" != "$section" ] && continue
+      val=$(_cfg_get "$section" "$key")
+      [ -z "$val" ] && val=$(_mf "$plugin" "config.$key.default")
+      [ -n "$val" ] && printf '%s: %s\n' "$key" "$val"
+    done <<EORAW
+$(_schema_all)
+EORAW
+    return 0
+  fi
+
+  local last="" section key plugin val def origin layer file line doc used
+  while IFS='|' read -r section key plugin; do
+    [ -n "$want" ] && [ "$want" != "$section" ] && continue
+    if [ "$section" != "$last" ]; then
+      printf '\n[%s]\n' "${section:-suite}"; last="$section"
+    fi
+    val=$(_cfg_get "$section" "$key")
+    def=$(_mf "$plugin" "config.$key.default")
+    origin=$(_cfg_origin "$section" "$key")
+    layer="${origin%%|*}"; file="${origin#*|}"; line="${file#*|}"; file="${file%%|*}"
+    file="${file/#$HOME/~}"
+    [ -z "$val" ] && { val="$def"; layer="default"; }
+    [ -z "$val" ] && val="(unset)"
+    if [ "$layer" = "default" ]; then
+      printf '  %-20s %-22s %s\n' "$key" "$val" "default"
+    else
+      printf '  %-20s %-22s %s · %s:%s\n' "$key" "$val" "$layer" "$file" "$line"
+    fi
+    if [ "$values" = false ]; then
+      doc=$(_mf "$plugin" "config.$key.doc")
+      used=$(_mf "$plugin" "config.$key.used_by")
+      [ -n "$doc" ] && printf '      %s\n' "$doc"
+      [ -n "$used" ] && printf '      used by: %s\n' "$used"
+    fi
+  done <<EOSHOW
+$(_schema_all)
+EOSHOW
+  printf '\n'
+  [ "$values" = false ] && printf 'Edit with: aether config set <section>.<key> <value> [global]\n'
+  return 0
+}
+
+cmd_config_explain() {
+  local raw="$1"
+  [ -n "$raw" ] || { printf 'Usage: aether config explain <section>.<key>\n'; return 1; }
+  local parsed section key; parsed=$(_split_key "$raw")
+  section="${parsed%% *}"; key="${parsed#* }"
+  local plugin; plugin=$(_schema_plugin_for "$section" "$key")
+  [ -n "$plugin" ] || { printf 'No such key: %s\n\nRun `aether config show` for the full list.\n' "$raw"; return 1; }
+
+  printf '\n%s.%s\n\n' "$section" "$key"
+  printf '  %s\n\n' "$(_mf "$plugin" "config.$key.doc")"
+  printf '  %-12s %s\n' "declared by" "$plugin"
+  printf '  %-12s %s\n' "type"        "$(_mf "$plugin" "config.$key.type"    || true)"
+  printf '  %-12s %s\n' "default"     "$(_mf "$plugin" "config.$key.default" || true)"
+  printf '  %-12s %s\n' "used by"     "$(_mf "$plugin" "config.$key.used_by" || true)"
+
+  printf '\n  Layers, lowest priority first:\n'
+  local f ln v
+  for pair in "global|$(_cfg_file global)" "project|$(_cfg_file local)"; do
+    f="${pair#*|}"; ln=$(aether_cfg_lineno "$f" "$section" "$key")
+    if [ -n "$ln" ]; then
+      v=$(aether_cfg_read "$f" "$section" "$key")
+      printf '    %-8s %-20s %s:%s\n' "${pair%%|*}" "$v" "${f/#$HOME/~}" "$ln"
+    else
+      printf '    %-8s %-20s %s\n' "${pair%%|*}" "—" "not set"
+    fi
+  done
+  printf '\n  Resolved: %s\n\n' "$(_cfg_get "$section" "$key")"
+  return 0
+}
+
+# The mistakes hand-editing actually produces. A typo is the one worth catching
+# most: today it is silently ignored, the default applies, and the setting
+# simply appears to have no effect.
+cmd_config_doctor() {
+  local schema resolved=0 problems=0
+  schema=$(_schema_all)
+
+  local f scope pair section key known suggestion
+  for pair in "global|$(_cfg_file global)" "project|$(_cfg_file local)"; do
+    scope="${pair%%|*}"; f="${pair#*|}"
+    [ -f "$f" ] || continue
+    while IFS='|' read -r section key; do
+      [ -n "$key" ] || continue
+      # Reads to EOF for the same reason as _schema_plugin_for.
+      known=$(printf '%s\n' "$schema" | awk -F'|' -v s="$section" -v k="$key" '$1 == s && $2 == k && !f { print 1; f = 1 }')
+      if [ -n "$known" ]; then
+        resolved=$((resolved + 1))
+      else
+        problems=$((problems + 1))
+        printf '  ✗ [%s] %s — unknown key  (%s:%s)\n' "$section" "$key" "$f" \
+          "$(aether_cfg_lineno "$f" "$section" "$key")"
+        # Longest shared prefix within the same section, which is what a typo
+        # in a long key like auto_nudge_lines actually looks like.
+        suggestion=$(printf '%s\n' "$schema" | awk -F'|' -v s="$section" -v k="$key" '
+          $1 == s {
+            n = 0
+            while (n < length(k) && n < length($2) && substr(k, n+1, 1) == substr($2, n+1, 1)) n++
+            if (n > best && n >= 4) { best = n; cand = $2 }
+          }
+          END { if (cand != "") print cand }')
+        [ -n "$suggestion" ] && printf '      did you mean %s?\n' "$suggestion"
+      fi
+    done <<EOKEYS
+$(aether_cfg_keys "$f")
+EOKEYS
+  done
+
+  # A [project] command whose binary is absent runs as nothing at all.
+  #
+  # Every command position is checked, not just the first word. `git ls-files … |
+  # xargs shellcheck` starts with `git`, which is always present, so checking only
+  # the first word reported "no problems" on a machine with no shellcheck — the
+  # exact silent skip this is here to catch. Runner prefixes have the same shape
+  # in reverse: `uv run pytest` needs `uv`, and that *is* the first word.
+  local cmdkey val bin seg missing
+  for cmdkey in test lint format typecheck build coverage; do
+    val=$(_cfg_get project "$cmdkey"); [ -n "$val" ] || continue
+    missing=""
+    # Split on pipeline and list separators; the first word of each is a command.
+    while IFS= read -r seg; do
+      seg="${seg#"${seg%%[![:space:]]*}"}"        # strip leading whitespace
+      bin="${seg%% *}"
+      # A few wrappers put the real command in argument position, so the first
+      # word is never the thing that can be missing. `git ls-files | xargs
+      # shellcheck` is the shape that matters here: without this, the check saw
+      # `git`, said nothing, and shellcheck was silently skipped. Only wrappers
+      # whose next word must already be an executable are unwrapped — `npx tsc`
+      # and `uv run pytest` are deliberately not, since those fetch or resolve it.
+      while :; do
+        case "$bin" in
+          xargs|env|nice|nohup|sudo|time)
+            seg="${seg#"$bin"}"; seg="${seg#"${seg%%[![:space:]]*}"}"
+            while :; do case "$seg" in -*) seg="${seg#* }"; seg="${seg#"${seg%%[![:space:]]*}"}" ;; *) break ;; esac; done
+            bin="${seg%% *}"; [ -n "$bin" ] || break ;;
+          *) break ;;
+        esac
+      done
+      case "$bin" in ''|-*|*=*|'('*) continue ;; esac
+      command -v "$bin" >/dev/null 2>&1 || missing="$missing $bin"
+    done <<EOSEG
+$(printf '%s' "$val" | tr '|;' '\n\n' | sed 's/&&/\n/g')
+EOSEG
+    [ -n "$missing" ] && {
+      problems=$((problems + 1))
+      printf '  ! [project] %s: %s\n' "$cmdkey" "$val"
+      printf '      not on PATH:%s — that step will be skipped\n' "$missing"
+    }
+  done
+
+  command -v aether_cfg_get >/dev/null 2>&1 || {
+    problems=$((problems + 1))
+    printf '  ✗ aether-config.sh not found — every value is falling back to its default\n'
+  }
+
+  if [ -f .aether/config ] || [ -f .aether/rules.md ]; then
+    case "$(aether_trust_state)" in
+      nohash)
+        problems=$((problems + 1))
+        printf '  ! no SHA-256 on this machine — nothing can be trusted\n'
+        printf '      install shasum, sha256sum or openssl\n' ;;
+      changed)
+        problems=$((problems + 1))
+        printf '  ! .aether/ changed since it was trusted\n'
+        printf '      [project] commands and rules.md are being ignored — review, then: aether trust\n' ;;
+      none)
+        problems=$((problems + 1))
+        printf '  ! .aether/ is untrusted\n'
+        printf '      [project] commands and rules.md are being ignored — review, then: aether trust\n' ;;
+    esac
+  fi
+
+  printf '  ✓ %s key(s) resolved\n' "$resolved"
+  [ "$problems" -eq 0 ] && printf '\nNo problems found.\n'
+  return 0
+}
+
+cmd_config() {
+  local sub="${1:-show}"; shift 2>/dev/null || true
+  case "$sub" in
+    show)    cmd_config_show "$@" ;;
+    explain) cmd_config_explain "$@" ;;
+    doctor)  cmd_config_doctor "$@" ;;
+    path)    _cfg_file "$(_cfg_scope_from_args "$@")"; printf '\n' ;;
+    edit)
+      local f; f=$(_cfg_file "$(_cfg_scope_from_args "$@")")
+      mkdir -p "$(dirname "$f")"; [ -f "$f" ] || _seed_config "$f"
+      "${EDITOR:-vi}" "$f" ;;
+    get)
+      # Falls back to the schema default, so this prints the value that is
+      # actually in effect rather than "" for anything left unset.
+      local parsed section key val plugin
+      parsed=$(_split_key "${1:-}"); section="${parsed%% *}"; key="${parsed#* }"
+      val=$(_cfg_get "$section" "$key")
+      if [ -z "$val" ]; then
+        plugin=$(_schema_plugin_for "$section" "$key")
+        [ -n "$plugin" ] && val=$(_mf "$plugin" "config.$key.default")
+      fi
+      printf '%s\n' "$val" ;;
+    set)
+      local raw="${1:-}" value="${2:-}"
+      [ -n "$raw" ] && [ -n "$value" ] || { printf 'Usage: aether config set <section>.<key> <value> [global]\n'; return 1; }
+      shift 2
+      local parsed section key scope plugin
+      parsed=$(_split_key "$raw"); section="${parsed%% *}"; key="${parsed#* }"
+      scope=$(_cfg_scope_from_args "$@")
+      plugin=$(_schema_plugin_for "$section" "$key")
+      [ -n "$plugin" ] || printf 'Warning: no plugin declares %s.%s — it will be ignored.\n' "$section" "$key"
+      _cfg_set "$(_cfg_file "$scope")" "$section" "$key" "$value" \
+               "$([ -n "$plugin" ] && _mf "$plugin" "config.$key.doc")"
+      printf '  ✓ %s.%s = %s  (%s)\n' "$section" "$key" "$value" "$(_cfg_file "$scope")"
+      # You made this change through aether, so it does not cost a re-prompt.
+      # Hand-editing does, which is the whole point of the hash.
+      [ "$scope" = local ] && [ "$(aether_trust_state)" != none ] && _trust_record
+      return 0 ;;
+    unset)
+      local raw="${1:-}"; [ -n "$raw" ] || { printf 'Usage: aether config unset <section>.<key> [global]\n'; return 1; }
+      shift
+      local parsed; parsed=$(_split_key "$raw")
+      local uscope; uscope=$(_cfg_scope_from_args "$@")
+      _cfg_unset "$(_cfg_file "$uscope")" "${parsed%% *}" "${parsed#* }"
+      printf '  ✓ unset %s\n' "$raw"
+      [ "$uscope" = local ] && [ "$(aether_trust_state)" != none ] && _trust_record
+      return 0 ;;
+    *) printf 'Unknown: aether config %s\n\nTry: show, explain, doctor, path, edit, get, set, unset\n' "$sub"; return 1 ;;
+  esac
+}
+
+# A first config that answers "what can I put here?" without leaving the file.
+# Every key is present but commented out at its default, so a commented line
+# reads as a suggestion rather than a decision the user has to look up.
+_seed_config() {
+  local dest="$1"
+  [ -f "$dest" ] && return 0
+  _dry && { printf '  [dry-run] seed %s\n' "$dest"; return 0; }
+  mkdir -p "$(dirname "$dest")"
+  {
+    printf '# aether config — every key below is commented out at its default.\n'
+    printf '# Uncomment a line to change it.  `aether config show` prints what is live.\n'
+    local last="" section key plugin doc def used
+    while IFS='|' read -r section key plugin; do
+      [ "$section" = "$last" ] || { printf '\n[%s]\n' "$section"; last="$section"; }
+      doc=$(_mf "$plugin" "config.$key.doc")
+      def=$(_mf "$plugin" "config.$key.default")
+      used=$(_mf "$plugin" "config.$key.used_by")
+      [ -n "$doc" ] && printf '# %s%s\n' "$doc" "${used:+  → $used}"
+      printf '# %s: %s\n' "$key" "$def"
+    done <<EOSEED
+$(_schema_all)
+EOSEED
+  } > "$dest"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TRUST
+# ═══════════════════════════════════════════════════════════════════════════
+
+# _trust_record — write (or refresh) this project's hash
+_trust_record() {
+  local f here h tmp
+  f=$(aether_trust_file); here=$(pwd -P); h=$(aether_hash_project)
+  _dry && { printf '  [dry-run] would trust %s\n' "$here"; return 0; }
+  mkdir -p "$(dirname "$f")"; [ -f "$f" ] || : > "$f"
+  tmp="$f.tmp"
+  awk -v p="$here" '{ i = index($0, " "); if (substr($0, i + 1) != p) print }' "$f" > "$tmp"
+  printf '%s %s\n' "$h" "$here" >> "$tmp"
+  mv "$tmp" "$f"
+}
+
+_trust_forget() {
+  local f here tmp
+  f=$(aether_trust_file); here=$(pwd -P)
+  [ -f "$f" ] || return 0
+  _dry && { printf '  [dry-run] would untrust %s\n' "$here"; return 0; }
+  tmp="$f.tmp"
+  awk -v p="$here" '{ i = index($0, " "); if (substr($0, i + 1) != p) print }' "$f" > "$tmp"
+  mv "$tmp" "$f"
+}
+
+# What the user is consenting to, shown before they consent to it. Anything else
+# would make `aether trust` a formality.
+_trust_preview() {
+  local any=0 v k
+  if [ -f .aether/config ]; then
+    for k in test lint format typecheck build coverage; do
+      v=$(aether_cfg_read .aether/config project "$k")
+      [ -n "$v" ] || continue
+      [ "$any" -eq 0 ] && { printf '\n  Commands the critics would run:\n'; any=1; }
+      printf '    %-11s %s\n' "$k" "$v"
+    done
+  fi
+  if [ -f .aether/rules.md ]; then
+    printf '\n  Prose that would reach a critic (.aether/rules.md, %s line(s)):\n' \
+      "$(awk 'END{print NR}' .aether/rules.md)"
+    awk 'NR <= 12 { printf "    %s\n", $0 } END { if (NR > 12) printf "    … %d more line(s)\n", NR - 12 }' .aether/rules.md
+    any=1
+  fi
+  [ "$any" -eq 0 ] && printf '\n  Nothing executable and no prose — this project only sets thresholds.\n'
+  return 0
+}
+
+cmd_trust() {
+  local sub="${1:-set}"
+  case "$sub" in
+    --forget|forget|remove)
+      _trust_forget; printf '  ✓ %s is no longer trusted\n' "$(pwd -P)" ;;
+    status)
+      local st; st=$(aether_trust_state)
+      printf '  %s: %s\n' "$(pwd -P)" "$st"
+      case "$st" in
+        ok)      printf '  [project] commands and rules.md are in use.\n' ;;
+        changed) printf '  Edited since it was trusted — both are being IGNORED.\n' ;;
+        nohash)  printf '  No SHA-256 available (shasum, sha256sum or openssl).\n'
+                 printf '  Trust cannot be verified, so nothing is trusted.\n' ;;
+        *)       printf '  Untrusted — [project] commands and rules.md are being ignored.\n' ;;
+      esac ;;
+    *)
+      [ -f .aether/config ] || [ -f .aether/rules.md ] || {
+        printf 'Nothing to trust: this project has no .aether/config or .aether/rules.md.\n'; return 1; }
+      [ "$(aether_trust_state)" = nohash ] && {
+        printf 'Cannot trust: no SHA-256 available (shasum, sha256sum or openssl).\n'
+        printf 'Trust is a content hash, and a weaker one would not be trust.\n'; return 1; }
+      printf 'Trusting %s\n' "$(pwd -P)"
+      _trust_preview
+      printf '\n'
+      _trust_record
+      printf '  ✓ trusted. Re-run `aether trust` after editing either file by hand;\n'
+      printf '    changes made with `aether config set` re-hash automatically.\n' ;;
+  esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MIGRATION  (pre-1.0 layout → <root>)
+#
+# Idempotent, so an interrupted run finishes on the next attempt, and running
+# it on an already-migrated machine is a no-op. Where both old and new exist,
+# NEW WINS — the old file is copied to .bak and removed, never merged over the
+# top of a value the user has already set in the new place.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_retire() {                       # back up, then remove
+  local f="$1"
+  [ -e "$f" ] || return 0
+  _dry && { printf '    would retire %s (backup at %s.bak)\n' "$f" "$f"; return 0; }
+  cp -R "$f" "$f.bak" 2>/dev/null || true
+  rm -rf "$f"
+}
+
+# Old <plugin>.config → one [section] in <root>/config
+_migrate_configs() {
+  local scope="$1" dest old plugin section key val moved=0
+  dest="$(_cfg_file "$scope")"
+  for plugin in $(_plugins_available); do
+    section=$(_mf "$plugin" config_section); section="${section:-$plugin}"
+    [ "$scope" = global ] && old="$HOME/.claude/${section}.config" || old="./${section}.config"
+    [ -f "$old" ] || continue
+    while IFS= read -r line; do
+      case "$line" in ''|'#'*) continue ;; esac
+      key="${line%%:*}"; val="${line#*:}"
+      # Strip surrounding whitespace without invoking sed per line.
+      key="${key#"${key%%[![:space:]]*}"}"; key="${key%"${key##*[![:space:]]}"}"
+      val="${val#"${val%%[![:space:]]*}"}"; val="${val%"${val##*[![:space:]]}"}"
+      [ -n "$key" ] || continue
+      # New wins: only carry a key the new file does not already define.
+      [ -n "$(_cfg_read "$dest" "$section" "$key")" ] && continue
+      _cfg_set "$dest" "$section" "$key" "$val" "$(_mf "$plugin" "config.$key.doc")"
+    done < "$old"
+    _retire "$old"; moved=$((moved + 1))
+  done
+  [ "$moved" -gt 0 ] && printf '    %s config file(s) → %s\n' "$moved" "$dest"
+  return 0
+}
+
+# Append a section to rules.md unless it is already there. Prose concatenates
+# rather than overriding, so re-running must not duplicate a block.
+# Returns 1 when there was nothing to do, so the caller stays quiet on a
+# re-run instead of reporting an import it did not perform.
+_rules_append() {
+  local dest="$1" section="$2" src="$3"
+  [ -f "$src" ] || return 1
+  if [ -f "$dest" ] && grep -q "^\[$section\]$" "$dest"; then return 1; fi
+  _dry && { printf '    would import %s → %s [%s]\n' "$src" "$dest" "$section"; return 0; }
+  mkdir -p "$(dirname "$dest")"
+  [ -s "$dest" ] && printf '\n' >> "$dest"
+  printf '[%s]\n' "$section" >> "$dest"
+  cat "$src" >> "$dest"
+}
+
+# The two prose mechanisms that existed before rules.md, plus cairn's template
+# pointer. cairn's pr.rules_file is why one user's rules ended up at
+# ~/.cairn/pr-rules.md — a path the suite never defined but happily followed.
+_migrate_rules() {
+  local scope="$1" dest rules_src tmpl_src
+  dest="$(_rules_file "$scope")"
+
+  if [ "$scope" = local ] && [ -f "./whetstone.config.md" ]; then
+    _rules_append "$dest" "critique-plan" "./whetstone.config.md"
+    _retire "./whetstone.config.md"
+    printf '    whetstone.config.md → %s [critique-plan]\n' "$dest"
+  fi
+
+  # Read from THIS scope only. Resolving normally would pull a global
+  # pr.rules_file into every project's rules.md, turning one setting into a
+  # copy in every repo the user migrates.
+  rules_src=$(_scoped_cfg "$scope" cairn pr.rules_file)
+  rules_src="${rules_src/#\~/$HOME}"
+  if [ -n "$rules_src" ] && [ -f "$rules_src" ] \
+     && _rules_append "$dest" "draft-pr" "$rules_src"; then
+    printf '    %s → %s [draft-pr]\n' "$rules_src" "$dest"
+  fi
+
+  tmpl_src=$(_scoped_cfg "$scope" cairn pr.template_file)
+  tmpl_src="${tmpl_src/#\~/$HOME}"
+  if [ -n "$tmpl_src" ] && [ -f "$tmpl_src" ] \
+     && [ ! -f "$(_root "$scope")/templates/pr.md" ]; then
+    _op_copy "$tmpl_src" "$(_root "$scope")/templates/pr.md" >/dev/null 2>&1 || true
+    printf '    %s → %s/templates/pr.md\n' "$tmpl_src" "$(_root "$scope")"
+  fi
+  return 0
+}
+
+# One scope, new file then old, with no cross-scope fallback.
+_scoped_cfg() {
+  local scope="$1" section="$2" key="$3" v old
+  v=$(aether_cfg_read "$(_cfg_file "$scope")" "$section" "$key")
+  [ -n "$v" ] && { printf '%s' "$v"; return 0; }
+  [ "$scope" = global ] && old="$HOME/.claude/$section.config" || old="./$section.config"
+  aether_cfg_read "$old" "" "$key"
+}
+
+# Generated output leaves .claude/plans/, which is plan mode's directory, not
+# ours. Plan files themselves stay — the user wrote those.
+_migrate_out() {
+  local scope="$1" out src
+  [ "$scope" = local ] || return 0
+  out="$(_out_dir "$scope")"
+  for src in .claude/plans/CRITIQUE.md .claude/plans/TEMPER.md; do
+    [ -f "$src" ] || continue
+    [ -f "$out/$(basename "$src")" ] || _op_copy "$src" "$out/$(basename "$src")" >/dev/null 2>&1
+    _retire "$src"
+    printf '    %s → %s/\n' "$src" "$out"
+  done
+  if [ -f .claude/plans/.whetstone-nudged ]; then
+    _dry || { mkdir -p "$out"; : > "$out/.nudged"; }
+    _retire .claude/plans/.whetstone-nudged
+  fi
+  return 0
+}
+
+_migrate_manifest() {
+  local scope="$1" old new
+  [ "$scope" = global ] && old="$LEGACY_GLOBAL_MANIFEST" || old="$LEGACY_LOCAL_MANIFEST"
+  new="$(_manifest_for "$scope")"
+  [ -f "$old" ] || return 0
+  [ -f "$new" ] || _op_copy "$old" "$new" >/dev/null 2>&1
+  _retire "$old"
+  printf '    %s → %s\n' "$old" "$new"
+  return 0
+}
+
+_migrate_layout() {
+  local scope="$1" any=""
+  # Cheap check first: say nothing at all on a machine with nothing to move.
+  if [ "$scope" = global ]; then
+    [ -e "$LEGACY_HOOK_DIR" ] || [ -f "$LEGACY_GLOBAL_MANIFEST" ] && any=1
+  else
+    [ -e "$LEGACY_LOCAL_HOOKS/enforce-suite.sh" ] || [ -f "$LEGACY_LOCAL_MANIFEST" ] && any=1
+  fi
+  for plugin in $(_plugins_available); do
+    local sec; sec=$(_mf "$plugin" config_section); sec="${sec:-$plugin}"
+    [ "$scope" = global ] && [ -f "$HOME/.claude/${sec}.config" ] && any=1
+    [ "$scope" = local  ] && [ -f "./${sec}.config" ] && any=1
+  done
+  [ "$scope" = local ] && { [ -f ./whetstone.config.md ] || [ -f .claude/plans/CRITIQUE.md ] \
+    || [ -f .claude/plans/TEMPER.md ]; } && any=1
+  [ -n "$any" ] || return 0
+
+  printf '  Migrating to %s/\n' "$(_root "$scope")"
+  _migrate_rules    "$scope"   # before configs: it reads pr.rules_file from them
+  _migrate_configs  "$scope"
+  _migrate_out      "$scope"
+  _migrate_manifest "$scope"
+  return 0
+}
+
+# Runs only once the new hook is registered, so an interrupted upgrade can
+# never leave a machine with no gate at all.
+_retire_legacy_hooks() {
+  local scope="$1" newhook
+  newhook="$(_hook_dir "$scope")/enforce-suite.sh"
+  [ -f "$newhook" ] || return 0
+  if [ "$scope" = global ]; then
+    [ -e "$LEGACY_HOOK_DIR" ] && { _retire "$LEGACY_HOOK_DIR"
+      printf '    retired %s\n' "$LEGACY_HOOK_DIR"; }
+  else
+    local f
+    for f in "$LEGACY_LOCAL_HOOKS/enforce-suite.sh" "$LEGACY_LOCAL_HOOKS/gates" \
+             "$LEGACY_LOCAL_HOOKS/plugin-hooks"; do
+      [ -e "$f" ] && _retire "$f"
+    done
+    # Only if we are the last thing in it — a user may keep their own hooks here.
+    rmdir "$LEGACY_LOCAL_HOOKS" 2>/dev/null || true
+  fi
+  return 0
+}
+
+cmd_install() {
+  local scope="local" want=""
+  WITH_CLAUDE_MD=false
+  local no_bonsai=false
+  for arg in "$@"; do
+    case "$arg" in
+      global|--global) scope="global" ;;
+      --claude-md)     WITH_CLAUDE_MD=true ;;
+      --no-bonsai)     no_bonsai=true ;;
+      --dry-run)       DRY_RUN=true ;;
+      -*)              printf 'Unknown option: %s\n' "$arg"; return 1 ;;
+      *)               want="$want $arg" ;;
+    esac
+  done
+
+  local repo; repo=$(_repo_root) || { printf 'Cannot locate the aether clone.\n'; return 1; }
+  _dry && printf '\n[dry-run] nothing below is written.\n'
+  local targets; targets=$(_plugins_available)
+  [ -n "$want" ] && targets="$want"
+
+  local settings; settings=$(_settings "$scope")
+  if ! _dry; then
+    mkdir -p "$(dirname "$settings")"
+    [ -f "$settings" ] || printf '{}\n' > "$settings"
+    _backup "$settings"
+  fi
+
+  # Per-plugin PreToolUse hooks are superseded by enforce-suite.sh.
+  _json_remove_stale_hooks "$settings" || true
+
+  # Before anything is written, so the install lands on the new layout rather
+  # than beside a half-migrated old one.
+  _migrate_layout "$scope"
+
+  printf '\nInstalling from %s ...\n' "$repo"
+  local installed="" failed=0 p
+  for p in $targets; do
+    [ "$p" = bonsai ] && [ "$no_bonsai" = true ] && { printf '  bonsai: skipped (--no-bonsai)\n'; continue; }
+    if _engine_install "$p" "$scope" 1; then
+      installed="$installed $p"
+      [ -n "$(_mf "$p" mcp.bonsai-py.command)" ] && _json_mcp_sync "$p" "$repo/plugins/$p" add || true
+    else
+      # 2 means "prerequisites missing, skipped" — not a failure.
+      [ $? -eq 2 ] || failed=1
+    fi
+  done
+  _json_remove_stale_hooks "$settings" || true
+
+  # Suite hook and the gates it sources.
+  printf '\nInstalling suite hook...\n'
+  local hookdir; hookdir=$(_hook_dir "$scope")
+  local gates;   gates=$(_gates_dir "$scope")
+  _dry || mkdir -p "$hookdir" "$gates"
+  _op_copy "$repo/hooks/enforce-suite.sh" "$hookdir/enforce-suite.sh"
+  rm -f "$gates"/enforce-*.sh 2>/dev/null || true
+  for p in $installed; do
+    local g="$repo/plugins/$p/hooks/enforce-$p.sh"
+    [ -f "$g" ] && _op_copy "$g" "$gates/enforce-$p.sh"
+  done
+  local _n=0 _g
+  for _g in "$gates"/enforce-*.sh; do [ -f "$_g" ] && _n=$((_n + 1)); done
+  _ok "$(printf '%s gates installed' "$_n")"
+  _json_register_suite_hook "$settings" "$hookdir/enforce-suite.sh" \
+    && _ok 'PreToolUse hook registered'
+  # Now, and only now, is it safe to delete the hook the old layout was using.
+  _retire_legacy_hooks "$scope"
+  # …and to deregister anything still pointing at it, in either phase.
+  if [ "$scope" = global ]; then
+    _json_drop_hooks_matching "$settings" "$LEGACY_HOOK_DIR/" || true
+  else
+    _json_drop_hooks_matching "$settings" "$LEGACY_LOCAL_HOOKS/" || true
+  fi
+
+  # The config reader the gates source. They run from <root>/hooks/gates/ and
+  # cannot reach into the clone, so the reader is installed beside them —
+  # the same reason the gates themselves are copied rather than sourced in place.
+  _op_copy "$repo/hooks/aether-config.sh" "$hookdir/aether-config.sh"
+
+  # Permissions, aggregated from the manifests of what actually installed.
+  local add="Bash Read Write" drop=""
+  for p in $installed; do add="$add $(_mf "$p" permissions)"; done
+  # Cleanup is unconditional: a stale permission outlives the plugin that wrote
+  # it, so scoping this to what installed *this run* would strand it forever.
+  for p in $(_plugins_available); do drop="$drop $(_mf "$p" legacy_permissions)"; done
+  _json_sync_perms "$settings" "$add" "$drop" && _ok 'permissions synced'
+
+  _op_copy "$repo/bin/aether" "$(_cli_dir "$scope")/aether"
+  _ok 'aether CLI installed'
+
+  # A first config with every key present but commented out at its default, so
+  # "what can I put here?" is answered by the file itself. Never overwrites one.
+  if [ ! -f "$(_cfg_file "$scope")" ]; then
+    _seed_config "$(_cfg_file "$scope")"
+    _dry || printf '  ✓ starter config written to %s\n' "$(_cfg_file "$scope")"
+  fi
+
+  if [ "$WITH_CLAUDE_MD" = true ]; then
+    _backup "$(_claude_md "$scope")"
+    for p in $(_plugins_available); do
+      _op_unsplice "$(_claude_md "$scope")" "$(_mf "$p" template.sentinel)" >/dev/null 2>&1 || true
+    done
+    _op_splice "$(_claude_md "$scope")" aether "$repo/templates/CLAUDE.md" nowrap
+    _ok 'aether CLAUDE.md block written'
+  fi
+
+  local shipped=""
+  for p in $installed; do shipped="$shipped $(_mf "$p" commands)"; done
+  local mf; mf=$(_manifest_for "$scope")
+  if _dry; then
+    printf '\n[dry-run] complete. Run without --dry-run to apply.\n'; return 0
+  fi
+  mkdir -p "$(dirname "$mf")"
+  cat > "$mf" <<MEOF
+version=$VERSION
+scope=$scope
+hook=$hookdir/enforce-suite.sh
+gates=$gates
+repo=$repo
+claude_md=$WITH_CLAUDE_MD
+plugins=$(echo $installed)
+commands=$(echo $shipped)
+MEOF
+  printf '\n  ✓ manifest written to %s\n' "$mf"
+  [ "$failed" -eq 0 ] || { printf '\naether installed with errors.\n'; return 1; }
+  printf '\naether v%s installed (%s). Restart Claude Code to activate.\n' "$VERSION" "$scope"
+}
+
 COMMAND="${1:-help}"
 shift || true
 
 case "$COMMAND" in
+  install)   cmd_install "$@" ;;
   status)    cmd_status ;;
+  hook)      cmd_hook "$@" ;;
   enable)    cmd_enable "$@" ;;
   disable)   cmd_disable "$@" ;;
+  config)    cmd_config "$@" ;;
+  trust)     cmd_trust "$@" ;;
+  rules)     aether_rules ;;
+  migrate)   for _s in global local; do _migrate_layout "$_s"; _retire_legacy_hooks "$_s"; done
+             printf 'Migration complete.\n' ;;
   update)    cmd_update ;;
   version|--version|-V) cmd_version ;;
   uninstall) cmd_uninstall "$@" ;;
   help|--help|-h) usage ;;
-  *) printf 'Unknown command: %s\n\n' "$COMMAND"; usage; exit 1 ;;
+  *)
+    # `aether cairn status` — the shims exec this, so one implementation serves
+    # both `cairn status` and `aether cairn status`.
+    if _plugins_available 2>/dev/null | grep -qx "$COMMAND"; then
+      _PLUGIN="$COMMAND"; sub="${1:-status}"; shift || true
+      case "$sub" in
+        status)    cmd_status "$_PLUGIN" ;;
+        enable)    cmd_enable "$@" ;;
+        disable)   cmd_disable "$@" ;;
+        install)   cmd_install "$_PLUGIN" "$@" ;;
+        uninstall) cmd_uninstall "$_PLUGIN" "$@" ;;
+        # Updating one plugin means reinstalling it from the clone, which also
+        # prunes any command file it no longer ships. `aether update` (no
+        # plugin) is the suite-level git pull.
+        #
+        # The recorded scope is passed explicitly. Defaulting to local meant
+        # `cairn update` run from any directory quietly performed a *local*
+        # install there — the same scope-inheritance bug that hit
+        # `aether uninstall` and the three plugin updates before it.
+        update)    cmd_install "$_PLUGIN" "$(_manifest_get scope)" "$@" ;;
+        hook)      cmd_hook "$@" "$_PLUGIN" ;;
+        config)    cmd_config show "$(_mf "$_PLUGIN" config_section || printf '%s' "$_PLUGIN")" "$@" ;;
+        help|--help|-h) usage ;;
+        *) printf 'Unknown %s subcommand: %s\n' "$_PLUGIN" "$sub"; exit 1 ;;
+      esac
+      exit $?
+    fi
+    printf 'Unknown command: %s\n\n' "$COMMAND"; usage; exit 1 ;;
 esac

@@ -15,16 +15,19 @@ Parse $ARGUMENTS for flags. Supported flags:
 Run this single Bash command:
 
 ```bash
-{ cat ./cairn.config 2>/dev/null; echo "---CAIRN_SEP---"; cat "$HOME/.claude/cairn.config" 2>/dev/null; }
+aether config show cairn --raw 2>/dev/null || true
 ```
 
-Split on `---CAIRN_SEP---`. Local config (before) takes precedence over global (after).
+Each line is `key: value`, already resolved — global `~/.aether/config`, then the
+project's `.aether/config`, per key, with declared defaults filled in. Nothing
+left to merge. If it prints nothing (aether missing or pre-1.1), use the
+documented fallbacks below and continue rather than failing.
 
 Resolve settings:
 - `pr.base` — default base branch if `--base` not in $ARGUMENTS
 - `pr.style` — default style if `--style` not in $ARGUMENTS; fallback to `style:` key; fallback to `conventional`
-- `pr.template_file` — path to PR description template file (optional)
-- `pr.rules_file` — path to prose generation rules file (optional)
+- `pr.template_file` — legacy path to a PR body template; superseded by `.aether/templates/pr.md`
+- `pr.rules_file` — legacy path to prose rules; superseded by the `[draft-pr]` section of `.aether/rules.md`
 
 **Step 2 — Detect base branch**
 
@@ -75,14 +78,24 @@ If found, print a warning block and continue (do not stop).
 
 **Step 5 — Read template and rules files (if configured)**
 
-If `pr.template_file` was set in config:
+Prefer the standard locations, falling back to the legacy pointer:
+```bash
+cat .aether/templates/pr.md "$HOME/.aether/templates/pr.md" 2>/dev/null | head -200
+```
+If neither exists and `pr.template_file` was set in config:
 ```bash
 cat <pr.template_file> 2>/dev/null || echo ""
 ```
 If the file exists, use its structure as the output format (fill in each section).
 If the file is missing, print: `⚠️  pr.template_file set but not found: <path>` and use the default format.
 
-If `pr.rules_file` was set in config:
+Read the prose rules. Global first, then the project — prose **concatenates**
+rather than overriding, so house style survives a repo adding one line:
+```bash
+{ cat "$HOME/.aether/rules.md" 2>/dev/null; printf '\n'; cat .aether/rules.md 2>/dev/null; }
+```
+Use the `[all]` section and the `[draft-pr]` section; ignore sections named for
+other commands. If neither file exists and `pr.rules_file` was set in config:
 ```bash
 cat <pr.rules_file> 2>/dev/null || echo ""
 ```

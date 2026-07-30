@@ -13,7 +13,30 @@
 # Under the aether suite, enforce-suite.sh sources this file with SUITE_MODE=1
 # and calls gate_whetstone with $tool_name / $cmd_or_path already parsed.
 
-CRITIQUE_FILE=".claude/plans/CRITIQUE.md"
+# ── Config reader ────────────────────────────────────────────────────────────
+# One parser, shared with bin/aether. Under the suite it is already sourced by
+# enforce-suite.sh; standalone this finds it. A gate that cannot find it must
+# still run — every config key has a default, so the gate degrades to those
+# rather than going silent.
+if ! command -v aether_cfg_get >/dev/null 2>&1; then
+  _ac_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  for _ac in "$_ac_here/../aether-config.sh" "$_ac_here/aether-config.sh" \
+             "$_ac_here/../../../hooks/aether-config.sh" \
+             "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh"; do
+    [ -f "$_ac" ] && { . "$_ac"; break; }
+  done
+  unset _ac _ac_here
+  if ! command -v aether_cfg_get >/dev/null 2>&1; then
+    aether_cfg_get() { :; }
+    aether_out_dir() { [ -d .aether ] && printf '.aether/out' || printf '%s/out' "${AETHER_HOME:-$HOME/.aether}"; }
+  fi
+fi
+
+# Generated output lives under .aether/out/ now. The pre-migration path is still
+# honoured so the gate does not start nagging on a machine that has not upgraded
+# yet — for a user who never runs the migration, nothing changes.
+CRITIQUE_FILE="$(aether_out_dir 2>/dev/null)/CRITIQUE.md"
+[ -f "$CRITIQUE_FILE" ] || [ ! -f .claude/plans/CRITIQUE.md ] || CRITIQUE_FILE=".claude/plans/CRITIQUE.md"
 
 # ── Gate ─────────────────────────────────────────────────────────────────────
 # Reads: $tool_name, $cmd_or_path.  Returns: 1 to nudge, 0 to stay silent.
@@ -72,8 +95,15 @@ print('yes' if re.search(r'\.(py|ts|tsx|js|jsx|mjs)$', sys.argv[1]) else 'no')
 " "$target" 2>/dev/null) || return 0
 
     if [ "$is_source" = "yes" ] && [ ! -f "$CRITIQUE_FILE" ]; then
-      sentinel=".claude/plans/.whetstone-nudged"
+      # Always project-relative, unlike CRITIQUE.md. This gate nudges once per
+      # project; routing it through aether_out_dir would put it in ~/.aether/out
+      # for any project without a .aether/, so the first project to be nudged
+      # would silence every other one on the machine.
+      sentinel=".aether/out/.nudged"
+      [ -f "$sentinel" ] || [ ! -f .claude/plans/.whetstone-nudged ] \
+        || sentinel=".claude/plans/.whetstone-nudged"
       [ -f "$sentinel" ] && return 0
+      mkdir -p "$(dirname "$sentinel")" 2>/dev/null || true
       touch "$sentinel" 2>/dev/null || true
       printf 'Whetstone: writing source code with no critiqued plan on record.\n'
       printf '  If this is a planned change, run /critique-plan first.\n'

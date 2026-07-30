@@ -11,25 +11,26 @@ If `--off` is present in $ARGUMENTS, print "cairn disabled for this run." and st
 
 **Step 0 — Config check**
 
-Run this single Bash command and capture its full output:
+Run this single Bash command and capture its output:
 
 ```bash
-{ cat ./cairn.config 2>/dev/null; echo "---CAIRN_SEP---"; cat "$HOME/.claude/cairn.config" 2>/dev/null; }
+aether config show cairn --raw 2>/dev/null || true
 ```
 
-Split the output on the `---CAIRN_SEP---` line. Everything before it is the local config; everything after is the global config. Local takes precedence over global.
+Each line is `key: value`, already resolved: global `~/.aether/config`, then the
+project's `.aether/config`, per key, with declared defaults filled in. There is
+no merging left for you to do.
 
-Parse both sections for an `enabled:` key:
-- If the effective value (local wins if present, otherwise global) is `enabled: false`, print:
-  `cairn is disabled. Run \`cairn enable\` to re-enable.`
-  and stop immediately.
-- If no `enabled:` key is found in either section, default to enabled (continue).
+- If `enabled` is `false`, print `cairn is disabled. Run \`aether cairn enable\` to re-enable.` and stop immediately.
+- If the command printed nothing (aether is not installed, or is older than 1.1),
+  fall back to the documented defaults and continue — never fail on this step.
+
+Run `aether config show cairn` without `--raw` to see what each key does, where
+its current value came from, and which command reads it.
 
 Also resolve `style` from config (used as fallback in Step 3):
 - Check local config for `style:` key, then global config.
 - Store the resolved config style for use if no `--style` flag is present in $ARGUMENTS.
-
-Note: config values for `enabled` and `style` only contain `true`/`false` or `conventional`/`plain`, so the `---CAIRN_SEP---` separator is safe from false matches.
 
 ---
 
@@ -58,9 +59,8 @@ Continuing with message generation — no commit will be executed.
 
 Resolve style in this priority order:
 1. `--style=<x>` in $ARGUMENTS (highest priority)
-2. `style:` key from local `cairn.config` (read in Step 0)
-3. `style:` key from global `cairn.config` (read in Step 0)
-4. Default: `conventional`
+2. The `style` line from Step 0 — already the resolved project-over-global value
+3. Default: `conventional`
 
 Analyse the diff and produce a commit message using the resolved style.
 

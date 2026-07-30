@@ -7,6 +7,225 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
+## [Unreleased]
+
+### Added
+
+- **One sectioned config file per scope.** `~/.aether/config` and
+  `.aether/config` replace four `<plugin>.config` files per scope, with an
+  `[<section>]` per plugin and every key name unchanged. Resolution stays
+  **per key**, so a project that sets one key does not discard the global value
+  of its neighbours.
+- **Two new sections that describe the repository rather than a plugin**, split
+  on a clear line — `[project]` is things to run (`test`, `lint`, `typecheck`,
+  `build`, `coverage`), `[git]` is things to write (`scopes`, `types`, `ticket`,
+  `trailers`, `base`). Both are declared in the manifest of the plugin that
+  consumes them, so there is no suite-wide schema file to install.
+- **`.aether/rules.md`** — prose for the critics, one section per command,
+  replacing whetstone's auto-discovered `whetstone.config.md` and cairn's
+  `pr.rules_file` pointer. Prose *concatenates* global-then-project rather than
+  overriding: losing your global writing rules because a repo added one line
+  would be the wrong default.
+- **`aether config`** — `show`, `explain`, `doctor`, `path`, `edit`, `get`,
+  `set`, `unset`. `show` prints each value with the layer, file and line that
+  supplied it, what the key does, and which command reads it. `doctor` catches
+  unknown keys with a suggestion, and `[project]` commands whose binary is not
+  on `PATH`. `--raw` emits bare `key: value` lines, which is what the slash
+  commands now read instead of merging two files themselves.
+- **`aether migrate`**, also run automatically by `aether install`. Idempotent,
+  and where both old and new exist the **new** value wins. Every old file is
+  copied to `.bak` before removal.
+- **`hooks/aether-config.sh`** — one config parser, sourced by both the CLI and
+  every gate. There were six independent readers of this format; two of the four
+  plugin copies were missing `head -1`, so a duplicated key resolved to a
+  multi-line value in half the suite.
+- **Trust, on direnv's model.** `~/.aether/trusted` maps a project path to a
+  content hash of its `config` plus `rules.md`. Until a project is trusted its
+  `[project]` run-commands and its `rules.md` are ignored — the two things in a
+  repo that can act on your machine, one by being executed and one by reaching a
+  critic's context. Everything else in a project's config applies immediately.
+  `aether trust` prints the commands and the prose before recording anything.
+  Hand-editing either file asks again, loudly, rather than silently downgrading
+  to global; `aether config set` re-hashes automatically.
+- **Critics that measure instead of infer.** `/critique-diff` gains a measurement
+  pass that runs the configured `typecheck`, `lint`, `test` and `coverage`, and
+  Correctness and Coverage start from that output. Each names the command it ran
+  and its exit status, and says plainly when nothing was configured.
+  `/critique-pr` stops treating `gh pr checks` as a proxy for having verified
+  anything — an empty check list is not a passing one — and runs `build` itself
+  when the branch is checked out.
+- **trellis** — a fifth plugin, and the proof that adding one now needs a
+  manifest and assets: it ships no `install.sh` and no `uninstall.sh`, so if the
+  engine needed one it could not be installed at all. Asserted in the tests.
+  Its one command, `/draft-config`, surveys the repo and writes the config the
+  other four read — CI workflows first, because a `run:` line provably works in
+  a clean checkout, then manifests, then the repo itself for commit sizes and
+  the git conventions actually in use. Every key carries a comment naming its
+  source, existing values are never overwritten, and watch-mode, server and
+  deploy scripts are never selected — a watch script would hang a critic
+  indefinitely. It writes commands but never runs them, and says so.
+- `aether rules` — prints the prose the critics will read, global then project,
+  with its own trust state stated in the output.
+- **`tests/acceptance.sh`** — end-to-end checks against a throwaway HOME, for what
+  a unit test cannot reach: a path containing spaces, nine hostile hook inputs
+  (none may exit 2 or write to stderr), `--dry-run` leaving the home directory
+  byte-identical with bonsai included, four consecutive installs producing
+  identical state, upgrading from the last tag with no dangling hooks, and the
+  hook's per-tool-call cost measured against that tag rather than an absolute
+  budget. `--full` additionally builds bonsai and handshakes both MCP servers.
+- `tests/test_config.sh` — 70 assertions on per-key merge, schema completeness,
+  `doctor`, comment-preserving writes, pre-migration fallback, and migration
+  including its idempotence.
+
+### Changed
+
+- **`~/.aether/` and `.aether/` are now the roots**, with the same name and the
+  same shape in both scopes. `.claude/` holds what Claude Code itself reads
+  (commands, `settings.json`, skills, `CLAUDE.md`, plan mode's `plans/`);
+  `.aether/` holds what aether owns. `$AETHER_HOME` overrides the global root.
+- **`~/.local/share/aether/` is retired.** It held the global hook while the
+  local one sat in `.claude/hooks/` — different parents for the same artefact.
+  Hook scripts move to `<root>/hooks/`, which `settings.json` can reference by
+  absolute path from anywhere.
+- Generated output moves to `<root>/out/`: `CRITIQUE.md`, `TEMPER.md`, and
+  whetstone's nudge sentinel. Plan files stay in `.claude/plans/`, which is plan
+  mode's own directory.
+- The install manifest moves from `~/.claude/aether.manifest` to
+  `<root>/manifest`.
+- `aether enable`/`disable` write one sectioned file instead of four.
+- Two tests stopped hardcoding the four plugin names — the palette check now
+  derives a command's owning plugin from its path, and the enable/disable checks
+  count the manifests. Adding a plugin should not fail a test about something
+  else.
+
+### Fixed
+
+- **`aether enable` and `aether disable` wrote the verb, not the value.**
+  Collapsing the two into one variable during the refactor produced
+  `enabled: disable`, which is not `false` — so nothing was disabled and
+  `aether status` still reported every plugin as on. Caught by the existing
+  suite.
+- **whetstone's once-per-project nudge briefly became once-per-machine.** The
+  sentinel moved to `.aether/out/` and was resolved through the same helper as
+  `CRITIQUE.md`, which falls back to `~/.aether/out/` for a project with no
+  `.aether/` — so the first project to be nudged silenced every other one. It is
+  now pinned to the project, with a test for exactly that.
+- Migration no longer copies a *global* `pr.rules_file` into every project it
+  touches: `[draft-pr]` prose is imported from the scope that set it.
+- `_mf` matched manifest keys by regex, so `config.pr.base.doc` could match a
+  line where the dots were any character. Now a literal prefix match.
+- **`--dry-run` ran bonsai's build for real** — `uv sync` and `npm run build`,
+  writing to `~/.cache` and `~/.npm`. The five primitives are guarded centrally,
+  but `build` is the one escape hatch that runs arbitrary commands and was never
+  covered. `--dry-run` also created `~/.claude.json` via the MCP sync, and left
+  empty `.aether/hooks/gates/` directories behind. It is now verifiably inert,
+  with a test asserting the *whole* home directory is byte-identical afterwards.
+- The gate count printed after install used `ls`; it now uses a glob, so the
+  message is right on a machine stripped down to bash and coreutils.
+- `aether uninstall` left `aether-config.sh` orphaned in the hook directory.
+- **The jq backend errored on a `settings.json` with no `hooks` key** —
+  `with_entries` on null is an error, not a no-op — so a jq-only user with a
+  permissions-only settings.json got `null (null) has no keys` on stderr and the
+  stale-hook cleanup silently did not happen. All three backends now produce
+  byte-identical output, and a phase aether does not manage (`SessionStart`) is
+  preserved.
+- **`config doctor` missed a missing binary whenever the command was a pipeline.**
+  It checked only the first word, so `git ls-files | xargs shellcheck` reported
+  nothing on a machine with no shellcheck — the exact silent skip the check exists
+  to catch. Every command position is now checked, including past wrappers like
+  `xargs` and `env` that put the real command in argument position.
+- **The PreToolUse hook got 25% slower**, from 81ms to 105ms per tool call — and
+  it runs on every Bash, Write and Edit. Cause: resolving a key ran one `awk` per
+  key per layer, which cost nothing before only because there was no config file
+  to read. Seeding a starter config at install made that path always-on, at twelve
+  awk processes per invocation. Both files are now dumped once into a shell
+  variable and every lookup answers from it: **1 awk process, 86ms.** A test
+  counts processes rather than timing, so it stays meaningful on a loaded CI box,
+  and another asserts the cached and uncached paths resolve identically —
+  including the trust gate on `[project]`, which the dump reproduces from a layer
+  column.
+- **A CRLF config file read as an empty one.** `[temper]\r` does not match
+  `/^\[.*\]$/`, so the section was never entered and *every* key in the file
+  silently did nothing — including `enabled: false`, which made `aether disable`
+  appear not to work. A regression against 1.0.0, whose `grep`-based reader at
+  least returned the value. All five parsers now normalise CRLF.
+- **`config set` silently corrupted any value containing a backslash.**
+  `awk -v v="$value"` performs escape processing on its argument, so `\.sql`
+  became `.sql` and a regex like `\d+` became `d+`. The default
+  `temper.critical_paths` contains `\.sql` and `\.env`, and migration uses the
+  same writer — so an upgrade quietly rewrote it. Values now come through the
+  environment, where no escape processing happens.
+- **Every install grew CLAUDE.md by one line.** Removing the sentinel block took
+  the block but not the blank line that separated it, and the re-append added a
+  fresh one: 295 lines, then 296, then 297. Trailing blanks are now stripped
+  before re-appending, so the splice is byte-idempotent.
+- **`aether update` corrupted itself mid-run.** It executes from
+  `~/.local/bin/aether` and copies a new `bin/aether` over that same path, and
+  `cp` truncates and rewrites in place. bash reads a script incrementally as it
+  executes, so the byte offsets shifted under the interpreter and it resumed
+  mid-token — `syntax error near unexpected token ';;'` from inside the
+  dispatcher's `case`, *after* the install had reported success. Every copy now
+  goes through a temp file in the destination directory and lands with a rename,
+  so a process already executing the old file keeps its inode and runs to
+  completion. Latent before this branch; the file growing made it reliable.
+- **`printf: write error: Broken pipe` on Linux.** `_schema_all | awk '… exit'`
+  closed the pipe while the writer was still going. macOS dies from SIGPIPE
+  silently, so it passed locally and failed on CI; the tests capture with `2>&1`,
+  so the message became part of the value and four assertions broke. Both readers
+  now consume their input, and eleven assertions check directly that no
+  subcommand writes to stderr.
+- **A relocated hook was registered twice.** cairn used to install standalone into
+  `~/.local/share/cairn/`, and a machine that had done that ran `post-cairn.sh`
+  twice on every Bash, Write and Edit. Registration now deduplicates on the
+  script's basename, which covers every past and future location without keeping
+  a list of them.
+- **`--dry-run` printed `✓ … registered` for work it had not done.** The same
+  failure as the earlier dry-run bugs, one level up in the output. Completed steps
+  now route through one helper that marks them `· … — not applied` under
+  `--dry-run`, asserted by a test that forbids a `✓` in dry-run output entirely.
+- **bonsai's MCP servers were never registered by the engine.** The spec was
+  piped to `python3 -`, which reads its *program* from stdin — so the heredoc
+  carrying the program claimed stdin, `sys.stdin.read()` returned nothing, and
+  the engine wrote an empty `mcpServers: {}` and reported success. The spec now
+  travels via argv. A server whose command cannot be resolved is refused outright
+  rather than written with an empty `command`, which Claude Code would try to
+  launch. `AETHER_REPO` was added so the engine can be exercised without a real
+  install, which is what makes this testable.
+- **Trust now fails closed with no SHA-256 available.** The first version fell
+  back to `cksum`, which is CRC32 — cheap enough to collide that someone able to
+  change a trusted repo's config could keep the checksum and keep the trust.
+  `openssl dgst` was added as a third option, and where none exists the project
+  reads as untrusted and says why. Losing the feature is the right trade against
+  losing the guarantee.
+
+### Changed
+
+- **One config resolver instead of two.** A cached path and an uncached path each
+  implemented layer precedence and the `[project]` trust gate separately — the
+  shape that drifts. There is now one path over a dump of all four layers
+  (pre-1.0 global, pre-1.0 project, global, project), which also removes the
+  special case that read the pre-1.0 files only when the new ones were empty:
+  ordering the layers is equivalent and simpler. A duplicated key inside one file
+  still takes the first occurrence, as `head -1` used to give.
+- **aether now uses its own config.** `.aether/config` and `.aether/rules.md` are
+  committed, so its critics run its real test command and read its real house
+  rules. The suite previously shipped without either, which meant the tool did
+  not eat its own dog food and nothing noticed.
+
+### Documentation
+
+- README gains **Commands** (every slash command with the flags that override
+  config), **The development workflow** (one pass through a change, from
+  `/draft-config` to `/draft-changelog`), worked `aether` CLI examples including a
+  config walked end to end, and a short **Roadmap**. A table of contents, because
+  it is now long enough to need one.
+
+### Notes
+
+Until you migrate, the pre-1.0 `<plugin>.config` files in either scope are still
+*read* when the new file has no value for a key. Writes only ever go to the new
+location, so the two cannot diverge.
+
 ## [1.0.0] — 2026-07-28
 
 bonsai, cairn, whetstone and temper now live in this repository. One clone, one

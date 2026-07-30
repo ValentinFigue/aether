@@ -75,22 +75,37 @@ printf '%s' "$cmd_or_path" | grep -qE '#[[:space:]]*cairn:skip'              && 
 
 $bypass_all && exit 0
 
+# ── Config reader ────────────────────────────────────────────────────────────
+# One parser, shared with bin/aether, and sourcing it here means the gates get it
+# for free. The engine installs it beside this file, and $_suite_dir is already
+# resolved above — so no extra process is spawned to find it. The generic search
+# below is only for an install that predates the file.
+if [ -f "$_suite_dir/aether-config.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$_suite_dir/aether-config.sh"
+elif [ -f "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh"
+fi
+# A gate that cannot find it must still run: every key has a default, so the
+# gates degrade to those rather than going silent.
+# Read both config files once, here, rather than once per key below.
+command -v aether_cfg_preload >/dev/null 2>&1 && aether_cfg_preload
+if ! command -v aether_cfg_resolve >/dev/null 2>&1; then
+  aether_cfg_resolve() { AETHER_CFG_VALUE=""; }
+  aether_cfg_get()     { :; }
+  aether_out_dir()     { [ -d .aether ] && printf '.aether/out' || printf '%s/out' "${AETHER_HOME:-$HOME/.aether}"; }
+fi
+
 # ── Plugin enabled check ─────────────────────────────────────────────────────
+# Sourcing the reader here also means the gates get it for free.
 
+# No $( ) — this runs once per plugin on every tool call.
 _plugin_enabled() {
-  local plugin="$1"
-  local global_cfg="$HOME/.claude/${plugin}.config"
-  local local_cfg="./${plugin}.config"
-  local val=""
-
-  [ -f "$global_cfg" ] && val=$(grep "^enabled:" "$global_cfg" | sed "s/^enabled: *//" | head -1) || true
-  [ -f "$local_cfg"  ] && {
-    local lv
-    lv=$(grep "^enabled:" "$local_cfg" | sed "s/^enabled: *//" | head -1 2>/dev/null) || true
-    [ -n "$lv" ] && val="$lv"
-  } || true
-
-  [ "$val" = "false" ] && return 1
+  if command -v aether_cfg_resolve >/dev/null 2>&1; then
+    aether_cfg_resolve "$1" enabled
+    [ "$AETHER_CFG_VALUE" = "false" ] && return 1
+  fi
   return 0
 }
 

@@ -19,17 +19,32 @@
 # Under the aether suite, enforce-suite.sh sources this file with SUITE_MODE=1
 # and calls gate_temper with $cmd_or_path already parsed.
 
-GLOBAL_CONFIG="$HOME/.claude/temper.config"
-LOCAL_CONFIG="./temper.config"
+# ── Config reader ────────────────────────────────────────────────────────────
+# One parser, shared with bin/aether. Under the suite it is already sourced by
+# enforce-suite.sh; standalone this finds it. A gate that cannot find it must
+# still run — every config key has a default, so the gate degrades to those
+# rather than going silent.
+if ! command -v aether_cfg_get >/dev/null 2>&1; then
+  _ac_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  for _ac in "$_ac_here/../aether-config.sh" "$_ac_here/aether-config.sh" \
+             "$_ac_here/../../../hooks/aether-config.sh" \
+             "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh"; do
+    [ -f "$_ac" ] && { . "$_ac"; break; }
+  done
+  unset _ac _ac_here
+  if ! command -v aether_cfg_get >/dev/null 2>&1; then
+    aether_cfg_get() { :; }
+    aether_out_dir() { [ -d .aether ] && printf '.aether/out' || printf '%s/out' "${AETHER_HOME:-$HOME/.aether}"; }
+  fi
+fi
 
 # Namespaced: several plugin hooks are sourced into one shell under the suite,
 # so a bare _config_get would collide.
-_temper_config_get() {
-  local key="$1"
-  local val=""
-  [ -f "$GLOBAL_CONFIG" ] && val=$(grep "^$key:" "$GLOBAL_CONFIG" | sed "s/^$key: *//" | head -1) || true
-  [ -f "$LOCAL_CONFIG"  ] && { local lv; lv=$(grep "^$key:" "$LOCAL_CONFIG" | sed "s/^$key: *//" | head -1 2>/dev/null) && [ -n "$lv" ] && val="$lv"; } || true
-  printf '%s' "$val"
+# Assigns rather than prints, for the same reason _plugin_enabled does: the gate
+# reads four keys and runs on every Bash call.
+_temper_cfg() {
+  if command -v aether_cfg_resolve >/dev/null 2>&1; then aether_cfg_resolve temper "$1"
+  else AETHER_CFG_VALUE=""; fi
 }
 
 # ── Gate ─────────────────────────────────────────────────────────────────────
@@ -44,16 +59,16 @@ gate_temper() {
   fi
 
   local enabled auto_nudge_lines auto_nudge_files critical_paths result
-  enabled=$(_temper_config_get "enabled")
+  _temper_cfg enabled; enabled="$AETHER_CFG_VALUE"
   if [ "$enabled" = "false" ]; then
     return 0
   fi
 
-  auto_nudge_lines=$(_temper_config_get "auto_nudge_lines")
+  _temper_cfg auto_nudge_lines; auto_nudge_lines="$AETHER_CFG_VALUE"
   auto_nudge_lines=${auto_nudge_lines:-200}
-  auto_nudge_files=$(_temper_config_get "auto_nudge_files")
+  _temper_cfg auto_nudge_files; auto_nudge_files="$AETHER_CFG_VALUE"
   auto_nudge_files=${auto_nudge_files:-10}
-  critical_paths=$(_temper_config_get "critical_paths")
+  _temper_cfg critical_paths; critical_paths="$AETHER_CFG_VALUE"
   critical_paths=${critical_paths:-"*auth*|*permission*|*token*|migrations/|*alembic*|\\.sql|*schema*|*secret*|*credential*|\\.env"}
 
   # Inlined rather than written to a mktemp file. The original comment here said

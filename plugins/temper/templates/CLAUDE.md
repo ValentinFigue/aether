@@ -38,7 +38,6 @@ Never bypass a 🔴 finding without a written reason in the commit message.
 🔴 Blocker      — do not push; fix first
 🟡 Significant  — fix before the next session or document the exception
 🟢 Minor        — fix when convenient; still worth tracking
-<!-- temper:end -->
 
 ### When to run /critique-pr
 
@@ -54,4 +53,4 @@ It runs temper's same four critics over the whole PR diff, plus a fifth that onl
 sense for a PR: whether the description still matches the code. An omitted change is
 more dangerous than an inaccurate one — a reviewer who trusts the description will not
 go looking for what it does not name.
-
+<!-- temper:end -->

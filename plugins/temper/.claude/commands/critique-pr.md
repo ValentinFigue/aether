@@ -20,7 +20,7 @@ truth about the diff.
 
 ## Configuration
 
-Identical to `/critique-diff`: read `~/.claude/temper.config` then `./temper.config`
+Identical to `/critique-diff`: run `aether config show temper --raw`
 (local wins), honour `enabled: false` by stopping immediately, and let flags in
 $ARGUMENTS override both.
 
@@ -55,6 +55,18 @@ git rev-list --count <head>..<base>                 # commits behind base
 Note whether any test files appear in the diff, the total files and lines changed, and
 the primary languages.
 
+**`gh pr checks` is not a substitute for running anything.** It reports what CI
+chose to run on some commit, which may not be the head, and a repo with no
+workflows reports nothing at all — an empty check list is not a passing one. Say
+which it is.
+
+If the branch is checked out locally, run the measurement pass from
+`/critique-diff` as well — `aether config show project --raw` and `aether rules`,
+then the configured `test`, `lint`, `typecheck` and `build`. `build` matters most
+here: it is the difference between "the description says it compiles" and knowing.
+Name every command you ran and its exit status. If the branch is not checked out,
+say that instead of implying the checks were yours.
+
 Report this as a short context block above the findings table — it is context, not
 findings:
 
@@ -66,8 +78,16 @@ PR #<n> — <title>
   behind base: <n> commits
 ```
 
+Add a line for anything you ran yourself, kept separate from CI's result:
+
+```
+  ran here: test ✓ (uv run pytest, exit 0)   build ✗ (npm run build, exit 1)
+```
+
 If checks are failing or the PR is not mergeable, say so plainly here. A red CI is
-worth knowing before reading a review of the code.
+worth knowing before reading a review of the code. If `[project]` is unset or the
+project is untrusted, say that once — the reader should know the review is a
+reading of the diff and nothing more.
 
 ## Step 3 — Secrets scan
 
@@ -146,8 +166,8 @@ by hand, so choosing to merge anyway is already an explicit act.
 
 ## Persist output
 
-Append to `.claude/plans/TEMPER.md` (or `~/.claude/plans/` if the project has no
-`.claude/plans/`), with the header:
+Append to `.aether/out/TEMPER.md` (or `~/.aether/out/TEMPER.md` if the project
+has no `.aether/`), with the header:
 
 `# Review — PR #<n> <title> — <current date>`
 

@@ -65,11 +65,14 @@ cd "$WS_FIX" || exit 1
 assert_dual_mode "$WHET" gate_whetstone Bash 'git commit -m x' "plan without critique nudges"
 assert_dual_mode "$WHET" gate_whetstone Write 'notes.md'       "non-source write is silent"
 
-# The Write gate is stateful — it nudges once per project and drops a
-# .whetstone-nudged sentinel. assert_dual_mode runs standalone first, which
-# would leave the sentinel behind and make the suite run legitimately silent,
-# so the sentinel is reset between the two modes here.
-SENTINEL=".claude/plans/.whetstone-nudged"
+# The Write gate is stateful — it nudges once per project and drops a sentinel.
+# assert_dual_mode runs standalone first, which would leave the sentinel behind
+# and make the suite run legitimately silent, so it is reset between the modes.
+#
+# Project-relative on purpose: it is a once-per-project nudge, so it must not
+# route through aether_out_dir, which falls back to ~/.aether/out for a project
+# that has no .aether/ — one nudged project would then silence the whole machine.
+SENTINEL=".aether/out/.nudged"
 rm -f "$SENTINEL"; run_standalone "$WHET" Write 'src/new.py';               ws_se=$?; ws_so="$OUT"
 rm -f "$SENTINEL"; run_suite "$WHET" gate_whetstone Write 'src/new.py';     ws_ue=$?; ws_su="$OUT"
 if [ "$ws_so" = "$ws_su" ] && [ "$ws_se" -eq "$ws_ue" ]; then
@@ -81,11 +84,21 @@ else
 fi
 
 # whetstone's Write gate nudges once per project, guarded by a sentinel file
-rm -f "$WS_FIX/.claude/plans/.whetstone-nudged"
+rm -f "$WS_FIX/$SENTINEL"
 run_standalone "$WHET" Write 'src/a.py'; first=$?
 run_standalone "$WHET" Write 'src/b.py'; second=$?
 assert_exit 1 "$first"  "whetstone: first source write nudges"
 assert_exit 0 "$second" "whetstone: second source write is silent (sentinel honoured)"
+
+# Regression: the sentinel moved to .aether/out/ and briefly resolved through
+# aether_out_dir, which falls back to ~/.aether/out. One nudged project then
+# silenced every other project on the machine.
+WS_FIX2=$(mktemp -d)
+mkdir -p "$WS_FIX2/.claude/plans"; : > "$WS_FIX2/.claude/plans/some-plan.md"
+cd "$WS_FIX2" || exit 1
+run_standalone "$WHET" Write 'src/c.py'; other=$?
+assert_exit 1 "$other" "whetstone: a second project is still nudged (sentinel is per-project)"
+cd "$WS_FIX" || exit 1
 
 # with a critique newer than the plan, nothing should fire
 : > "$WS_FIX/.claude/plans/CRITIQUE.md"

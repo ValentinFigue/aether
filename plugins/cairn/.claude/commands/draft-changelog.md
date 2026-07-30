@@ -14,10 +14,13 @@ Parse $ARGUMENTS for flags. Supported flags:
 Run:
 
 ```bash
-{ cat ./cairn.config 2>/dev/null; echo "---CAIRN_SEP---"; cat "$HOME/.claude/cairn.config" 2>/dev/null; }
+aether config show cairn --raw 2>/dev/null || true
 ```
 
-Split on `---CAIRN_SEP---`. Local config takes precedence.
+Each line is `key: value`, already resolved — global `~/.aether/config`, then the
+project's `.aether/config`, per key, with declared defaults filled in. Nothing
+left to merge. If it prints nothing (aether missing or pre-1.1), use the
+documented fallbacks below and continue rather than failing.
 
 Resolve:
 - `changelog.style` — default style if `--style` not in $ARGUMENTS; fallback to `style:`; fallback to `conventional`

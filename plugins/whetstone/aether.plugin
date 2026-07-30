@@ -1,0 +1,45 @@
+# whetstone — plugin manifest.  See plugins/cairn/aether.plugin for the format.
+
+name: whetstone
+description: Critiques plans before implementation — surfaces blockers while they are cheap
+stage: plan
+scopes: local global
+config_section: whetstone
+
+commands: critique-plan.md
+legacy_commands: autocritic.md
+
+# The only gate matching Write/Edit/MultiEdit as well as Bash — it branches on
+# the tool name and serves both paths from one function.
+hook.1: PreToolUse | Bash\|Write\|Edit\|MultiEdit | hooks/enforce-whetstone.sh | suite_owned
+
+cli: whetstone
+cli.strategy: copy
+cli.scopes: global
+
+# Bash was missing here before this manifest existed, despite the gate matching
+# Bash — so the gate ran without the permission it needs.
+permissions: Read Write Bash
+
+template: templates/CLAUDE.md
+template.sentinel: whetstone
+template.has_own_sentinels: true
+
+# ── Config schema ────────────────────────────────────────────────────────────
+
+config.enabled.default: true
+config.enabled.type: bool
+config.enabled.doc: Whether whetstone's gate and command run at all
+config.enabled.used_by: /critique-plan
+
+config.critics.default: impl, arch, risk
+config.critics.doc: Which critics run by default; testing, complexity, api and cost are opt-in
+config.critics.used_by: /critique-plan
+
+config.skip.default:
+config.skip.doc: Critics to omit from the default set
+config.skip.used_by: /critique-plan
+
+config.severity.default: red, yellow, green
+config.severity.doc: Which severities get reported
+config.severity.used_by: /critique-plan

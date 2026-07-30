@@ -1,0 +1,22 @@
+# trellis — surveys the repository and lays the frame.
+#
+# The cheapest possible proof that the engine works: a manifest and one command
+# file. No install.sh, no uninstall.sh, no hook, no gate, no CLI. `aether install
+# trellis` and `aether uninstall trellis` work from this file alone, and trellis
+# appears in `aether status` because it exists.
+
+name: trellis
+scopes: local global
+
+commands: draft-config.md
+
+permissions: Bash Read Write
+
+# trellis has no gate, so `enabled` only affects whether the command will run.
+# It is declared so that `aether disable`, which writes this key for every
+# plugin, does not produce something `aether config doctor` calls unknown.
+config_section: trellis
+config.enabled.default: true
+config.enabled.type: bool
+config.enabled.doc: Whether /draft-config will run; trellis has no gate, so nothing else is affected
+config.enabled.used_by: /draft-config

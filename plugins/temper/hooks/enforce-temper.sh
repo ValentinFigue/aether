@@ -47,18 +47,52 @@ _temper_cfg() {
   else AETHER_CFG_VALUE=""; fi
 }
 
+# ── Rule helpers ─────────────────────────────────────────────────────────────
+# A direct port of the python this replaced. It is a port because it sat on the
+# hook's hot path: python3 costs ~18ms to start, and every branch below is git
+# plus arithmetic — which git and awk already do. `tests/test_rules.sh` keeps the
+# repository states it was diffed against, as assertions.
+#
+# The python used `re.match`, which anchors at position 0, so `echo hi && git push`
+# never matched. Preserved deliberately: cairn's `re.search` and temper's `re.match`
+# genuinely differ on that command, and this change is not the place to reconcile
+# them. `^git[[:space:]]+` is what `re.match(r'\bgit\b\s+')` reduces to — `\b` at
+# position 0 only succeeds when the first character is a word character.
+_tp_word_end='([^[:alnum:]_]|$)'
+
+# Sum of insertions and deletions in the staged diff — python's
+# re.findall(r'(\d+) (?:insertion|deletion)', shortstat), summed.
+_temper_staged_lines() {
+  git diff --staged --shortstat 2>/dev/null | awk '
+    { for (i = 2; i <= NF; i++) if ($i ~ /^insertion|^deletion/) s += $(i-1) }
+    END { print s + 0 }'
+}
+
+# Build one extended regex from the pipe-separated patterns, matching python:
+# each pattern is stripped, then "*" becomes ".*", then searched case-insensitively.
+# Empty patterns are kept rather than skipped — in python an empty pattern matches
+# every path, and a rewrite that quietly fixed that would not be a no-op.
+_temper_critical_ere() {
+  local raw="$1" p out="" first=1 oldifs="$IFS"
+  IFS='|'
+  for p in $raw; do
+    p="${p#"${p%%[![:space:]]*}"}"
+    p="${p%"${p##*[![:space:]]}"}"
+    if [ "$first" = 1 ]; then out="${p//\*/.*}"; first=0
+    else out="$out|${p//\*/.*}"; fi
+  done
+  IFS="$oldifs"
+  printf '%s' "$out"
+}
+
 # ── Gate ─────────────────────────────────────────────────────────────────────
 # Reads: $cmd_or_path.  Returns: 1 to nudge, 0 to stay silent.
 gate_temper() {
   local cmd="${cmd_or_path:-}"
   [ -z "$cmd" ] && return 0
+  aether_bypassed temper && return 0
 
-  # Bypass marker — accepts # temper:skip or # suite:skip (silences all suite hooks)
-  if printf '%s' "$cmd" | grep -qE '# *(temper|suite):skip'; then
-    return 0
-  fi
-
-  local enabled auto_nudge_lines auto_nudge_files critical_paths result
+  local enabled auto_nudge_lines auto_nudge_files critical_paths result=none
   _temper_cfg enabled; enabled="$AETHER_CFG_VALUE"
   if [ "$enabled" = "false" ]; then
     return 0
@@ -71,117 +105,68 @@ gate_temper() {
   _temper_cfg critical_paths; critical_paths="$AETHER_CFG_VALUE"
   critical_paths=${critical_paths:-"*auth*|*permission*|*token*|migrations/|*alembic*|\\.sql|*schema*|*secret*|*credential*|\\.env"}
 
-  # Inlined rather than written to a mktemp file. The original comment here said
-  # the temp file avoided "heredoc/quoting issues" — the real cause was bash
-  # tracking quote state through a heredoc body while scanning $( ... ) for its
-  # closing paren, which only breaks when the body has an odd number of single
-  # quotes. This body is balanced, so inlining is safe and keeps a hook that
-  # fires on every Bash call off the filesystem.
-  result=$(python3 - "$cmd" "$auto_nudge_lines" "$auto_nudge_files" "$critical_paths" <<'PYEOF'
-import re, subprocess, sys, os
-
-cmd = sys.argv[1]
-auto_nudge_lines = int(sys.argv[2])
-auto_nudge_files = int(sys.argv[3])
-critical_paths_raw = sys.argv[4]
-
-def run(args):
-    try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=10)
-        return r.stdout.strip()
-    except Exception:
-        return ""
-
-# ── git push ─────────────────────────────────────────────────────────────────
-if re.match(r'\bgit\b\s+push\b', cmd):
+  # ── git push ───────────────────────────────────────────────────────────────
+  if [[ $cmd =~ ^git[[:space:]]+push$_tp_word_end ]]; then
     # Allow dry-run passes through
-    if re.search(r'--dry-run|-n\b', cmd):
-        print("none")
-        sys.exit(0)
-    print("push")
-    sys.exit(0)
+    [ -n "${AETHER_IS_DRY_RUN:-}" ] && return 0
+    result=push
 
-# ── git commit ────────────────────────────────────────────────────────────────
-if re.match(r'\bgit\b\s+commit\b', cmd):
-    # Count staged diff stats
-    shortstat = run(["git", "diff", "--staged", "--shortstat"])
-    lines = sum(int(x) for x in re.findall(r'(\d+) (?:insertion|deletion)', shortstat))
-    files_out = run(["git", "diff", "--staged", "--name-only"])
-    files = len([f for f in files_out.splitlines() if f]) if files_out else 0
+  # ── git commit ─────────────────────────────────────────────────────────────
+  elif [[ $cmd =~ ^git[[:space:]]+commit$_tp_word_end ]]; then
+    local lines files
+    lines=$(_temper_staged_lines)
+    files=$(git diff --staged --name-only 2>/dev/null | awk '$0 != "" { n++ } END { print n + 0 }')
 
-    if lines > auto_nudge_lines or files > auto_nudge_files:
-        print("commit_large")
-        sys.exit(0)
+    if [ "$lines" -gt "$auto_nudge_lines" ] || [ "$files" -gt "$auto_nudge_files" ]; then
+      result=commit_large
+    elif git diff --staged --name-only 2>/dev/null \
+         | grep -qiE "$(_temper_critical_ere "$critical_paths")"; then
+      result=commit_critical
+    fi
 
-    # Critical path check — patterns are pipe-separated extended regex
-    patterns = [p.strip().replace("*", ".*") for p in critical_paths_raw.split("|")]
-    staged_files = files_out.splitlines() if files_out else []
-    for filepath in staged_files:
-        for pat in patterns:
-            if re.search(pat, filepath, re.IGNORECASE):
-                print("commit_critical")
-                sys.exit(0)
+  # ── git merge ──────────────────────────────────────────────────────────────
+  elif [[ $cmd =~ ^git[[:space:]]+merge$_tp_word_end ]]; then
+    # The branch is the last non-flag token, and only when there is one beyond
+    # `git merge` itself — a bare `git merge` names no branch.
+    # read -ra rather than word-splitting $cmd: unquoted expansion would glob, and
+    # `git merge *` must be tokens, not a directory listing.
+    local t branch="" n=0 IFS=$' \t\n'
+    local -a toks; read -ra toks <<< "$cmd"
+    for t in "${toks[@]}"; do
+      case "$t" in -*) ;; *) branch="$t"; n=$((n + 1)) ;; esac
+    done
+    [ "$n" -gt 2 ] || branch=""
+    case "$branch" in
+      main|master|develop|trunk) result=merge_primary ;;
+    esac
 
-    print("none")
-    sys.exit(0)
+  # ── git rebase -i ──────────────────────────────────────────────────────────
+  elif [[ $cmd =~ ^git[[:space:]]+rebase$_tp_word_end.*-i$_tp_word_end ]]; then
+    local t ref="" seen=0 count=0 IFS=$' \t\n'
+    local -a toks; read -ra toks <<< "$cmd"
+    for t in "${toks[@]}"; do
+      if [ "$seen" = 1 ]; then
+        case "$t" in -*) ;; *) ref="$t"; break ;; esac
+      fi
+      [ "$t" = rebase ] && seen=1
+    done
+    if [ -n "$ref" ]; then
+      # HEAD~N is answerable without asking git; anything else needs rev-list.
+      if [[ $ref =~ ^[Hh][Ee][Aa][Dd]~([0-9]+) ]]; then
+        count="${BASH_REMATCH[1]}"
+      else
+        count=$(git rev-list --count "HEAD...$ref" 2>/dev/null)
+        case "$count" in ''|*[!0-9]*) count=0 ;; esac
+      fi
+      [ "$count" -gt 5 ] && result=rebase_large
+    fi
 
-# ── git merge ─────────────────────────────────────────────────────────────────
-if re.match(r'\bgit\b\s+merge\b', cmd):
-    primary = {"main", "master", "develop", "trunk"}
-    # Extract branch name from command (last non-flag token)
-    tokens = [t for t in cmd.split() if not t.startswith("-")]
-    branch = tokens[-1] if len(tokens) > 2 else ""
-    if branch in primary:
-        print("merge_primary")
-    else:
-        print("none")
-    sys.exit(0)
-
-# ── git rebase -i ─────────────────────────────────────────────────────────────
-if re.match(r'\bgit\b\s+rebase\b.*-i\b', cmd) or re.match(r'\bgit\b\s+rebase\b\s+-i\b', cmd):
-    tokens = cmd.split()
-    # Find the ref argument (last non-flag token after "rebase")
-    rebase_idx = next((i for i, t in enumerate(tokens) if t == "rebase"), -1)
-    ref = None
-    for t in tokens[rebase_idx + 1:]:
-        if not t.startswith("-"):
-            ref = t
-            break
-
-    if ref is None:
-        print("none")
-        sys.exit(0)
-
-    # Try to parse HEAD~N directly
-    m = re.match(r'HEAD~(\d+)', ref, re.IGNORECASE)
-    if m:
-        count = int(m.group(1))
-    else:
-        out = run(["git", "rev-list", "--count", f"HEAD...{ref}"])
-        try:
-            count = int(out)
-        except ValueError:
-            count = 0
-
-    if count > 5:
-        print("rebase_large")
-    else:
-        print("none")
-    sys.exit(0)
-
-# ── git stash pop ─────────────────────────────────────────────────────────────
-if re.match(r'\bgit\b\s+stash\b.*\bpop\b', cmd):
-    stash_diff = run(["git", "stash", "show", "-p", "stash@{0}"])
-    lines = len(stash_diff.splitlines()) if stash_diff else 0
-    if lines > auto_nudge_lines:
-        print("stash_large")
-    else:
-        print("none")
-    sys.exit(0)
-
-print("none")
-PYEOF
-) || return 0
+  # ── git stash pop ──────────────────────────────────────────────────────────
+  elif [[ $cmd =~ ^git[[:space:]]+stash$_tp_word_end.*pop$_tp_word_end ]]; then
+    local lines
+    lines=$(git stash show -p 'stash@{0}' 2>/dev/null | awk 'END { print NR + 0 }')
+    [ "$lines" -gt "$auto_nudge_lines" ] && result=stash_large
+  fi
 
   case "$result" in
     push)
@@ -190,7 +175,7 @@ temper: about to push — have you run /critique-diff to review your changes?
   Run /critique-diff first, then push.
   Append  # temper:skip  (or  # suite:skip) to your push command to bypass this check.
 MSG
-      return 1
+      return 2   # block, not advice — never budgeted away
       ;;
     commit_large)
       cat <<'MSG'
@@ -206,7 +191,7 @@ temper: critical path file detected in staged changes — run /critique-diff fir
   One or more staged files matches a critical path pattern (auth, schema, migrations, credentials).
   Append  # temper:skip  (or  # suite:skip) to your commit command to bypass this check.
 MSG
-      return 1
+      return 2   # block, not advice — never budgeted away
       ;;
     merge_primary)
       cat <<'MSG'
@@ -242,14 +227,18 @@ MSG
 if [ -z "${SUITE_MODE:-}" ]; then
   set -euo pipefail
 
-  input=$(cat)
+  command -v aether_parse_command >/dev/null 2>&1 || exit 0
+  # The same parse the suite runs, so standalone and suite modes cannot drift.
+  aether_parse_command "$(cat)" || exit 0
 
-  cmd_or_path=$(printf '%s' "$input" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-print(data.get('tool_input', {}).get('command', ''))
-" 2>/dev/null) || exit 0
+  # Standalone, a block and a nudge are both exit 1: the gate contract is 0 or 1
+  # and never 2, which Claude Code reads as "block the tool call". The severity
+  # only exists so the dispatcher's budget can tell them apart.
+  # Commands only — the old standalone parse read tool_input.command and nothing
+  # else, so a Write payload reached the gate empty. The shared parse falls back
+  # to file_path; this keeps that difference invisible.
+  [ "${AETHER_TOOL:-}" = Bash ] || exit 0
 
-  gate_temper
-  exit $?
+  gate_temper && exit 0
+  exit 1
 fi

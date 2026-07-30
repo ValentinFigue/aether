@@ -303,5 +303,8 @@ Full specification: [BYPASS.md](https://github.com/ValentinFigue/aether/blob/mai
 | `# temper:skip` | Silence temper gate only |
 | `# cairn:skip` | Silence cairn gate only |
 
-Append to any bash command as an inline comment. Bash ignores comments at runtime.
+Append to any bash command as a **trailing** inline comment — the marker must be the
+last thing on the line, after a `#` that starts a word and is outside quotes. Bash
+ignores comments at runtime. A marker inside a quoted string is not a bypass, so
+`git commit -m "docs: explain # temper:skip"` still runs every gate.
 <!-- aether:end -->

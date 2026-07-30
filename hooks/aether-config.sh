@@ -406,3 +406,122 @@ aether_plan_state() {
   [ -n "$computed" ] || { printf 'uncritiqued'; return 0; }
   [ "$recorded" = "$computed" ] && printf 'critiqued' || printf 'stale'
 }
+
+
+# ── Command parsing ──────────────────────────────────────────────────────────
+# One interpreter per hook run, instead of one per gate.
+#
+# Traced with `bash -x`, a `git commit` used to start three python processes — this
+# parse, temper's rule and cairn's rule — plus five greps for the bypass markers. At
+# ~18ms per interpreter that was over half the hook's 92ms, paid on every Bash, Write
+# and Edit of every session.
+#
+# Everything a gate used to re-derive is computed once and exported, so a gate becomes
+# bash policy over variables rather than a program that re-reads the command. Exported
+# rather than printed: a caller that had to read this would fork to do it.
+
+aether_parse_command() {
+  [ -n "${AETHER_PARSED:-}" ] && return 0
+  local input="${1:-}"
+  [ -n "$input" ] || return 1
+  eval "$(printf '%s' "$input" | python3 -c 'import json, re, shlex, sys
+
+try:
+    data = json.loads(sys.stdin.read())
+except Exception:
+    sys.exit(1)
+tool = data.get("tool_name", "") or ""
+inp = data.get("tool_input") or {}
+cmd = inp.get("command") or inp.get("file_path") or inp.get("path") or ""
+if not isinstance(cmd, str):
+    cmd = ""
+
+# A bypass marker only counts inside a trailing comment: a "#" that begins a word and
+# is outside quotes. Grepping the whole command meant a commit *documenting* the
+# marker silenced the suite -- an easy accident and a false negative at once.
+def comment_of(s):
+    in_s = in_d = False
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c == "\\" and not in_s:
+            i += 2
+            continue
+        if c == "'\''" and not in_d:
+            in_s = not in_s
+        elif c == '\''"'\'' and not in_s:
+            in_d = not in_d
+        elif c == "#" and not in_s and not in_d and (i == 0 or s[i - 1].isspace()):
+            return s[i:]
+        i += 1
+    return ""
+
+# ...and only in the *trailing* run of marker tokens. `# temper:skip && rm -rf /`
+# is a comment containing the marker, not a command marked to be skipped; reading
+# it as one would let any text that happens to end up in a comment turn the suite
+# off downstream of the word it appears in.
+MARKER = re.compile(r"^(?:aether|suite|whetstone|bonsai|temper|cairn):skip$")
+markers = []
+for tok in reversed(comment_of(cmd).lstrip("#").split()):
+    if not MARKER.match(tok):
+        break
+    markers.append(tok)
+
+IS_PUSH = bool(re.search(r"\bgit\b.*\bpush\b", cmd))
+IS_COMMIT = bool(re.search(r"\bgit\b.*\bcommit\b", cmd))
+IS_DRY = bool(re.search(r"--dry-run|-n\b", cmd))
+
+msg, has_inline = "", False
+if IS_COMMIT:
+    has_inline = bool(re.search(r"(-m|--message)\s*.+", cmd))
+    m = re.search(r"(?:-m|--message)\s*(?:\"([^\"]+)\"|'\''([^'\'']+)'\''|(\S+))", cmd)
+    if m:
+        msg = (m.group(1) or m.group(2) or m.group(3) or "").strip()
+    else:
+        has_inline = False
+
+out = {
+    "AETHER_TOOL": tool,
+    "AETHER_CMD": cmd,
+    "AETHER_IS_COMMIT": "1" if IS_COMMIT else "",
+    "AETHER_IS_PUSH": "1" if IS_PUSH else "",
+    "AETHER_IS_DRY_RUN": "1" if IS_DRY else "",
+    "AETHER_COMMIT_MSG": msg,
+    "AETHER_HAS_INLINE_MSG": "1" if has_inline else "",
+    "AETHER_IS_SOURCE": "1" if re.search(r"\.(py|ts|tsx|js|jsx|mjs)$", cmd) else "",
+    "AETHER_BYPASS": " ".join(sorted(set(markers))),
+}
+for k, v in out.items():
+    print("%s=%s" % (k, shlex.quote(v)))
+' 2>/dev/null)" || return 1
+  [ -n "${AETHER_TOOL:-}" ] || return 1
+  # The names the gates have always used, so nothing downstream has to change.
+  tool_name="$AETHER_TOOL"
+  cmd_or_path="$AETHER_CMD"
+  AETHER_PARSED=1
+  return 0
+}
+
+# Is this plugin bypassed for this command? One answer for all five call sites, which
+# had already drifted: `#\s*`, `# *` and `#[[:space:]]*` in three different gates.
+aether_bypassed() {
+  case " ${AETHER_BYPASS:-} " in
+    *" aether:skip "*|*" suite:skip "*) return 0 ;;
+    *" $1:skip "*) return 0 ;;
+  esac
+  return 1
+}
+
+# ── Suppressed nudges ────────────────────────────────────────────────────────
+# Where the dispatcher parks the nudges its budget did not print, so
+# `aether status --notes` can show them.
+#
+# Project-relative and never via aether_out_dir, which falls back to
+# ~/.aether/out for a project with no .aether/ — that fallback is how v1.1.0's
+# once-per-project nudge became once-per-machine and how v1.4.0's plan pointer
+# nearly did. State that belongs to one repository is written inside it or not
+# at all; prints nothing when there is no .aether/ to put it in.
+aether_notes_file() {
+  [ -d .aether ] || return 0
+  printf '.aether/out/.notes'
+}

@@ -22,6 +22,7 @@ Usage:
   aether install [plugin...] [global] [--claude-md] [--no-bonsai]
                                         Install the suite, or named plugins
   aether status                         Show install state for all plugins
+  aether status --notes                 Nudges the hook's budget held back
   aether config show [section]          Resolved values, where each came from
   aether config explain <section>.<key> One key in full
   aether check [path...] [--all] [--raw]
@@ -970,6 +971,30 @@ JSEOF
     printf '  Could not update permissions (install python3, node, or jq).\n'
     return 1 ;;
   esac
+}
+
+# The nudges the hook's budget held back on the last tool call.
+#
+# The budget prints one nudge and names who else spoke; without somewhere to read
+# the rest, "+ temper and cairn also had notes" would be a dead end. It also covers
+# the case nothing announces: a block prints alone, and every nudge beside it is
+# suppressed silently.
+cmd_status_notes() {
+  local f
+  f=$(aether_notes_file 2>/dev/null)
+  if [ -z "$f" ]; then
+    printf 'No .aether/ in this project, so suppressed nudges are not recorded here.\n'
+    printf '  Run `aether config set <key> <value>` or `trellis` to create one.\n'
+    return 0
+  fi
+  if [ ! -s "$f" ]; then
+    printf 'Nothing was suppressed on the last tool call.\n'
+    return 0
+  fi
+  printf 'Suppressed on the last tool call:\n'
+  # `## plugin` section headers, written by enforce-suite.sh.
+  awk '/^## / { printf "%s%s\n", (n++ ? "\n" : ""), toupper(substr($0, 4)); next }
+       { print "  " $0 }' "$f"
 }
 
 cmd_status() {
@@ -2910,7 +2935,10 @@ shift || true
 
 case "$COMMAND" in
   install)   cmd_install "$@" ;;
-  status)    cmd_status ;;
+  status)    case "${1:-}" in
+               --notes) cmd_status_notes ;;
+               *)       cmd_status ;;
+             esac ;;
   hook)      cmd_hook "$@" ;;
   enable)    cmd_enable "$@" ;;
   disable)   cmd_disable "$@" ;;

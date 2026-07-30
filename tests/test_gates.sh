@@ -123,6 +123,22 @@ git commit -qm init
 assert_dual_mode "$TEMPER" gate_temper Bash 'git push origin main'   "push nudges"
 assert_dual_mode "$TEMPER" gate_temper Bash 'git push --dry-run'     "dry-run push is silent"
 assert_dual_mode "$TEMPER" gate_temper Bash 'git commit -m x'        "small commit is silent"
+
+# ── severity ─────────────────────────────────────────────────────────────────
+# Which outcomes are advice and which are not. The README promises temper blocks
+# an unreviewed push and a critical-path commit; everything else is a nudge the
+# dispatcher's budget may hold back.
+suite "gate severity"
+printf 'x\n' > auth.py; git add auth.py
+assert_severity "$TEMPER" gate_temper Bash 'git push origin main' 2 "temper: push is a block"
+assert_severity "$TEMPER" gate_temper Bash 'git commit -m x'      2 "temper: critical-path commit is a block"
+git reset -q; rm -f auth.py
+: > many.txt; for i in $(seq 1 250); do printf 'l\n' >> many.txt; done; git add many.txt
+assert_severity "$TEMPER" gate_temper Bash 'git commit -m x'      1 "temper: large commit is a nudge"
+git reset -q; rm -f many.txt
+assert_severity "$CAIRN"  gate_cairn  Bash 'git commit -m wip'    1 "cairn: weak message is a nudge"
+assert_severity "$CAIRN"  gate_cairn  Bash 'git push origin main' 1 "cairn: push is a nudge"
+assert_severity "$BONSAI" gate_bonsai Bash 'sed -i s/a/b/ x.py'   1 "bonsai: mutate is a nudge"
 assert_dual_mode "$TEMPER" gate_temper Bash 'git merge main'         "merge to primary nudges"
 assert_dual_mode "$TEMPER" gate_temper Bash 'git merge feature-xyz'  "merge to non-primary is silent"
 assert_dual_mode "$TEMPER" gate_temper Bash 'echo hi'                "unrelated command is silent"

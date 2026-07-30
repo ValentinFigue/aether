@@ -15,85 +15,76 @@
 # and calls gate_cairn with $cmd_or_path already parsed — so the gate below is
 # the single definition of cairn's rules, not a copy the suite has to mirror.
 
+# ── Message quality ──────────────────────────────────────────────────────────
+# A direct port of the python this replaced, kept deliberately literal — same word
+# list, same four patterns, same 12-character floor, same conventional-commit
+# escape hatch, in the same order. It is a port because it is on the hook's hot
+# path: python3 costs ~18ms to start and this rule is a regex plus a set lookup,
+# which bash already does. `tests/test_rules.sh` keeps the messages it was
+# diffed against, as assertions.
+#
+# Echoes one of: none | commit_weak
+_cairn_judge() {
+  local msg="$1" ml
+
+  # Well-formed conventional commit: type(scope): description — never weak.
+  # Checked before weakness, as in the original: `fix: <10+ chars>` outranks the
+  # fact that "fix" is itself a weak word.
+  local conv='^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?!?: .{10,}'
+  if [[ $msg =~ $conv ]]; then printf none; return 0; fi
+
+  ml=$(printf '%s' "$msg" | tr '[:upper:]' '[:lower:]')
+  # python's rstrip(".,!") — strips every trailing character in the set, not one
+  while :; do
+    case "$ml" in
+      *[.,!]) ml="${ml%?}" ;;
+      *) break ;;
+    esac
+  done
+
+  if [ "${#msg}" -lt 12 ]; then printf commit_weak; return 0; fi
+
+  case " fix wip misc update changes stuff test temp tmp commit save done ok patch tweak cleanup refactor work more " in
+    *" $ml "*) printf commit_weak; return 0 ;;
+  esac
+
+  local p
+  for p in \
+    '^(fix(ed|es|ing)?|updat(e|ed|ing)|add(s|ed|ing)?)[[:space:]]+(bug|issue|stuff|things?|it|this)$' \
+    '^more (changes|fixes|updates|work)$' \
+    '^(minor|small|quick)[[:space:]]+[[:alnum:]_]+$' \
+    '^[[:alnum:]_]+$'
+  do
+    if [[ $ml =~ $p ]]; then printf commit_weak; return 0; fi
+  done
+
+  printf none
+}
+
 # ── Gate ─────────────────────────────────────────────────────────────────────
 # Reads: $cmd_or_path.  Returns: 1 to nudge, 0 to stay silent.
 gate_cairn() {
   local cmd="${cmd_or_path:-}"
   [ -z "$cmd" ] && return 0
+  aether_bypassed cairn && return 0
 
-  # Bypass markers
-  if printf '%s' "$cmd" | grep -qE '# *(cairn|suite):skip'; then
-    return 0
-  fi
+  local result=none
 
-  local result
-  result=$(python3 - "$cmd" <<'PYEOF'
-import re, sys
-cmd = sys.argv[1]
-
-IS_COMMIT = re.search(r'\bgit\b.*\bcommit\b', cmd)
-IS_PUSH   = re.search(r'\bgit\b.*\bpush\b', cmd)
-
-# ── Gate 2: git push ─────────────────────────────────────────────────────────
-if IS_PUSH:
+  # ── Gate 2: git push ───────────────────────────────────────────────────────
+  if [ -n "${AETHER_IS_PUSH:-}" ]; then
     # Skip dry-runs — the user is not actually pushing
-    if re.search(r'--dry-run|-n\b', cmd):
-        print("none"); sys.exit()
-    print("push"); sys.exit()
+    [ -n "${AETHER_IS_DRY_RUN:-}" ] && return 0
+    result=push
 
-# ── Gate 1: git commit with weak or missing message ──────────────────────────
-if IS_COMMIT:
-    # No inline -m flag → message will open an editor; cairn is the better path
-    has_inline_msg = bool(re.search(r'(-m|--message)\s*.+', cmd))
-    if not has_inline_msg:
-        print("commit_no_message"); sys.exit()
-
-    # Extract the inline message.
-    # Apostrophes are written \x27 rather than \' on purpose: bash tracks quote
-    # state through a heredoc body when scanning $( ... ) for its closing paren,
-    # so an odd number of single quotes here breaks the whole command
-    # substitution with "syntax error near unexpected token )".
-    m = re.search(r"(?:-m|--message)\s*(?:\"([^\"]+)\"|\x27([^\x27]+)\x27|(\S+))", cmd)
-    if not m:
-        print("commit_no_message"); sys.exit()
-    msg = (m.group(1) or m.group(2) or m.group(3) or "").strip()
-
-    WEAK_SINGLE = {
-        "fix", "wip", "misc", "update", "changes", "stuff",
-        "test", "temp", "tmp", "commit", "save", "done", "ok",
-        "patch", "tweak", "cleanup", "refactor", "work", "more",
-    }
-    WEAK_PATTERNS = [
-        r'^(fix(ed|es|ing)?|updat(e|ed|ing)|add(s|ed|ing)?)\s+(bug|issue|stuff|things?|it|this)$',
-        r'^more (changes|fixes|updates|work)$',
-        r'^(minor|small|quick)\s+\w+$',
-        r'^\w+$',              # single word, no conventional prefix
-    ]
-
-    msg_lower = msg.lower().rstrip(".,!")
-    is_weak = (
-        len(msg) < 12
-        or msg_lower in WEAK_SINGLE
-        or any(re.match(p, msg_lower) for p in WEAK_PATTERNS)
-    )
-
-    # Well-formed conventional commit: type(scope): description  — never weak
-    is_conventional = bool(re.match(
-        r'^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?!?: .{10,}',
-        msg
-    ))
-
-    if is_conventional:
-        print("none"); sys.exit()
-
-    if is_weak:
-        print("commit_weak"); sys.exit()
-
-    print("none"); sys.exit()
-
-print("none")
-PYEOF
-) || return 0
+  # ── Gate 1: git commit with weak or missing message ────────────────────────
+  elif [ -n "${AETHER_IS_COMMIT:-}" ]; then
+    if [ -z "${AETHER_HAS_INLINE_MSG:-}" ]; then
+      # No inline -m flag → message will open an editor; cairn is the better path
+      result=commit_no_message
+    else
+      result=$(_cairn_judge "${AETHER_COMMIT_MSG:-}")
+    fi
+  fi
 
   case "$result" in
     commit_weak)
@@ -137,13 +128,23 @@ PYEOF
 if [ -z "${SUITE_MODE:-}" ]; then
   set -euo pipefail
 
-  input=$(cat)
+  _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  for _lib in "$_here/../aether-config.sh" "$_here/aether-config.sh" \
+              "$_here/../../../hooks/aether-config.sh" \
+              "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh"; do
+    # shellcheck source=/dev/null
+    [ -f "$_lib" ] && { . "$_lib"; break; }
+  done
+  unset _lib _here
+  command -v aether_parse_command >/dev/null 2>&1 || exit 0
 
-  cmd_or_path=$(printf '%s' "$input" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-print(data.get('tool_input', {}).get('command', ''))
-" 2>/dev/null) || exit 0
+  # The same parse the suite runs, so standalone and suite modes cannot drift.
+  aether_parse_command "$(cat)" || exit 0
+
+  # Commands only — the old standalone parse read tool_input.command and nothing
+  # else, so a Write payload reached the gate empty. The shared parse falls back
+  # to file_path; this keeps that difference invisible.
+  [ "${AETHER_TOOL:-}" = Bash ] || exit 0
 
   gate_cairn
   exit $?

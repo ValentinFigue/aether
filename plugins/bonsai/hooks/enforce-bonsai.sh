@@ -21,42 +21,33 @@ gate_bonsai() {
   [ -z "$cmd" ] && return 0
 
   # Bypass marker
-  if printf '%s' "$cmd" | grep -qE '# *(bonsai|suite):skip'; then
-    return 0
+  aether_bypassed bonsai && return 0
+
+  # Classify the command into one of three operation types.
+  #
+  # A direct port of the python this replaced — same four categories, same
+  # precedence, same source extensions. python3 costs ~18ms to start and this is
+  # four regexes; on a hook that fires on every Bash call that was the second of
+  # three interpreters. `\b` has no POSIX ERE equivalent, so it is written out as
+  # "not a word character, or the edge of the string". `tests/test_rules.sh` keeps
+  # the commands it was diffed against, as assertions.
+  local W='[^[:alnum:]_]'
+  local SRC="\.(py|ts|tsx|js|jsx|mjs)($W|$)"
+  [[ $cmd =~ $SRC ]] || return 0
+
+  local SEARCH="(^|$W)(grep|rg|ripgrep|ag|ack|pygrep|fgrep)($W|\$)"
+  local MUTATE="(^|$W)(sed|awk|perl)($W|\$)"
+  local MOVE="(^|$W)(mv|git[[:space:]]+mv|cp)($W|\$)"
+  local XARGS="(^|$W)xargs($W|\$).*(sed|awk|perl)"
+
+  local result=none
+  if [[ $cmd =~ $MOVE ]]; then
+    result=move
+  elif [[ $cmd =~ $MUTATE ]] || [[ $cmd =~ $XARGS ]]; then
+    result=mutate
+  elif [[ $cmd =~ $SEARCH ]]; then
+    result=search
   fi
-
-  # Classify the command into one of three operation types
-  local result
-  result=$(python3 - "$cmd" <<'PYEOF'
-import re, sys
-cmd = sys.argv[1]
-
-SRC = r'\.(py|ts|tsx|js|jsx|mjs)(\b|$)'
-
-# Category A — text search/read tools on source files
-SEARCH_RE = re.compile(r'\b(grep|rg|ripgrep|ag|ack|pygrep|fgrep)\b')
-
-# Category B — text mutation tools on source files
-MUTATE_RE = re.compile(r'\b(sed|awk|perl)\b')
-
-# Category C — move / rename / copy of source files
-MOVE_RE   = re.compile(r'\b(mv|git\s+mv|cp)\b')
-
-# Category D — xargs chains that pipe into mutation
-XARGS_RE  = re.compile(r'\bxargs\b.*(sed|awk|perl)', re.DOTALL)
-
-has_src = bool(re.search(SRC, cmd))
-
-if MOVE_RE.search(cmd) and has_src:
-    print("move")
-elif (MUTATE_RE.search(cmd) or XARGS_RE.search(cmd)) and has_src:
-    print("mutate")
-elif SEARCH_RE.search(cmd) and has_src:
-    print("search")
-else:
-    print("none")
-PYEOF
-) || return 0
 
   case "$result" in
     search)
@@ -103,14 +94,22 @@ MSG
 if [ -z "${SUITE_MODE:-}" ]; then
   set -euo pipefail
 
-  input=$(cat)
+  _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  for _lib in "$_here/../aether-config.sh" "$_here/aether-config.sh" \
+              "$_here/../../../hooks/aether-config.sh" \
+              "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh"; do
+    # shellcheck source=/dev/null
+    [ -f "$_lib" ] && { . "$_lib"; break; }
+  done
+  unset _lib _here
+  command -v aether_parse_command >/dev/null 2>&1 || exit 0
+  # The same parse the suite runs, so standalone and suite modes cannot drift.
+  aether_parse_command "$(cat)" || exit 0
 
-  # If python3 fails for any reason (empty stdin, parse error), allow silently.
-  cmd_or_path=$(printf '%s' "$input" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-print(data.get('tool_input', {}).get('command', ''))
-" 2>/dev/null) || exit 0
+  # bonsai reads commands only. Its old standalone parse read tool_input.command
+  # and nothing else, so a Write payload reached the gate as an empty string; the
+  # shared parse falls back to file_path, and this keeps that difference invisible.
+  [ "${AETHER_TOOL:-}" = Bash ] || exit 0
 
   gate_bonsai
   exit $?

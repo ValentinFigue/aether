@@ -1,30 +1,51 @@
 # aether
 
-Aether binds bonsai, whetstone, temper, and cairn into a single coordinated suite — one repo, one install, one config, one bypass convention, one hook that knows the order of things. A fifth plugin, trellis, writes the config the other four read.
+Checkpoints for Claude Code. aether makes a coding agent stop at the four moments a careful colleague would — before implementing, while editing, before committing, before pushing — and gives each one a command that does the checking.
 
 
 | | |
 |---|---|
-| [Install](#install) · [How it works](#how-it-works) | getting it onto a machine |
-| [Configuration](#configuration) · [Trust](#trust) | the part you touch daily |
+| [The problem](#the-problem) · [Quick start](#quick-start) | why, and getting it running |
+| [How it works](#how-it-works) · [Configuration](#configuration) · [Trust](#trust) | the part you touch daily |
 | [Commands](#commands) · [The development workflow](#the-development-workflow) | what to run, and when |
-| [CLI reference](#cli-reference) · [Bypass](#bypass) | `aether …`, and turning it off |
-| [Roadmap](#roadmap) | what is missing |
+| [CLI reference](#cli-reference) · [Bypass](#bypass) · [Roadmap](#roadmap) | reference |
 
 ---
 
-## Why
+## The problem
 
-Each Claude Code plugin installs its own hook, its own bypass syntax, and touches `settings.json` independently. Install all four and you get four competing hook registrations, redundant gate checks on the same git command, and no shared way to silence them all at once.
+Claude Code will write code, commit it, and open a PR without stopping to check
+anything — and it is very good at making that look finished. The failure mode is
+not bad code. It is that **nothing interrupts at the points where a human would.**
 
-Aether solves the wiring problem:
+You ask for rate limiting on an API. Same request, both columns:
 
-- One `PreToolUse` hook (`enforce-suite.sh`) replaces all four per-plugin hooks
-- One `settings.json` pass — no per-plugin editing
-- One bypass convention (`# aether:skip`) silences everything; per-plugin markers (`# temper:skip`) work too
-- One unified CLAUDE.md block covers all four plugins
+| | without aether | with aether |
+|---|---|---|
+| **plan** | — | `/critique-plan` → 🔴 an in-process counter does nothing behind a load balancer |
+| **edit** | `sed -i s/RateLimit/Limiter/ *.py` — misses the re-export in `api/__init__.py` | bonsai: *use `pyrename`, sed misses re-exports* |
+| **commit** | `"add rate limiting"` | `/critique-diff` → 🔴 the limit is never released when the handler raises |
+| **push** | pushed, unreviewed | blocked until it has been reviewed |
+| **PR body** | `"add rate limiting"` | `/draft-pr` writes it from the diff, so it names the Redis dependency you added |
 
-Since 1.0.0 all four plugins live in this repository, so setting up a new machine is one `git clone` and one script — no network access during install, and the four can never drift to different versions. The plugins are unchanged in behaviour: each still installs and runs standalone.
+Left column: you find out in review, three days later, or in production. Right
+column: at the point where fixing it is a sentence, not a revert.
+
+Each checkpoint is a slash command you can run yourself, plus a hook that reminds
+you when you forget. Nothing blocks except pushing unreviewed code and committing
+to a path you marked critical — everything else is a nudge, and
+`# aether:skip` silences any of it for one command.
+
+### Why one suite rather than four plugins
+
+The four started as separate Claude Code plugins, and each installed its
+own hook, its own bypass syntax, and edited `settings.json` on its own. Install all
+four and you get four competing hook registrations, four redundant checks on the
+same `git commit`, and no way to turn them all off at once.
+
+aether is the wiring: one `PreToolUse` hook that knows the order of things, one
+`settings.json` pass, one config file, one bypass convention, one CLAUDE.md block.
+The plugins still install and run standalone — this is coordination, not a rewrite.
 
 ---
 
@@ -40,32 +61,39 @@ Since 1.0.0 all four plugins live in this repository, so setting up a new machin
 
 ---
 
-## Install
+## Quick start
 
 ```bash
-git clone https://github.com/ValentinFigue/aether
-cd aether
-
-# Global, with the CLAUDE.md rules block (recommended)
+git clone https://github.com/ValentinFigue/aether && cd aether
 bash install.sh --global --claude-md
-
-# Local (this project only)
-bash install.sh
-
-# Skip bonsai — the only plugin needing uv, node and npm
-bash install.sh --global --no-bonsai
-
-# Dry run — see what would happen without making changes
-bash install.sh --global --dry-run
 ```
 
-**Keep the clone.** bonsai registers its MCP servers in `~/.claude.json` by absolute path into this directory, so moving or deleting the clone breaks them. Re-run `install.sh` from the new location if you do move it.
+Then once per repository — trellis reads your CI workflows and git history and
+writes the config the critics use:
 
-### Prerequisites
+```bash
+cd ~/your-project
+/draft-config     # writes .aether/config: your test command, lint, git conventions
+aether trust      # review what it found, then let the critics run it
+```
 
-`bash` and `python3` (or `node`, or `jq`) for everything except bonsai. bonsai additionally needs `uv`, `node` and `npm` to build its Python and TypeScript servers. If those are missing the installer skips bonsai, tells you how to finish later, and installs the rest.
+That is the whole setup. The hooks now nudge at each checkpoint, and the commands
+are there when you want them: `/critique-plan`, `/critique-diff`, `/draft-commit`,
+`/draft-pr`.
 
-There is no `curl | bash` one-liner. The installer copies files out of the clone, so piping it to bash could never have worked, and dropping it also removes a remote-code-execution path from the install flow.
+```bash
+bash install.sh                       # this project only
+bash install.sh --global --no-bonsai  # skip the one plugin needing uv/node/npm
+bash install.sh --global --dry-run    # print every step, change nothing
+```
+
+**Keep the clone.** bonsai registers its MCP servers by absolute path into it, so
+moving or deleting the clone breaks them — re-run `install.sh` from the new location.
+
+Needs `bash` and one of `python3`/`node`/`jq`; bonsai also needs `uv`, `node` and
+`npm`, and is skipped with an explanation if they are missing. There is no
+`curl | bash` — the installer copies files out of the clone, so piping it could
+never have worked.
 
 ---
 
@@ -147,79 +175,53 @@ not be installed at all, which is asserted in the test suite.
 ## What changes in your environment
 
 Two directories, and the split between them is the rule: **`.claude/` is what
-Claude Code reads; `.aether/` is what aether owns.**
-
-Both scopes use the same directory name and the same shape — `~/.aether/`
-globally, `.aether/` in a project. Referred to below as `<root>`.
+Claude Code reads; `.aether/` is what aether owns.** Both scopes have the same
+shape — `~/.aether/` globally, `.aether/` in a project.
 
 ```
-<root>/
-  config          your settings, one [section] per plugin
-  rules.md        prose for the critics, one section per command
-  templates/      optional file templates (e.g. pr.md)
-  hooks/          enforce-suite.sh · gates/ · aether-config.sh
-  out/            CRITIQUE.md · TEMPER.md · .nudged
-  manifest        what the installer put on this machine
+<root>/config       your settings, one [section] per plugin
+<root>/rules.md     prose for the critics
+<root>/hooks/       enforce-suite.sh · gates/ · aether-config.sh
+<root>/out/         CRITIQUE.md · TEMPER.md
+<root>/manifest     what the installer put here
 ```
 
-| What | Where |
-|---|---|
-| Config | `<root>/config` — sectioned, resolved per key |
-| Prose rules | `<root>/rules.md` — concatenated, global then project |
-| `enforce-suite.sh` | `<root>/hooks/enforce-suite.sh` |
-| Plugin gates | `<root>/hooks/gates/enforce-<plugin>.sh` — sourced by the suite hook |
-| Plugin hooks | `<root>/hooks/plugin-hooks/` — PostToolUse scripts the suite has no equivalent for |
-| Config reader | `<root>/hooks/aether-config.sh` — the one parser, shared with the CLI |
-| Generated output | `<root>/out/` — CRITIQUE.md, TEMPER.md |
-| Install manifest | `<root>/manifest` |
-| Hook registration | `settings.json` — one `PreToolUse` entry, matcher `Bash\|Write\|Edit\|MultiEdit` |
-| Permissions | `settings.json` — `Bash`, `Read`, `Write`, plus each installed plugin's own (bonsai adds `mcp__bonsai-*__*`) |
-| Slash commands | `~/.claude/commands/` — `critique-*.md`, `draft-*.md` |
-| CLAUDE.md block | injected with `--claude-md` flag |
-| `aether` CLI | `~/.local/bin/aether` — a binary belongs on PATH |
+In `.claude/`, which belongs to Claude Code: one `PreToolUse` entry in
+`settings.json` (matcher `Bash\|Write\|Edit\|MultiEdit`), the permissions each
+installed plugin declares, the slash commands, and the CLAUDE.md block with
+`--claude-md`. bonsai's MCP servers go in `~/.claude.json`. The `aether` binary
+goes in `~/.local/bin/`. `$AETHER_HOME` overrides the global root.
 
-`$AETHER_HOME` overrides the global root if you would rather it lived at
-`~/.config/aether`. One variable, read in one place.
-
-Hook *scripts* live under `<root>/hooks/` because `settings.json` references them
-by absolute path, so they can live anywhere. That also retires
-`~/.local/share/aether/`, which used to hold the global hook while the local one
-sat in `.claude/hooks/` — different parents for the same artefact.
-
-Per-plugin `PreToolUse` hooks are removed during install, since `enforce-suite.sh` supersedes them. `settings.json` and `CLAUDE.md` are copied to `.bak` before the first change.
+`settings.json` and `CLAUDE.md` are copied to `.bak` before the first change.
+Per-plugin `PreToolUse` hooks are removed on install, since `enforce-suite.sh`
+supersedes them — but `PostToolUse` hooks are not, because the suite hook has no
+equivalent for them.
 
 ### Upgrading from 1.0.0
 
-`aether install` migrates the old layout on the way past — four `<plugin>.config`
-files per scope become one sectioned `config`, `whetstone.config.md` and any
-`pr.rules_file` become `rules.md`, and `.claude/plans/{CRITIQUE,TEMPER}.md` move
-to `out/`. Every old file is copied to `.bak` before being removed, the pass is
-idempotent, and where both old and new exist the **new** value wins.
-
-`aether migrate` runs it on its own. Until you migrate, the old
-`<plugin>.config` files are still *read* when the new file has no value for a
-key, so nothing breaks in the meantime.
-
-### PreToolUse is unified; PostToolUse is not
-
-The suite hook covers the `PreToolUse` phase only. cairn and bonsai also register `PostToolUse` hooks — `post-cairn.sh` (suggests `/draft-commit` after a clean review, `/draft-changelog` after a version bump) and `post-bonsai.sh` (reference-drift check after a rename-shaped edit). These have no equivalent in the suite hook, so they are left registered per-plugin rather than removed.
+`aether install` migrates on the way past: four `<plugin>.config` files per scope
+become one sectioned `config`, `whetstone.config.md` and any `pr.rules_file` become
+`rules.md`, and `.claude/plans/{CRITIQUE,TEMPER}.md` move to `out/`. Every old file
+is copied to `.bak`, the pass is idempotent, and where both exist the **new** value
+wins. `aether migrate` runs it alone. Until you migrate the old files are still
+*read* when the new one has no value for a key.
 
 ---
 
 ## Configuration
 
-One file per scope, sectioned. Plain text — open it and edit it; nothing caches.
+One file per scope, sectioned, plain text. `~/.aether/config` globally,
+`.aether/config` in a project — `/draft-config` writes it for you.
 
 ```
-# ~/.aether/config — your defaults, everywhere
 enabled: true
 
-[project]
+[project]            # things to RUN — this is what makes the critics measure
 test:      uv run pytest
 lint:      uvx ruff check
 typecheck: npx tsc --noEmit
 
-[git]
+[git]                # things to WRITE — house rules for commits and PRs
 scopes: api, web, infra
 ticket: TK-[0-9]+
 
@@ -229,156 +231,106 @@ critical_paths:   *auth* *token* migrations/ *.sql
 
 [cairn]
 style: conventional
-
-[whetstone]
-critics: impl, risk
 ```
 
-Keys outside any section are suite-wide. The four sections named after plugins
-carry that plugin's settings, with every key name unchanged from the pre-1.0
-`<plugin>.config` files. Two sections describe the repository rather than a
-plugin, and they split on a clear line: **`[project]` is things to run,
-`[git]` is things to write.**
+Keys outside a section are suite-wide. Sections named after a plugin hold its
+settings. The two that describe the repository split on a clear line: **`[project]`
+is things to run, `[git]` is things to write.**
 
-### `[project]` — commands the critics execute
-
-Shell commands. This is what upgrades Coverage from *inferring* that tests exist
-to actually running them — so it needs `aether trust` before it takes effect.
-Each critic names the command it ran and its exit status, and says plainly when
-it could not run anything rather than implying a check happened.
-
-| Key | What changes if you set it |
+| `[project]` | effect |
 |---|---|
-| `test` | `/critique-diff` and `/critique-pr` Coverage runs the suite and reports real failures |
-| `lint` / `format` | Correctness reports actual violations instead of eyeballing style |
-| `typecheck` | Correctness runs it against the changed files |
-| `build` | `/critique-pr` can confirm the branch still builds |
-| `coverage` / `coverage_min` | Coverage compares against a threshold instead of a judgement call |
+| `test` | Coverage runs your suite and quotes real failures instead of reading the diff |
+| `lint` · `format` · `typecheck` | Correctness reports actual violations with file and line |
+| `build` | `/critique-pr` confirms the branch still builds |
+| `coverage` · `coverage_min` | Coverage compares a number against a threshold |
 
-### `[git]` — how this project writes commits and PRs
-
-No commands, nothing executed. House rules that `/draft-commit` and `/draft-pr`
-follow and `/critique-pr` checks against.
-
-| Key | Example | What changes if you set it |
+| `[git]` | example | effect |
 |---|---|---|
-| `scopes` | `api, web, infra` | `/draft-commit` picks from your real scopes instead of inventing one |
-| `types` | `feat, fix, docs, chore` | restricts the Conventional Commits type it may use |
-| `ticket` | `TK-[0-9]+` | `/draft-commit` pulls the ticket from the branch name into the subject; `/critique-pr` flags a PR with none |
-| `trailers` | `Co-Authored-By` | `/draft-commit` always emits them |
-| `base` | `main` | `/draft-pr` stops auto-detecting the base branch |
+| `scopes` · `types` | `api, web` | `/draft-commit` picks from your real ones instead of inventing |
+| `ticket` | `TK-[0-9]+` | pulled from the branch into the subject; `/critique-pr` flags a PR without one |
+| `trailers` | `Co-Authored-By` | always emitted |
+| `base` | `main` | `/draft-pr` stops auto-detecting |
 
 ### How the layers override
 
-Three layers, resolved **per key** — not per file, and not per section:
-
-| Layer | Source | Beats |
-|---|---|---|
-| 1 | `~/.aether/config` | — |
-| 2 | `<project>/.aether/config` | global |
-| 3 | flags, e.g. `/critique-diff --severity=red` | both |
-
-A project file overrides only the keys it names. Set `severity` globally and
-`auto_nudge_lines` in one repo, and both apply:
+Global, then project, then flags — resolved **per key**, so a project that sets one
+threshold keeps the global value of every other:
 
 ```
-global   [temper] auto_nudge_lines: 200
-                  severity: red, yellow
+global   [temper] auto_nudge_lines: 200      resolved  auto_nudge_lines: 400  (project)
+                  severity: red, yellow                severity: red, yellow  (global)
 project  [temper] auto_nudge_lines: 400
-                                              ↓
-resolved [temper] auto_nudge_lines: 400   (project)
-                  severity: red, yellow   (global)
 ```
-
-### Letting trellis write it
-
-`[project]` is the section that upgrades Coverage from inferring to measuring, and
-it is also the section nobody fills in — writing five shell commands by hand is
-exactly the kind of task that gets postponed.
-
-```bash
-/draft-config          # detect, ask about the gaps, write .aether/config
-```
-
-trellis looks at **CI workflows first**: a `run:` line in
-`.github/workflows/*.yml` is a command that provably works in a clean checkout,
-because someone maintains it and it fails loudly when it rots. Manifest scripts
-come second and are noisier — this repository's own `package.json` offers
-`test:watch`, which a critic must never run. It reads the repo last, for commit
-sizes and the git conventions actually in use.
-
-Every key it writes carries a comment naming where the value came from, so a
-detected command is distinguishable from a guess. It never overwrites a key you
-have set, never selects a watch-mode or deploy script, and never runs what it
-detects — that is what `aether trust` is for, and the report says so.
 
 ### Knowing what to change
 
-The question a config file has to answer is "if I change this, what happens?"
-The schema lives in each plugin's manifest, beside the assets it already
-declares, so a key is documented by being declared — and `aether config show`
-answers the question inline:
+The schema lives in each plugin's manifest, so a key is documented by being
+declared — and `aether config show` answers "if I change this, what happens?":
 
 ```
 $ aether config show temper
-
 [temper]
-  auto_nudge_lines     400                    project · .aether/config:14
+  auto_nudge_lines     400            project · .aether/config:14
       Nudge before a commit whose staged diff exceeds this many lines
       used by: enforce-temper.sh
-  auto_nudge_files     10                     default
-      Same, for number of files changed
-      used by: enforce-temper.sh
-  severity             red, yellow            global · ~/.aether/config:6
-      Which severities get reported
-      used by: /critique-diff /critique-pr
+  severity             red, yellow    global · ~/.aether/config:6
 ```
 
-Value, which layer supplied it, the file and line to edit, what it does, and
-what consumes it. `--values` drops the prose once you know the file; `--raw`
-emits bare `key: value` lines, which is what the slash commands read.
-
-**aether configures itself.** [`.aether/config`](.aether/config) in this repo is the
-worked example — committed, because it describes the project rather than the
-developer. Every key records where its value came from, so a detected command is
-distinguishable from a guess, and two keys are deliberately *unset* with a note
-explaining why the obvious value would be wrong.
-
-`aether config doctor` catches what hand-editing actually produces:
+`aether config doctor` catches what hand-editing produces — a typo is otherwise
+silently ignored, the default applies, and the setting appears to do nothing:
 
 ```
 $ aether config doctor
   ✗ [temper] auto_nudge_line — unknown key  (.aether/config:14)
       did you mean auto_nudge_lines?
-  ! [project] lint: git ls-files '*.sh' | xargs shellcheck
+  ! [project] lint: git ls-files | xargs shellcheck
       not on PATH: shellcheck — that step will be skipped
-  ✓ 14 key(s) resolved
 ```
 
-An unknown key is the one worth catching most: a typo is silently ignored, the
-default applies, and the setting simply appears to have no effect. The PATH check
-looks at every command position, not just the first word — `git ls-files | xargs
-shellcheck` starts with `git`, which is always there, so checking one word would
-report nothing while shellcheck was silently skipped.
+It checks every command position, not just the first word: `git ls-files | xargs
+shellcheck` starts with `git`, so checking one word would report nothing while
+shellcheck was silently skipped.
 
-`aether config explain <section>.<key>` prints one key in full — default, type,
-every layer that sets it, and which commands read it.
+Anything that writes a config emits the doc line as a comment above each key, so
+the file explains itself. [This repo's own `.aether/config`](.aether/config) is the
+worked example — every value records where it came from, and two keys are
+deliberately *unset* with a note on why the obvious value would be wrong.
 
-**The file explains itself.** Anything that writes a config — `config set`, or
-the installer seeding a first one — emits the doc line as a comment above each
-key, so "what can I put here?" is answered by the file you already have open.
+### Trust
+
+A project's config can set thresholds the moment you clone it; none of that can
+execute anything. Two things can, and both wait for you:
+
+| | why it waits |
+|---|---|
+| `[project]` commands | a critic would execute them |
+| `rules.md` prose | it reaches a critic's context — an injection vector with no log |
+
+Until you trust a project those two are ignored, global config and prose are used
+instead, and **the critic says so in its report**. `aether trust` prints the
+commands and the prose *before* recording anything:
 
 ```
-[temper]
-# Nudge before a commit whose staged diff exceeds this many lines
-auto_nudge_lines: 400
+$ aether trust
+Trusting /Users/you/Code/thing
+  Commands the critics would run:
+    test        uv run pytest
+  Prose that would reach a critic (.aether/rules.md, 4 line(s)):
+    [critique-diff]
+    We use event sourcing — flag anything that bypasses the event log.
 ```
+
+Trust is a content hash, so **hand-editing either file asks again** — loudly,
+rather than silently falling back to global. `aether config set` re-hashes
+automatically, because you made the change through the tool. That asymmetry is
+direnv's model and the reason it is safe. Global config and prose are always
+trusted: you wrote them.
 
 ### `rules.md` — prose for the critics
 
-Free text, one section per command, replacing the two mechanisms that existed
-before it: whetstone's auto-discovered `whetstone.config.md` and cairn's
-`pr.rules_file` pointer.
+Free text beside the config, one section per command. Prose **concatenates**
+global-then-project rather than overriding — losing your global writing rules
+because a repo added a line would be the wrong default.
 
 ```markdown
 [all]
@@ -386,73 +338,7 @@ This is a bash project. Prefer POSIX-compatible constructs.
 
 [critique-diff]
 We use event sourcing — flag anything that bypasses the event log.
-
-[draft-pr]
-Always mention the ticket ID in the first line.
 ```
-
-Prose **concatenates** rather than overriding: global first, then project.
-That differs from `config` deliberately — losing your global writing rules
-because a repo added one line would be the wrong default.
-
-### Trust
-
-A project's config can set thresholds and pick critics the moment you clone it —
-none of that can execute anything. Two things can, and both wait for your
-consent:
-
-| What | Why it waits |
-|---|---|
-| `[project]` run-commands | a critic would execute them |
-| `rules.md` prose | it reaches a critic's context, which is an injection vector with no log |
-
-Until you trust a project, those two are ignored, global config and global prose
-are used instead, and **the critic says so in its report header** — a review with
-less context than the file suggests is worse than one with no rules at all.
-
-```bash
-aether trust           # show what you are consenting to, then record it
-aether trust status    # none | ok | changed
-aether trust forget    # revoke
-```
-
-`aether trust` prints the commands and the prose *before* recording anything,
-because otherwise it is a formality:
-
-```
-$ aether trust
-Trusting /Users/you/Code/thing
-
-  Commands the critics would run:
-    test        uv run pytest
-    typecheck   npx tsc --noEmit
-
-  Prose that would reach a critic (.aether/rules.md, 4 line(s)):
-    [critique-diff]
-    We use event sourcing — flag anything that bypasses the event log.
-```
-
-Trust is a content hash, so **hand-editing either file asks again** — loudly,
-rather than silently falling back to global, which would hide that anything
-changed. Edits made through `aether config set` re-hash automatically, because
-you made them through the tool. This is direnv's model and the reason it is safe.
-
-Global config and global prose are always trusted: you wrote them.
-
-### Editing by hand
-
-```bash
-aether config path [global]                     # print the file path
-aether config edit [global]                     # open it in $EDITOR
-aether config show [<section>]                  # resolved values + what each does
-aether config explain temper.auto_nudge_lines   # one key, in full
-aether config doctor                            # validate
-aether config set   temper.auto_nudge_lines 400 [global]
-aether config unset temper.auto_nudge_lines
-```
-
-`config set` rewrites only the line it targets, preserving your comments and
-ordering, and creates the section if it is missing.
 
 ---
 
@@ -680,80 +566,33 @@ Each gate is defined once, in its own plugin's `hooks/enforce-<plugin>.sh`, and 
 
 ```
 aether install [plugin...] [global] [--claude-md] [--no-bonsai] [--dry-run]
-                                         Install the suite, or just the named plugins
 aether uninstall [plugin...] [global] [--claude-md]
-                                         Remove a plugin, or the suite layer itself
-aether status                            Plugin state, gates, clone path, version
+aether status                            Plugin state, gates, clone, version
+aether doctor [--fix] [--deep]           Check the install against the manifests
 aether config show [section] [--values|--raw]
-                                         Resolved values, where each came from
-aether config explain <section>.<key>    One key in full
-aether config doctor                     Validate: unknown keys, dead paths
+aether config explain <section>.<key>
+aether config doctor                     Just the config and trust half
 aether config set|unset <section>.<key> [value] [global]
-aether config path|edit [global]         Print or open the config file
-aether trust [status|forget]             Allow this project's [project] commands
-                                         and rules.md to be used
-aether rules                             Print the prose the critics will read
+aether config path|edit [global]
+aether trust [status|list|forget|prune]
+aether rules                             The prose the critics will read
 aether migrate                           Move a pre-1.0 layout into ~/.aether/
-aether enable  [local|global]            Enable all plugins
-aether disable [local|global]            Disable all plugins
-aether hook enable|disable <plugin>      Stop a gate being invoked at all
-aether update                            git pull the clone and re-run the installer
-aether version                           Print the CLI and installed versions
-aether help                              Show help
+aether enable|disable [local|global]      All plugins
+aether hook enable|disable <plugin>       Stop a gate loading at all
+aether update                             git pull the clone, re-run the installer
+aether version · aether help
 ```
 
-Every plugin also answers to its own name — `aether cairn status` — and the
-`cairn`, `temper`, `whetstone` and `bonsai` binaries are 24-line shims that exec
-exactly that, so `cairn status` still works and there is one implementation.
+Every plugin answers to its own name — `aether cairn status` — and the `cairn`,
+`temper`, `whetstone` and `bonsai` binaries are 24-line shims that exec exactly
+that, so there is one implementation.
 
-`enable`/`disable` and `hook enable`/`disable` are different: the first writes
-`enabled: false` for the gate to read, the second stops the gate being loaded.
-The soft mute is usually what you want; the hard one is for debugging.
-
-### Worked examples
-
-```bash
-# What is installed, and where
-aether status
-aether config path                       # ./.aether/config
-aether config path global                # ~/.aether/config
-
-# Read the config, three ways
-aether config show                       # everything, with docs and sources
-aether config show temper --values       # values and sources, no prose
-aether config show temper --raw          # bare `key: value`, what the commands read
-aether config explain cairn.pr.base      # one key: default, type, every layer
-
-# Change it
-aether config set temper.auto_nudge_lines 400          # this project
-aether config set cairn.style plain global             # everywhere
-aether config unset temper.auto_nudge_lines
-aether config edit global                              # open it in $EDITOR
-
-# Check it
-aether config doctor                     # unknown keys, missing binaries, trust state
-
-# Allow this project's commands and prose to be used
-aether trust
-aether trust status                      # none | ok | changed
-aether trust forget
-
-# Turn things off
-aether disable                           # all plugins, this project
-aether disable global                    # all plugins, everywhere
-aether config set bonsai.enabled false   # one plugin, this project
-aether hook disable bonsai               # stop the gate loading at all (debugging)
-
-# Maintain
-aether update                            # git pull the clone, re-run the installer
-aether migrate                           # move a pre-1.0 layout into ~/.aether/
-aether install temper global             # add one plugin
-aether uninstall bonsai global           # remove one plugin
-```
-
-**Example output of `aether status`:**
+`enable`/`disable` writes `enabled: false` for the gate to read; `hook
+enable`/`disable` stops the gate being loaded. The soft mute is usually what you
+want.
 
 ```
+$ aether status
 aether v1.1.0
 
   bonsai       enabled  MCP: bonsai-py bonsai-ts
@@ -768,43 +607,42 @@ aether v1.1.0
   Installed version: 1.1.0
 ```
 
-**A worked config, end to end:**
+### `aether doctor`
 
-```bash
-$ cd ~/Code/my-api
-$ /draft-config
-Wrote .aether/config
+`status` says what is installed; `doctor` says what is wrong with it. Every check
+compares the state on disk against what the manifests declare, and every finding
+names its fix.
 
-  [project]
-    test        uv run pytest      from .github/workflows/ci.yml
-    lint        uvx ruff check     from .github/workflows/ci.yml
-    typecheck   mypy src           guessed from pyproject.toml — verify this
-  [git]
-    scopes      api, web, infra    from 200 commits (81% conventional)
-
-  Skipped 1 candidate:
-    npm run test:watch             watch mode
-
-Nothing runs yet. Review the commands, then: aether trust
-
-$ aether config show project --values
-[project]
-  test        uv run pytest      project · .aether/config:4
-  lint        uvx ruff check     project · .aether/config:6
-  typecheck   mypy src           project · .aether/config:8
-
-$ aether config get project.test          # withheld: not trusted yet
-
-$ aether trust
-  Commands the critics would run:
-    test        uv run pytest
-    lint        uvx ruff check
-    typecheck   mypy src
-  ✓ trusted.
-
-$ aether config get project.test
-uv run pytest
 ```
+$ aether doctor
+install (global)
+  ✗ PostToolUse: ~/.local/share/cairn/post-cairn.sh is registered but does not exist
+      Claude Code tries to run it on every matching tool call
+      fix: aether doctor --fix
+  ✗ post-cairn.sh is registered more than once — it fires once per registration
+  ! 2 command(s) from a pre-1.0 install are still in the palette
+  ✓ 14 manifest entries all present on disk
+  ✓ permissions match what the installed plugins declare
+  ✓ 4 gates parse
+config
+  ✗ [temper] auto_nudge_line — unknown key  (.aether/config:14)
+trust
+  ! 1 entry(ies) point at a directory that no longer exists
+      fix: aether trust prune
+
+3 problem(s), 2 warning(s).
+```
+
+It exists because every bug that mattered in 1.1.0 shared a shape: **the tool
+reported success and had done nothing.** The engine registered no MCP servers for
+six commits. An upgrade left a hook pointing into a deleted directory.
+`post-cairn.sh` fired twice. All invisible from outside — in a tool whose job is
+noticing problems.
+
+`--fix` performs only the three repairs where the right action is unambiguous:
+deregister a hook whose script is gone, drop a duplicate registration, prune dead
+trust entries. Everything else prints the command. `--deep` also handshakes each
+MCP server, which spawns `uv` and `node`.
 
 ---
 
@@ -853,8 +691,8 @@ Two layers. The unit suite asserts behaviour; the acceptance script exercises th
 things that only appear in a real install.
 
 ```bash
-bash tests/run.sh                  # 420 assertions, ~3 min
-bash tests/run.sh gates            # one file
+bash tests/run.sh                  # 473 assertions, ~4 min
+bash tests/run.sh doctor           # one file
 bash tests/run.sh config           # the config, trust and migration tests
 
 bash tests/acceptance.sh           # end to end against a throwaway HOME, ~4 min
@@ -862,16 +700,19 @@ bash tests/acceptance.sh --full     # also build bonsai and handshake its MCP se
 bash tests/acceptance.sh --perf-only  # just what the hook costs per tool call
 ```
 
-`acceptance.sh` covers what a unit test cannot: installing into a path with
-spaces, nine hostile hook inputs (none may exit 2, which would block the tool
-call, and none may write to stderr), `--dry-run` leaving the home directory
-byte-identical with bonsai included, four consecutive installs producing identical
-state, upgrading from the last release with no dangling hooks, and the per-tool-call
-cost of the hook measured **against that release** rather than an absolute budget,
-so a loaded machine does not produce a false alarm. It never touches your real
-`$HOME`.
+`acceptance.sh` covers what a unit test cannot: a path with spaces, nine hostile
+hook inputs (none may exit 2, which would block the tool call, and none may write to
+stderr), `--dry-run` leaving the home directory byte-identical with bonsai included,
+four consecutive installs producing identical state, upgrading from the last release
+with no dangling hooks, `aether doctor` clean both before and after that upgrade, and
+the hook's per-tool-call cost measured **against that release** rather than an
+absolute budget — so a loaded machine does not raise a false alarm. It never touches
+your real `$HOME`.
 
-Plain bash and python3, no packages to install. The suite covers dual-mode gate equivalence (each gate behaves identically standalone and under the dispatcher), bypass markers, fail-open on malformed input, install idempotence, migration from a standalone install, and uninstall.
+Plain bash and python3, no packages. The unit suite covers dual-mode gate
+equivalence (each gate behaves identically standalone and under the dispatcher),
+bypass markers, fail-open on malformed input, per-key config resolution, trust,
+migration, install idempotence, and uninstall.
 
 ---
 
@@ -903,6 +744,14 @@ than leaving them to whoever remembers.
 **Multi-repo config.** `[project]` assumes one test command for one tree. A
 monorepo needs per-path sections, and that is a real design question rather than
 a small change.
+
+**Work with any agent, not just Claude Code.** The checking is already portable:
+bonsai's tools are plain MCP, the config and prose are plain text, the CLI is bash,
+and the commands are markdown prompts. What is Claude Code specific is the automatic
+interruption — the gates register in its `settings.json` and parse its PreToolUse
+payload. Each rule already lives in one file behind a `gate_<plugin>` function, so
+another host is payload translation rather than a rewrite. The intent is to support
+Cursor, Windsurf, Zed and anything else that grows an equivalent hook.
 
 **A distribution story.** Today it is `git clone` plus a script, and the clone has
 to stay put because bonsai's MCP servers reference it by absolute path. A

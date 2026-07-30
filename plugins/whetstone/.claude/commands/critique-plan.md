@@ -68,11 +68,22 @@ Use this context to ground findings: flag dependency version conflicts, note con
 
 ## Plan discovery
 
-Find the plan to critique using this order:
-1. `PLAN.md` in the project root
-2. `PLAN_MODE_HANDOFF.md` in the project root
-3. Any `.md` files inside a `plans/` directory
-4. If none found, ask the user to paste the plan directly
+```bash
+aether plan status
+```
+
+That prints the plan the **gate** is judging, and whether it considers it critiqued.
+Using the same answer here is the point: this command and the gate had three different
+discovery rules between them, and neither looked where plan mode actually writes — so
+the gate spent its life judging a stale file while this command asked you to paste one.
+
+If it reports no plan, fall back in this order:
+
+1. `aether plan path` — the recorded plan, if the pointer exists but `status` is unsure
+2. `PLAN.md` or `PLAN_MODE_HANDOFF.md` in the project root
+3. the newest `.md` in `.claude/plans/` or `~/.claude/plans/`, ignoring `CRITIQUE.md`
+   and `TEMPER.md`
+4. ask the user to paste the plan
 
 ---
 
@@ -204,21 +215,40 @@ Do not revise the plan. Surface findings only. The user will decide what to act 
 
 ## Persist output
 
-After printing the report, determine where to write it:
-- If the project has a `.aether/` directory → write to `.aether/out/CRITIQUE.md`
-- Otherwise → write to `~/.aether/out/CRITIQUE.md`
+**Write the critique into the plan itself**, at the end, wrapped in these markers:
 
-Create the directory if it does not exist. `enforce-whetstone.sh` looks for the
-file at exactly this path to decide whether a plan has been critiqued, so writing
-it elsewhere leaves the gate nudging forever. Pre-1.1 installs used
-`.claude/plans/CRITIQUE.md`; the gate still honours that path when it exists, and
-`aether migrate` moves it.
+```
+<!-- aether:critique sha=<hash> date=<YYYY-MM-DD> blockers=<n> -->
+## Critique — <date>
 
-Prepend a header: `# Critique — <source file name> — <current date>`
+…the report table and counts…
+<!-- /aether:critique -->
+```
 
-If `CRITIQUE.md` already exists at the resolved path, append rather than overwrite, so the file accumulates a history of critiques over time.
+Get `<hash>` from `aether plan hash <plan-file>` **before** appending — it is the hash
+of the plan with any existing critique block removed, which is what the gate
+recomputes to decide whether the critique still matches the plan.
 
----
+If the plan already has a critique block, replace it rather than appending a second
+one, and keep the previous report above the new one inside the block if the history is
+worth having.
+
+Two reasons this goes in the plan rather than beside it:
+
+- **It is the only file writable in plan mode.** A critique that cannot record itself
+  there is a critique that never happens, which is what used to occur.
+- **It is per plan.** One `CRITIQUE.md` for a whole project meant critiquing plan A
+  satisfied the gate for plan B.
+
+Then, **if a write outside the plan is possible** — i.e. not in plan mode — also append
+the same report to `.aether/out/CRITIQUE.md` (or `~/.aether/out/CRITIQUE.md` if the
+project has no `.aether/`), under a header of
+`# Critique — <plan file name> — <date>`. That file is the accumulating history across
+plans; the in-plan block is the authoritative record for *this* plan. Appending, never
+overwriting.
+
+If you are in plan mode and cannot write it, say so in one line rather than failing —
+the in-plan block is enough for the gate, and the history catches up next time.
 
 ## Post-critique gate
 

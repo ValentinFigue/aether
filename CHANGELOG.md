@@ -7,6 +7,63 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
+## [Unreleased]
+
+### Fixed
+
+- **The plan critique never happened automatically, for seven separate reasons.** The
+  gate globbed `./.claude/plans/*.md` while Claude Code's plan mode writes to
+  `~/.claude/plans/`, so **it had never once seen a plan written by plan mode** — it
+  compared whatever stale file happened to be in the project directory. The
+  `/critique-plan` command used a third, different discovery rule and neither looked
+  there either. Staleness was mtime-based, so re-saving an unchanged plan invalidated
+  an accurate critique and any copy or checkout reordered the answer. One `CRITIQUE.md`
+  covered a whole project, so critiquing plan A satisfied the gate for plan B. The
+  critique could not persist at all in plan mode, which permits writing only the plan
+  file. The source-write nudge used one empty sentinel per project, so it was
+  decorative after the first day. And nothing recorded which plan a project was
+  working on.
+- **The suite hook's matcher was hardcoded** in `_json_register_suite_hook`, so
+  widening a plugin's matcher in its manifest did nothing — `suite_owned` hooks are
+  replaced by the suite hook, which used the literal. It is now the union of every
+  `suite_owned` PreToolUse matcher the manifests declare, in a fixed order so it stays
+  stable and testable.
+
+### Added
+
+- **A critique lives inside the plan it critiques**, behind
+  `<!-- aether:critique sha=… -->` … `<!-- /aether:critique -->`. That is the only file
+  writable in plan mode, and it is per plan by construction. The `sha` covers the plan
+  with that block removed, so re-saving does not invalidate an accurate critique while
+  appending a section does — and editing the critique text does not mark the plan
+  stale. Trailing blank lines are normalised out, because appending the block naturally
+  adds one and that alone used to read as a change.
+- **`ExitPlanMode` nudges** — presenting a plan is exactly when its critique should
+  already exist. It **prints and returns 0, always**: whether Claude Code delivers
+  PreToolUse for that tool, and what it does with a non-zero exit, could not be
+  determined from outside it, and a nudge that trapped you in the mode it was nudging
+  about — while intercepting the calls the critique needs — would be far worse than no
+  nudge. The gate records the first time it sees such a payload and `aether plan status`
+  reports it, so the open question answers itself from use rather than from a guess.
+- **`plugins/whetstone/hooks/post-whetstone.sh`** — records which plan this project is
+  working on. Silent: plan mode rewrites the plan repeatedly while it is being built,
+  so nudging here would fire on every edit.
+- **`aether plan status | path | hash`.** The failure this replaces was invisible for
+  as long as it took to notice; "which plan does the gate think I am working on, and
+  does it consider it critiqued" is now one command.
+- `aether_sha` extracted from `aether_hash_project`, which hardcoded two filenames and
+  so could not be reused. One hasher, one fail-closed path.
+- `tests/test_whetstone_plan.sh` — 42 assertions, 23 of which fail against the previous
+  code.
+
+### Changed
+
+- The source-write nudge is keyed to the plan's hash, so it fires once per uncritiqued
+  plan rather than once per project for ever. The pre-1.4 sentinel is still honoured, so
+  an existing project does not get one fresh nudge on upgrade.
+- `/critique-plan` discovers the plan via `aether plan status`, the same answer the gate
+  uses, instead of a third rule of its own.
+
 ## [1.3.1] — 2026-07-30
 
 ### Fixed

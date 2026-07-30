@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# enforce-suite.sh — aether PreToolUse hook (matcher: Bash|Write|Edit|MultiEdit)
+# enforce-suite.sh — aether PreToolUse hook.
+#
+# The matcher is the union of every suite_owned PreToolUse matcher the plugin
+# manifests declare — see _suite_matcher in bin/aether. Today that is
+# Bash|Write|Edit|MultiEdit|ExitPlanMode.
 #
 # Single coordinated gate chain covering all four suite plugins:
 #   whetstone  (plan gate)   — git commit/push when plan exists but no critique
@@ -163,6 +167,16 @@ case "$tool_name" in
     # bonsai, temper and cairn only ever inspect Bash commands. whetstone's
     # single gate handles both paths by branching on $tool_name, replacing the
     # separate gate_whetstone_write the suite used to carry.
+    _run_gate whetstone gate_whetstone "$bypass_whetstone" || _exit=1
+    ;;
+  ExitPlanMode)
+    # Only whetstone has anything to say when a plan is presented. Its gate returns 0
+    # for this tool unconditionally — it prints and never gates — so leaving plan mode
+    # can never be blocked.
+    #
+    # Widening the matcher in the manifest is not enough on its own: without this
+    # branch the hook is invoked and dispatches nothing, which is how the trigger
+    # first appeared to work and did not.
     _run_gate whetstone gate_whetstone "$bypass_whetstone" || _exit=1
     ;;
 esac

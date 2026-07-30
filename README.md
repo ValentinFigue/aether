@@ -296,6 +296,33 @@ the file explains itself. [This repo's own `.aether/config`](.aether/config) is 
 worked example — every value records where it came from, and two keys are
 deliberately *unset* with a note on why the obvious value would be wrong.
 
+### Plans and their critiques
+
+`/critique-plan` records its findings **inside the plan**, behind a marker holding a
+hash of the plan with that block removed:
+
+```markdown
+<!-- aether:critique sha=3f9a1c… date=2026-07-30 blockers=0 -->
+## Critique
+…
+<!-- /aether:critique -->
+```
+
+The plan file is the only thing writable in plan mode, so it is the only place a
+critique made there can go — and a per-plan record means critiquing one plan no longer
+satisfies the gate for every other. Re-saving a plan keeps its critique valid; adding a
+section does not.
+
+```
+$ aether plan status
+  plan:   ~/.claude/plans/rate-limiting.md
+  ! the plan changed after its last critique   fix: /critique-plan
+```
+
+whetstone nudges when you present the plan, on the first source write, and at
+`git commit` — once per uncritiqued plan, not once per project. It never blocks;
+leaving plan mode in particular always proceeds.
+
 ### Monorepos — `[project:<path>]`
 
 `[project]` assumes one test command for one tree. A monorepo has several, so it gets
@@ -620,6 +647,7 @@ aether config set|unset <section>.<key> [value] [global]
 aether config path|edit [global]
 aether check [path...] [--all] [--raw]   Run this project's [project] commands
 aether project for <file...>             Which monorepo areas those files touch
+aether plan [status|path|hash]           The plan the gate sees, and its critique state
 aether trust [status|list|forget|prune]
 aether rules                             The prose the critics will read
 aether migrate                           Move a pre-1.0 layout into ~/.aether/
@@ -786,14 +814,6 @@ pass, so the same commands a critic uses are one keystroke for a human too.
 **Merge discipline.** `aether merge` gating on the things worth blocking a merge
 for — critique run, description accurate, CI green on the actual head — rather
 than leaving them to whoever remembers.
-
-**The plan critique cannot record itself.** Two independent mismatches:
-`enforce-whetstone.sh` looks for plans in `.claude/plans/`, but plan mode writes to
-`~/.claude/plans/` — so the gate never sees the plan you actually wrote. And the
-critique's last step writes `.aether/out/CRITIQUE.md`, which plan mode forbids, so
-the automatic critique cannot persist. Fix: glob both directories, and let the
-critique live *inside* the plan file — the one file plan mode can write — stamped
-with a hash of the plan body so staleness is content-based rather than mtime-based.
 
 **Work with any agent, not just Claude Code.** The checking is already portable:
 bonsai's tools are plain MCP, the config and prose are plain text, the CLI is bash,

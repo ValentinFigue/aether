@@ -28,6 +28,7 @@ Usage:
                                         Run this project's [project] commands,
                                         per monorepo area
   aether project for <file...>          Which areas those files belong to
+  aether plan [status|path|hash]        The plan the gate sees, and its critique state
   aether doctor [--fix] [--deep]        Check the install, config and trust
                                         against what the manifests declare
   aether config doctor                  Just the config and trust half
@@ -832,10 +833,44 @@ JSEOF
   esac
 }
 
+# The union of every suite_owned PreToolUse matcher the manifests declare.
+#
+# It was hardcoded here, which meant widening a plugin's matcher in its manifest did
+# nothing: `suite_owned` hooks are replaced by the suite hook, and the suite hook used
+# this string. whetstone adding ExitPlanMode is the case that exposed it. Derived now,
+# for the same reason PLUGINS= and the config schema are — one place to be correct.
+#
+# The order is fixed rather than first-seen, so the string is stable across a change to
+# the plugin set and a test can assert it. Unknown tools are appended alphabetically.
+_suite_matcher() {
+  local repo plugin f line seen="" tool known="Bash Write Edit MultiEdit ExitPlanMode" out=""
+  repo=$(_repo_root) || { printf 'Bash|Write|Edit|MultiEdit'; return 0; }
+  for plugin in $(_plugins_available); do
+    f="$repo/plugins/$plugin/aether.plugin"; [ -f "$f" ] || continue
+    while IFS= read -r line; do
+      case "$line" in *suite_owned*) ;; *) continue ;; esac
+      case "$line" in *PreToolUse*) ;; *) continue ;; esac
+      # field 2 of "hook.N: PreToolUse | <matcher> | script | flags"
+      line=$(printf '%s' "$line" | awk -F' +[|] +' '{print $2}')
+      seen="$seen $(printf '%s' "$line" | tr -d '\\' | tr '|' ' ')"
+    done <<EOHK
+$(grep '^hook\.' "$f" 2>/dev/null)
+EOHK
+  done
+  for tool in $known; do
+    case " $seen " in *" $tool "*) out="$out|$tool" ;; esac
+  done
+  for tool in $(printf '%s\n' $seen | sort -u); do
+    case " $known " in *" $tool "*) continue ;; esac
+    [ -n "$tool" ] && out="$out|$tool"
+  done
+  [ -n "$out" ] && printf '%s' "${out#|}" || printf 'Bash|Write|Edit|MultiEdit'
+}
+
 _json_register_suite_hook() {
   local file="$1" hook_path="$2"
   _dry && return 0
-  local matcher="Bash|Write|Edit|MultiEdit"
+  local matcher; matcher=$(_suite_matcher)
   case "$(_json_backend)" in
    python3)
     python3 - "$file" "$hook_path" "$matcher" <<'PYEOF' > "$file.tmp" && mv "$file.tmp" "$file"
@@ -1843,6 +1878,58 @@ _check_changed_files() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# PLANS
+#
+# `aether plan status` exists because the failure this replaces was invisible: the
+# gate globbed ./.claude/plans/ while plan mode wrote to ~/.claude/plans/, so it
+# silently judged the wrong file — or none — for as long as that took to notice.
+# "Which plan does the gate think I am working on, and does it consider it critiqued"
+# should be one command away.
+# ═══════════════════════════════════════════════════════════════════════════
+
+cmd_plan() {
+  local sub="${1:-status}"; shift 2>/dev/null || true
+  case "$sub" in
+    path) aether_plan_file; printf '\n' ;;
+    hash)
+      local f="${1:-$(aether_plan_file)}"
+      [ -n "$f" ] || { printf 'No plan recorded.\n'; return 1; }
+      aether_plan_hash "$f"; printf '\n' ;;
+    status)
+      local f state seen
+      f=$(aether_plan_file)
+      if [ -z "$f" ]; then
+        printf '  no plan recorded for this project\n'
+        printf '      one is recorded when a plan file is written under .claude/plans/\n'
+        printf '      or ~/.claude/plans/ while working here\n'
+      else
+        state=$(aether_plan_state "$f")
+        printf '  plan:   %s\n' "${f/#$HOME/~}"
+        case "$state" in
+          critiqued)   _dr_ok  "critiqued, and current" ;;
+          stale)       _dr_warn "the plan changed after its last critique"
+                       _dr_fix "/critique-plan" ;;
+          uncritiqued) _dr_warn "no critique on record"
+                       _dr_fix "/critique-plan" ;;
+          *)           _dr_warn "the recorded plan file is gone" ;;
+        esac
+      fi
+      # Whether Claude Code delivers PreToolUse for ExitPlanMode could not be
+      # determined from outside the tool, so the gate records the first time it sees
+      # one and this reports it rather than the design asserting either way.
+      seen=".aether/out/.exitplanmode-seen"
+      if [ -f "$seen" ]; then
+        printf '  ExitPlanMode trigger: observed %s\n' "$(head -1 "$seen" 2>/dev/null)"
+      else
+        printf '  ExitPlanMode trigger: not yet observed\n'
+        printf '      the nudge also fires on the first source write and at git commit\n'
+      fi
+      return 0 ;;
+    *) printf 'Unknown: aether plan %s\n\nTry: status, path, hash\n' "$sub"; return 1 ;;
+  esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # DOCTOR
 #
 # v1.1.0 fixed twelve bugs, and the ones that mattered shared a shape: the tool
@@ -2830,6 +2917,7 @@ case "$COMMAND" in
   config)    cmd_config "$@" ;;
   doctor)    cmd_doctor "$@" ;;
   check)     cmd_check "$@" ;;
+  plan)      cmd_plan "$@" ;;
   project)   cmd_project "$@" ;;
   trust)     cmd_trust "$@" ;;
   rules)     aether_rules ;;

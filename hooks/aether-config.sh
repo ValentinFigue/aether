@@ -231,19 +231,25 @@ aether_trust_file() { printf '%s/trusted' "$(aether_root global)"; }
 # cheap to collide, so someone able to change a trusted repo's config could keep
 # the checksum and keep the trust. Returning empty here fails CLOSED: the project
 # reads as untrusted, which loses a feature rather than the guarantee.
+# aether_sha — SHA-256 of stdin, or nothing.
+#
+# Deliberately no cksum fallback. cksum is CRC32, and the point of every hash here is
+# that an edit cannot pass for the version that was approved — a 32-bit checksum is
+# cheap to collide. Printing nothing fails CLOSED: the caller reads it as untrusted or
+# uncritiqued, which loses a feature rather than the guarantee.
+aether_sha() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1
+  elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1
+  elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 | sed 's/^.*= //'
+  else return 0; fi
+}
+
+# Content hash of everything a project can say to us.
 aether_hash_project() {
   local data
   data=$( { cat .aether/config .aether/rules.md 2>/dev/null; } )
   [ -n "$data" ] || { printf 'empty'; return 0; }
-  if command -v shasum >/dev/null 2>&1; then
-    printf '%s' "$data" | shasum -a 256 | cut -d' ' -f1
-  elif command -v sha256sum >/dev/null 2>&1; then
-    printf '%s' "$data" | sha256sum | cut -d' ' -f1
-  elif command -v openssl >/dev/null 2>&1; then
-    printf '%s' "$data" | openssl dgst -sha256 | sed 's/^.*= //'
-  else
-    return 0
-  fi
+  printf '%s' "$data" | aether_sha
 }
 
 # none — never trusted, or nothing to trust
@@ -319,4 +325,84 @@ aether_trust_entries() {
     fi
     printf '%s\t%s\n' "$state" "$p"
   done < "$f"
+}
+
+# ── Plans ────────────────────────────────────────────────────────────────────
+# The critique of a plan lives inside the plan, behind a marker carrying the hash
+# of the plan with that marker's block removed. Three reasons, all of which the
+# previous mtime-and-separate-file design got wrong:
+#
+#   - plan mode permits writing only the plan file, so nothing else CAN be written
+#   - it is per plan, where one CRITIQUE.md per project meant critiquing plan A
+#     satisfied the gate for plan B
+#   - a hash survives `touch`, a copy and a checkout, where mtimes do not
+#
+# The marker:
+#   <!-- aether:critique sha=<hex> date=<iso> blockers=<n> -->
+#   …the critique…
+#   <!-- /aether:critique -->
+#
+# The block is closed rather than running to end of file. Truncating at the opening
+# marker would mean a section appended to the plan AFTER a critique read as part of
+# that critique — new, uncritiqued content passing as reviewed. With a close tag the
+# hash covers everything outside the block, so appending anywhere makes it stale.
+
+AETHER_PLAN_MARKER='<!-- aether:critique'
+AETHER_PLAN_MARKER_END='<!-- /aether:critique -->'
+
+# Project-relative, unconditionally — NOT via aether_out_dir, which falls back to
+# ~/.aether/out for a project with no .aether/. That fallback is right for generated
+# reports and wrong here: it would make one project's plan pointer global and let the
+# first project to record one speak for every other. Exactly the bug the .nudged
+# sentinel had before v1.1.0.
+aether_plan_pointer() { printf '.aether/out/.plan'; }
+
+# The plan this project is working on: whatever was last written to a plans directory
+# while in it, recorded by post-whetstone.sh. Falling back to the pre-1.4 rule — newest
+# .md in ./.claude/plans/ — so a project that has not written a plan through the hook
+# yet behaves as it always did rather than suddenly going quiet or loud.
+aether_plan_file() {
+  local ptr f
+  ptr=$(aether_plan_pointer)
+  if [ -f "$ptr" ]; then
+    f=$(head -1 "$ptr" 2>/dev/null)
+    [ -n "$f" ] && [ -f "$f" ] && { printf '%s' "$f"; return 0; }
+  fi
+  ls -t .claude/plans/*.md 2>/dev/null | while IFS= read -r f; do
+    case "$(basename "$f")" in CRITIQUE.md|TEMPER.md|.*) continue ;; esac
+    printf '%s' "$f"; break
+  done
+}
+
+# Hash of the plan with its critique block excised — the whole file, not just the part
+# above the marker, or an edit made below it would read as current.
+aether_plan_hash() {
+  [ -f "${1:-}" ] || return 0
+  # An unclosed block (hand-edited, or written by something older) is treated as
+  # running to end of file, so it degrades to the truncating behaviour rather than
+  # hashing a critique into the plan and calling every plan stale.
+  # Trailing blank lines are dropped before hashing. Appending the critique block
+  # naturally puts a blank line before it, and that blank line is plan content by
+  # position — so without this, correctly critiquing a plan made it read as stale.
+  # Whitespace at the end of a file is not something a reader would call a change,
+  # and fragility of exactly this kind is what the hash replaces.
+  awk -v m="$AETHER_PLAN_MARKER" -v e="$AETHER_PLAN_MARKER_END" '
+    index($0, m) == 1 { skip = 1; next }
+    skip && index($0, e) == 1 { skip = 0; next }
+    !skip { l[++n] = $0 }
+    END { while (n > 0 && l[n] ~ /^[[:space:]]*$/) n--
+          for (i = 1; i <= n; i++) print l[i] }' "$1" | aether_sha
+}
+
+# none | uncritiqued | stale | critiqued
+aether_plan_state() {
+  local f="${1:-}" recorded computed
+  [ -n "$f" ] && [ -f "$f" ] || { printf 'none'; return 0; }
+  recorded=$(sed -n 's/^<!-- aether:critique .*sha=\([0-9a-f][0-9a-f]*\).*/\1/p' "$f" 2>/dev/null | head -1)
+  # A marker with no sha= reads as uncritiqued rather than passing.
+  [ -n "$recorded" ] || { printf 'uncritiqued'; return 0; }
+  computed=$(aether_plan_hash "$f")
+  # No SHA-256 on this machine: nothing can be verified, so nothing is trusted.
+  [ -n "$computed" ] || { printf 'uncritiqued'; return 0; }
+  [ "$recorded" = "$computed" ] && printf 'critiqued' || printf 'stale'
 }

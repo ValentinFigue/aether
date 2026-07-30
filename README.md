@@ -338,19 +338,28 @@ Value, which layer supplied it, the file and line to edit, what it does, and
 what consumes it. `--values` drops the prose once you know the file; `--raw`
 emits bare `key: value` lines, which is what the slash commands read.
 
+**aether configures itself.** [`.aether/config`](.aether/config) in this repo is the
+worked example — committed, because it describes the project rather than the
+developer. Every key records where its value came from, so a detected command is
+distinguishable from a guess, and two keys are deliberately *unset* with a note
+explaining why the obvious value would be wrong.
+
 `aether config doctor` catches what hand-editing actually produces:
 
 ```
 $ aether config doctor
   ✗ [temper] auto_nudge_line — unknown key  (.aether/config:14)
       did you mean auto_nudge_lines?
-  ! [project] typecheck: npx tsc --noEmit
-      npx is not on PATH — that step will be skipped
+  ! [project] lint: git ls-files '*.sh' | xargs shellcheck
+      not on PATH: shellcheck — that step will be skipped
   ✓ 14 key(s) resolved
 ```
 
 An unknown key is the one worth catching most: a typo is silently ignored, the
-default applies, and the setting simply appears to have no effect.
+default applies, and the setting simply appears to have no effect. The PATH check
+looks at every command position, not just the first word — `git ls-files | xargs
+shellcheck` starts with `git`, which is always there, so checking one word would
+report nothing while shellcheck was silently skipped.
 
 `aether config explain <section>.<key>` prints one key in full — default, type,
 every layer that sets it, and which commands read it.

@@ -40,10 +40,13 @@ aether_out_dir() {
 # Format: layer|section|key|value. The layer is kept because [project] from the
 # project layer is gated on trust, and a merged view could not tell the two apart.
 
-aether_cfg_dump() {         # <file> <layer>
-  local file="$1" layer="$2"
+# <file> <layer> [section]
+# The section argument is for the pre-1.0 <plugin>.config files, which have no
+# section headers: the filename was the section.
+aether_cfg_dump() {
+  local file="$1" layer="$2" forced="${3:-}"
   [ -f "$file" ] || return 0
-  awk -v L="$layer" '
+  awk -v L="$layer" -v FORCED="$forced" '
     { sub(/\r$/, "") }
     /^[[:space:]]*#/ { next }
     /^[[:space:]]*$/ { next }
@@ -53,7 +56,7 @@ aether_cfg_dump() {         # <file> <layer>
       i = index(line, ":")
       if (i > 1) {
         v = substr(line, i + 1); sub(/^[[:space:]]+/, "", v)
-        print L "|" cur "|" substr(line, 1, i - 1) "|" v
+        print L "|" (FORCED != "" ? FORCED : cur) "|" substr(line, 1, i - 1) "|" v
       }
     }' "$file"
 }
@@ -61,15 +64,38 @@ aether_cfg_dump() {         # <file> <layer>
 # Idempotent. Call it once per process; every aether_cfg_resolve after that is
 # free. Not called implicitly, so a long-lived caller that expects to see edits
 # it just made keeps the uncached path.
+# Layers in ascending precedence. The pre-1.0 files sit below the new ones, which
+# is equivalent to the old "only read them if the new files had nothing" rule:
+# either way a value in a new file wins, and with nothing in the new files the
+# project's old file beats the global one.
+#
+# The legacy names are a hardcoded list on purpose — unlike the plugin list, this
+# set is closed history and can never grow, and globbing *.config in the working
+# directory would parse whatever a project happens to have lying there.
+AETHER_LEGACY_SECTIONS="whetstone bonsai temper cairn trellis"
+
 aether_cfg_preload() {
-  AETHER_CFG_ALL="$(aether_cfg_dump "${AETHER_HOME:-$HOME/.aether}/config" global)
-$(aether_cfg_dump .aether/config project)"
+  local sec
+  AETHER_CFG_ALL="$(
+    for sec in $AETHER_LEGACY_SECTIONS; do
+      aether_cfg_dump "$HOME/.claude/$sec.config" legacy-global "$sec"
+    done
+    for sec in $AETHER_LEGACY_SECTIONS; do
+      aether_cfg_dump "./$sec.config" legacy-project "$sec"
+    done
+    aether_cfg_dump "${AETHER_HOME:-$HOME/.aether}/config" global
+    aether_cfg_dump .aether/config project
+  )"
   AETHER_CFG_PRELOADED=1
 }
 
+# Anything that writes config invalidates the dump, so a single process that sets
+# a key and then reads it back cannot see a stale value.
+aether_cfg_invalidate() { unset AETHER_CFG_PRELOADED AETHER_CFG_ALL; }
+
 # Resolve from the preloaded dump: project beats global, per key, with no forks.
 _aether_cfg_from_dump() {
-  local section="$1" key="$2" line trusted=unknown
+  local section="$1" key="$2" line trusted=unknown won=""
   AETHER_CFG_VALUE=""
   while IFS= read -r line; do
     case "$line" in
@@ -84,7 +110,12 @@ _aether_cfg_from_dump() {
       [ "$trusted" = unknown ] && { aether_trusted && trusted=yes || trusted=no; }
       [ "$trusted" = yes ] || continue
     fi
-    AETHER_CFG_VALUE="${rest#*|}"
+    # First occurrence wins *within* a layer — the same rule `head -1` gave, and
+    # what a duplicated key in one file has always meant. A higher layer still
+    # overrides a lower one, because the dump is emitted in ascending precedence.
+    if [ "$layer" != "$won" ]; then
+      AETHER_CFG_VALUE="${rest#*|}"; won="$layer"
+    fi
   done <<EOF
 $AETHER_CFG_ALL
 EOF
@@ -121,43 +152,13 @@ aether_cfg_read() {
 # runs on every Bash, Write and Edit, so those forks were the whole difference
 # between 80ms and 130ms per tool call. aether_cfg_get wraps this for the CLI and
 # the slash commands, where one fork does not matter.
+# One path, always through the dump. There were two — a cached one and an
+# uncached one — each implementing layer precedence and the [project] trust gate
+# separately, which is exactly the shape that drifts. Preloading on first use
+# costs one awk per existing config file, once per process.
 aether_cfg_resolve() {
-  local section="$1" key="$2" val="" v f
-  if [ -n "${AETHER_CFG_PRELOADED:-}" ]; then
-    _aether_cfg_from_dump "$section" "$key"
-    [ -n "$AETHER_CFG_VALUE" ] && return 0
-    [ -z "$section" ] && return 0
-    # The pre-1.0 files are not in the dump, so they are checked here — but only
-    # if they exist. Falling through to the general path instead meant every
-    # *unset* key re-read both new files, and most keys are unset, so the cache
-    # saved nothing at all.
-    f="$HOME/.claude/$section.config"
-    if [ -f "$f" ]; then v=$(aether_cfg_read "$f" "" "$key"); [ -n "$v" ] && val="$v"; fi
-    f="./$section.config"
-    if [ -f "$f" ]; then v=$(aether_cfg_read "$f" "" "$key"); [ -n "$v" ] && val="$v"; fi
-    AETHER_CFG_VALUE="$val"
-    return 0
-  fi
-  f="${AETHER_HOME:-$HOME/.aether}/config"
-  if [ -f "$f" ]; then v=$(aether_cfg_read "$f" "$section" "$key"); [ -n "$v" ] && val="$v"; fi
-
-  # [project] holds shell commands a critic would execute, so the project layer
-  # of that one section waits for `aether trust`. Every other section applies
-  # immediately: a threshold cannot run anything.
-  if [ "$section" = project ] && ! aether_trusted; then
-    AETHER_CFG_VALUE="$val"; return 0
-  fi
-
-  if [ -f .aether/config ]; then
-    v=$(aether_cfg_read .aether/config "$section" "$key"); [ -n "$v" ] && val="$v"
-  fi
-  if [ -z "$val" ] && [ -n "$section" ]; then
-    f="$HOME/.claude/$section.config"
-    if [ -f "$f" ]; then v=$(aether_cfg_read "$f" "" "$key"); [ -n "$v" ] && val="$v"; fi
-    f="./$section.config"
-    if [ -f "$f" ]; then v=$(aether_cfg_read "$f" "" "$key"); [ -n "$v" ] && val="$v"; fi
-  fi
-  AETHER_CFG_VALUE="$val"
+  [ -n "${AETHER_CFG_PRELOADED:-}" ] || aether_cfg_preload
+  _aether_cfg_from_dump "$1" "$2"
 }
 
 aether_cfg_get() { aether_cfg_resolve "$@"; printf '%s' "$AETHER_CFG_VALUE"; }

@@ -122,6 +122,11 @@ number. Their individual histories are preserved under
   stale-hook cleanup silently did not happen. All three backends now produce
   byte-identical output, and a phase aether does not manage (`SessionStart`) is
   preserved.
+- **`config doctor` missed a missing binary whenever the command was a pipeline.**
+  It checked only the first word, so `git ls-files | xargs shellcheck` reported
+  nothing on a machine with no shellcheck — the exact silent skip the check exists
+  to catch. Every command position is now checked, including past wrappers like
+  `xargs` and `env` that put the real command in argument position.
 - **The PreToolUse hook got 25% slower**, from 81ms to 105ms per tool call — and
   it runs on every Bash, Write and Edit. Cause: resolving a key ran one `awk` per
   key per layer, which cost nothing before only because there was no config file
@@ -185,6 +190,20 @@ number. Their individual histories are preserved under
   `openssl dgst` was added as a third option, and where none exists the project
   reads as untrusted and says why. Losing the feature is the right trade against
   losing the guarantee.
+
+### Changed
+
+- **One config resolver instead of two.** A cached path and an uncached path each
+  implemented layer precedence and the `[project]` trust gate separately — the
+  shape that drifts. There is now one path over a dump of all four layers
+  (pre-1.0 global, pre-1.0 project, global, project), which also removes the
+  special case that read the pre-1.0 files only when the new ones were empty:
+  ordering the layers is equivalent and simpler. A duplicated key inside one file
+  still takes the first occurrence, as `head -1` used to give.
+- **aether now uses its own config.** `.aether/config` and `.aether/rules.md` are
+  committed, so its critics run its real test command and read its real house
+  rules. The suite previously shipped without either, which meant the tool did
+  not eat its own dog food and nothing noticed.
 
 ### Documentation
 

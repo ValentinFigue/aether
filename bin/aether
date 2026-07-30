@@ -115,6 +115,11 @@ _repo_root() {
 # Plain grep/sed, deliberately: no python3, node or jq is needed to work out
 # what to install. Only the settings.json steps need an interpreter, which is
 # the same degradation the hand-written installers had.
+# Plain awk per lookup. A variant that loaded every manifest into one shell
+# variable and answered with parameter expansion was tried and reverted: it cut
+# awk invocations from 225 to 73 for `aether config show` and made it 2.5×
+# SLOWER, because `${all#*"$needle"}` over a 400-line string, ~150 times, is
+# quadratic in bash. Fewer processes is not the same as less work.
 _mf() {
   local plugin="$1" key="$2" repo
   repo=$(_repo_root) || return 1
@@ -123,6 +128,7 @@ _mf() {
   awk -v k="$key" 'index($0, k ":") == 1 {
     v = substr($0, length(k) + 2); sub(/^[[:space:]]+/, "", v); print v; exit }' "$f"
 }
+
 
 # Every plugin with a manifest in the clone. Replaces the hardcoded
 # PLUGINS="bonsai whetstone temper cairn", so a new plugin appears in
@@ -159,6 +165,13 @@ if ! command -v aether_cfg_get >/dev/null 2>&1; then
   aether_cfg_read()   { :; }
   aether_cfg_get()    { :; }
 fi
+# Preload once, here, in the top-level shell. Every _cfg_get call site wraps it
+# in $( ), which forks — so without this the dump was rebuilt for every key, and
+# `aether config show` re-read both files ~36 times. Subshells inherit the
+# variables, so one preload here serves all of them; a write invalidates it and
+# the next read rebuilds.
+command -v aether_cfg_preload >/dev/null 2>&1 && aether_cfg_preload
+
 _cfg_read() { aether_cfg_read "$@"; }
 _cfg_get()  { aether_cfg_get  "$@"; }
 
@@ -195,6 +208,7 @@ _cli_dir()      { [ "$1" = global ] && printf '%s' "$HOME/.local/bin"     || pri
 # when updating one) it writes the doc line above it, so a file explains itself
 # to whoever opens it next.
 _cfg_set() {
+  command -v aether_cfg_invalidate >/dev/null 2>&1 && aether_cfg_invalidate
   local file="$1" section="$2" key="$3" value="$4" doc="${5:-}"
   _dry && { printf '    would set %s%s: %s in %s\n' \
     "${section:+[$section] }" "$key" "$value" "$file"; return 0; }
@@ -252,6 +266,7 @@ _cfg_set() {
 
 # _cfg_unset <file> <section> <key> — delete one line, leave the rest alone
 _cfg_unset() {
+  command -v aether_cfg_invalidate >/dev/null 2>&1 && aether_cfg_invalidate
   local file="$1" section="$2" key="$3"
   [ -f "$file" ] || return 0
   _dry && { printf '    would unset %s%s in %s\n' "${section:+[$section] }" "$key" "$file"; return 0; }
@@ -1383,14 +1398,44 @@ EOKEYS
   done
 
   # A [project] command whose binary is absent runs as nothing at all.
-  local cmdkey val bin
+  #
+  # Every command position is checked, not just the first word. `git ls-files … |
+  # xargs shellcheck` starts with `git`, which is always present, so checking only
+  # the first word reported "no problems" on a machine with no shellcheck — the
+  # exact silent skip this is here to catch. Runner prefixes have the same shape
+  # in reverse: `uv run pytest` needs `uv`, and that *is* the first word.
+  local cmdkey val bin seg missing
   for cmdkey in test lint format typecheck build coverage; do
     val=$(_cfg_get project "$cmdkey"); [ -n "$val" ] || continue
-    bin="${val%% *}"
-    command -v "$bin" >/dev/null 2>&1 || {
+    missing=""
+    # Split on pipeline and list separators; the first word of each is a command.
+    while IFS= read -r seg; do
+      seg="${seg#"${seg%%[![:space:]]*}"}"        # strip leading whitespace
+      bin="${seg%% *}"
+      # A few wrappers put the real command in argument position, so the first
+      # word is never the thing that can be missing. `git ls-files | xargs
+      # shellcheck` is the shape that matters here: without this, the check saw
+      # `git`, said nothing, and shellcheck was silently skipped. Only wrappers
+      # whose next word must already be an executable are unwrapped — `npx tsc`
+      # and `uv run pytest` are deliberately not, since those fetch or resolve it.
+      while :; do
+        case "$bin" in
+          xargs|env|nice|nohup|sudo|time)
+            seg="${seg#"$bin"}"; seg="${seg#"${seg%%[![:space:]]*}"}"
+            while :; do case "$seg" in -*) seg="${seg#* }"; seg="${seg#"${seg%%[![:space:]]*}"}" ;; *) break ;; esac; done
+            bin="${seg%% *}"; [ -n "$bin" ] || break ;;
+          *) break ;;
+        esac
+      done
+      case "$bin" in ''|-*|*=*|'('*) continue ;; esac
+      command -v "$bin" >/dev/null 2>&1 || missing="$missing $bin"
+    done <<EOSEG
+$(printf '%s' "$val" | tr '|;' '\n\n' | sed 's/&&/\n/g')
+EOSEG
+    [ -n "$missing" ] && {
       problems=$((problems + 1))
       printf '  ! [project] %s: %s\n' "$cmdkey" "$val"
-      printf '      %s is not on PATH — that step will be skipped\n' "$bin"
+      printf '      not on PATH:%s — that step will be skipped\n' "$missing"
     }
   done
 

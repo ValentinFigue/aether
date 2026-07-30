@@ -339,59 +339,46 @@ printf '[temper]\nseverity: red\n' > "$PT2/.aether/config"
 out=$( cd "$PT2" && env HOME="$HT2" bash "$CLI" trust 2>&1 )
 assert_contains "$out" "Nothing executable" "trust says so when there is nothing to run"
 
-# ── the preloaded path agrees with the uncached one ─────────────────────────
-# The hook reads twelve keys per tool call, so it dumps both config files once
-# and answers from a shell variable. Two code paths resolving the same key is
-# exactly the kind of split that drifts, so assert they agree — including the
-# trust gate on [project], which the dump has to reproduce from its layer column.
-suite "preloaded and uncached resolution agree"
-HQ=$(mk); PQ=$(mk); mkdir -p "$HQ/.aether" "$PQ/.aether"
-cat > "$HQ/.aether/config" <<'EOF'
-enabled: true
-[temper]
-severity: red, yellow
-auto_nudge_lines: 200
-[cairn]
-style: conventional
-EOF
-cat > "$PQ/.aether/config" <<'EOF'
-[temper]
-auto_nudge_lines: 400
-[project]
-test: echo hi
-EOF
-both() {   # <section> <key> -> "uncached|preloaded"
-  ( cd "$PQ" && HOME="$HQ" bash -c "
-      . '$LIB'
-      aether_cfg_resolve \"\$1\" \"\$2\"; a=\"\$AETHER_CFG_VALUE\"
-      aether_cfg_preload
-      aether_cfg_resolve \"\$1\" \"\$2\"; b=\"\$AETHER_CFG_VALUE\"
-      printf '%s|%s' \"\$a\" \"\$b\"" _ "$1" "$2" )
-}
-# Section and key are passed separately so the sectionless case is really
-# sectionless — `set -- $pair` on " enabled" drops the leading empty field and
-# silently tested section "enabled" instead.
-check_both() {
-  local sec="$1" key="$2" r
-  r=$(both "$sec" "$key")
-  [ "${r%%|*}" = "${r#*|}" ] \
-    && pass "both paths agree on [${sec:-suite}] $key = ${r%%|*}" \
-    || fail "both paths agree on [${sec:-suite}] $key" "uncached=${r%%|*} preloaded=${r#*|}"
-}
-check_both temper  auto_nudge_lines
-check_both temper  severity
-check_both cairn   style
-check_both ""      enabled
-check_both temper  nope
-check_both project test
+# ── layer precedence, all four layers ────────────────────────────────────────
+# There used to be two resolvers — a cached one and an uncached one — each
+# implementing precedence and the [project] trust gate separately. They are now
+# one path over a dump of every layer, so this is what needs protecting: the
+# order, and the fact that a duplicated key inside one file still takes the first
+# occurrence, which is what `head -1` used to give.
+suite "layer precedence"
+HQ=$(mk); PQ=$(mk); mkdir -p "$HQ/.aether" "$HQ/.claude" "$PQ/.aether"
+q() { ( cd "$PQ" && HOME="$HQ" bash -c ". '$LIB'; aether_cfg_get \"\$1\" \"\$2\"" _ "$1" "$2" ); }
 
-# The sectionless key must actually resolve, not merely agree on being empty.
-assert_eq "true|true" "$(both "" enabled)" "a sectionless key resolves in both paths"
+printf 'severity: legacy-global\nauto_nudge_lines: 111\n' > "$HQ/.claude/temper.config"
+assert_eq "legacy-global" "$(q temper severity)" "a pre-1.0 global file still resolves"
 
-# …and after trusting, both must start returning the [project] value.
-( cd "$PQ" && env HOME="$HQ" bash "$CLI" trust >/dev/null 2>&1 )
-r=$(both project test)
-assert_eq "echo hi|echo hi" "$r" "both paths honour trust for [project]"
+printf 'severity: legacy-project\n' > "$PQ/temper.config"
+assert_eq "legacy-project" "$(q temper severity)" "…and a pre-1.0 project file beats it"
+
+printf '[temper]\nseverity: global\n' > "$HQ/.aether/config"
+assert_eq "global" "$(q temper severity)" "…and the new global file beats both"
+
+printf '[temper]\nseverity: project\n' > "$PQ/.aether/config"
+assert_eq "project" "$(q temper severity)" "…and the new project file wins outright"
+
+assert_eq "111" "$(q temper auto_nudge_lines)" "a key only the pre-1.0 file sets still resolves"
+
+printf '[temper]\ndiff: first\ndiff: second\n' > "$PQ/.aether/config"
+assert_eq "first" "$(q temper diff)" "a duplicated key in one file takes the first occurrence"
+
+# The dump is built once per process, so a write has to invalidate it or a caller
+# that sets a key and reads it back in the same run sees the old value.
+suite "a write invalidates the dump"
+HR=$(mk); PR_=$(mk); mkdir -p "$HR/.aether" "$PR_/.aether"
+printf '[temper]\nseverity: before\n' > "$PR_/.aether/config"
+got=$( cd "$PR_" && env HOME="$HR" bash -c '
+  . "'"$LIB"'"
+  eval "$(sed "/^COMMAND=/,\$d" "'"$CLI"'")" 2>/dev/null
+  aether_cfg_resolve temper severity          # preloads
+  _cfg_set .aether/config temper severity after
+  aether_cfg_resolve temper severity
+  printf "%s" "$AETHER_CFG_VALUE"' 2>/dev/null )
+assert_eq "after" "$got" "a key set in-process reads back as the new value"
 
 # ── nothing chatters on stderr ───────────────────────────────────────────────
 # `_schema_all | awk '... exit'` closed the pipe mid-write, and bash on Linux
@@ -413,6 +400,43 @@ for c in "config show" "config show temper" "config show temper --raw" \
     && pass "aether $c writes nothing to stderr" \
     || fail "aether $c writes nothing to stderr" "$err"
 done
+
+# ── aether uses its own config ───────────────────────────────────────────────
+# The suite shipped without one, so its own critics could not run its own tests —
+# the tool did not eat its own dog food, and nothing noticed.
+suite "aether configures itself"
+[ -f "$REPO/.aether/config" ] \
+  && pass "the repo has a .aether/config" \
+  || fail "the repo has a .aether/config"
+c=$(cat "$REPO/.aether/config" 2>/dev/null)
+assert_contains "$c" "[project]"          "…with a [project] section"
+assert_contains "$c" "bash tests/run.sh"  "…whose test command is the real one"
+assert_contains "$c" "[git]"              "…and the git conventions in use"
+[ -f "$REPO/.aether/rules.md" ] \
+  && pass "the repo has a .aether/rules.md" \
+  || fail "the repo has a .aether/rules.md"
+
+# It has to be committed, or a colleague cloning the repo gets none of it.
+( cd "$REPO" && git check-ignore -q .aether/config ) \
+  && fail ".aether/config is not gitignored" "it is ignored, so it would never be shared" \
+  || pass ".aether/config is not gitignored"
+( cd "$REPO" && git check-ignore -q .aether/rules.md ) \
+  && fail ".aether/rules.md is not gitignored" "it is ignored" \
+  || pass ".aether/rules.md is not gitignored"
+# …while the per-developer parts stay out.
+for pd in .aether/out/x .aether/manifest .aether/hooks/x; do
+  ( cd "$REPO" && git check-ignore -q "$pd" ) \
+    && pass "$pd stays ignored" \
+    || fail "$pd stays ignored" "it would be committed"
+done
+
+# Every command it names must be one the doctor can vouch for, and every key must
+# be one a plugin declares — this file is the worked example in the README.
+out=$( cd "$REPO" && env HOME="$HOME" bash "$CLI" config doctor 2>&1 )
+case "$out" in
+  *"unknown key"*) fail "the repo's own config has no unknown keys" "$out" ;;
+  *) pass "the repo's own config has no unknown keys" ;;
+esac
 
 # ── one reader, not six ──────────────────────────────────────────────────────
 # The gates and the CLI must not carry separate parsers again.

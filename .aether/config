@@ -1,0 +1,51 @@
+# aether's own config. Written by hand, in the shape /draft-config produces —
+# every key records where its value came from, so a detected command is
+# distinguishable from a guess.
+#
+# Committed on purpose: it describes the project, so a colleague cloning this
+# repo gets the same test command and the same thresholds. .aether/out/,
+# .aether/manifest and .aether/hooks/ are per-developer and stay ignored.
+#
+# `aether config show` prints what is live and where each value came from.
+# `aether trust` is what allows the [project] commands below to actually run.
+
+[project]
+# Shell command that runs the test suite → /critique-diff /critique-pr
+# from .github/workflows/tests.yml:28
+test: bash tests/run.sh
+# Linter command → /critique-diff /critique-pr
+# from .github/workflows/tests.yml:57 — CI runs this advisory (continue-on-error),
+# so treat its output as a finding to weigh, not a gate
+lint: git ls-files '*.sh' 'bin/*' 'plugins/*/bin/*' | xargs shellcheck --severity=error --shell=bash
+# Build command → /critique-pr
+# bonsai is the only plugin with build output; this is the same script install runs.
+# It takes about a minute, which is why only /critique-pr uses it.
+build: bash plugins/bonsai/scripts/build.sh
+# typecheck is deliberately unset. This tree is bash at the top level and Python
+# plus TypeScript inside plugins/bonsai, each with its own checks in bonsai's
+# workflow. [project] holds one command for one tree, so there is nothing honest
+# to put here — see the monorepo item in the README roadmap.
+
+[git]
+# Conventional Commits scopes → /draft-commit /critique-pr
+# from the 17 commits since the monorepo consolidation, all of which are conventional.
+# Measured from that point rather than over all history: the four imported plugin
+# histories drag the whole-repo figure to 40%, which describes those repos, not this one.
+scopes: cli, config, engine, hooks, install, manifests, readme, trellis, trust
+# Commit types in use → /draft-commit /critique-pr
+types: docs, feat, fix, perf, refactor, test
+# Trailers every commit carries → /draft-commit
+# 23 of the last 40 commits; the git-subtree-* trailers are import artefacts, not a convention.
+trailers: Co-Authored-By
+# base is unset: origin/HEAD is already main, and /draft-pr auto-detects main and
+# master, so naming it here would only be noise.
+
+[temper]
+# Paths that always trigger a review nudge, whatever the diff size → enforce-temper.sh
+# The default set covers auth, secrets and migrations. Extended here because this
+# repo's gates run on every single tool call, so a change to one has a blast radius
+# that has nothing to do with how many lines it touched.
+critical_paths: *auth*|*permission*|*token*|migrations/|*alembic*|\.sql|*schema*|*secret*|*credential*|\.env|hooks/|bin/aether
+# auto_nudge_lines is deliberately unset. The 75th percentile of recent commits is
+# 398 lines, but that is inflated by one large branch; the median is 136. The
+# default of 200 sits between them and is the better threshold.

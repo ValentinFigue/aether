@@ -7,6 +7,53 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
+## [Unreleased]
+
+### Added
+
+- **`aether doctor`** — one command asking whether the state on disk matches what
+  the manifests declare. It exists because every bug that mattered in 1.1.0 shared a
+  shape: the tool reported success and had done nothing. It checks that every hook in
+  `settings.json` exists and is executable, that no script is registered twice, that
+  the suite hook is registered exactly once, that each declared MCP server is
+  registered with a resolvable command and existing paths, that every artefact the
+  install manifest records is present, that no pre-rename command is still in the
+  palette, that no pre-1.0 location survives, that the recorded clone is still there,
+  that the declared permissions are present, that each gate parses, and that no trust
+  entry points at a directory that no longer exists. Every finding names its fix.
+- **`aether doctor --fix`** — the three repairs where the right action is
+  unambiguous: deregister a hook whose script is gone, drop a duplicate registration
+  keeping the copy the engine installed, and prune dead trust entries. It works out
+  what to do before touching anything, so a run with nothing to fix leaves the home
+  directory byte-identical — `.bak` included.
+- **`aether doctor --deep`** — additionally handshakes each MCP server, which is the
+  check whose absence let the engine ship for six commits registering none.
+- **`aether trust list` and `aether trust prune`** — every recorded project with its
+  state (`ok`, `changed`, `dead`), and removal of entries whose directory is gone.
+  Nothing pruned them before, so a path deleted months ago still granted consent if a
+  directory reappeared there. Reported by default, pruned only on request: a path can
+  be temporarily unmounted, so silently forgetting consent would be the wrong default.
+- `tests/test_doctor.sh` — 53 assertions, each against the state of an actual 1.1.0
+  bug rather than a synthetic stand-in.
+
+### Fixed
+
+- **On a jq-only machine the doctor silently checked nothing.** `~/.claude.json` does
+  not exist until bonsai installs, and jq exits non-zero on a missing file — so the
+  probe read as "cannot inspect settings.json" and every hook check was skipped.
+  python3 and node swallow the missing file in their loaders, which is why the two
+  backends disagreed. Caught by the backend-equivalence assertion.
+
+### Changed
+
+- `aether config doctor` now calls the same implementation as `aether doctor`'s
+  config half rather than carrying its own copy. It keeps working, and it stays
+  scoped to config and trust.
+- README opens on the problem the suite solves, with a before/after example, rather
+  than on the plumbing of combining four plugins. Adds **Quick start** (three
+  commands, `/draft-config` included). The roadmap now states the
+  intent to support agents beyond Claude Code. Trimmed from 953 to ~790 lines.
+
 ## [1.1.0] — 2026-07-30
 
 ### Added

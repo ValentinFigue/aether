@@ -168,6 +168,25 @@ PY
 [ "${n:-0}" = 0 ] && ok "no hook points at a missing script" || bad "no hook points at a missing script" "$n dangling"
 [ -z "$(cd "$HI" && find . -name '*aether-tmp*')" ] && ok "no temp file left behind" || bad "no temp file left behind"
 
+# ── 6b. the doctor agrees the install is sound ───────────────────────────────
+# The strongest single check available: it compares every artefact against what the
+# manifests declare, so a clean install that it complains about means one of the two
+# is wrong.
+grp "aether doctor after a fresh install"
+HDR=$(mk); NEUTRAL_D=$(mk)
+env HOME="$HDR" bash install.sh --global --no-bonsai >/dev/null 2>&1
+out=$( cd "$NEUTRAL_D" && env HOME="$HDR" bash "$REPO/bin/aether" doctor 2>&1 ); rc=$?
+if [ "$rc" -eq 0 ] && [ -z "$(printf '%s' "$out" | grep -E '^  (✗|!)')" ]; then
+  ok "reports nothing on a fresh install"
+else
+  bad "reports nothing on a fresh install" "$(printf '%s' "$out" | grep -E '^  (✗|!)' | head -4)"
+fi
+snapd() { ( cd "$HDR" && find . | sort ); }
+b4=$(snapd)
+( cd "$NEUTRAL_D" && env HOME="$HDR" bash "$REPO/bin/aether" doctor --fix >/dev/null 2>&1 )
+[ "$b4" = "$(snapd)" ] && ok "--fix changes nothing when there is nothing to fix" \
+                       || bad "--fix changes nothing when there is nothing to fix"
+
 # ── 7. upgrading from the last release ───────────────────────────────────────
 grp "upgrade from $(git describe --tags --abbrev=0 2>/dev/null || echo 'the previous release')"
 tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
@@ -195,6 +214,15 @@ print(sum(1 for p in ("PreToolUse","PostToolUse")
 PY
 )
     [ "${n:-0}" = 0 ] && ok "the upgrade leaves no dangling hook" || bad "the upgrade leaves no dangling hook" "$n"
+    # And the doctor must agree, which is the check that would have caught the
+    # dangling PostToolUse entry this upgrade path used to leave behind.
+    NEUTRAL_U=$(mk)
+    dout=$( cd "$NEUTRAL_U" && env HOME="$HU" bash "$REPO/bin/aether" doctor --install 2>&1 ); drc=$?
+    if [ "$drc" -eq 0 ] && [ -z "$(printf '%s' "$dout" | grep -E '^  ✗')" ]; then
+      ok "aether doctor is clean after the upgrade"
+    else
+      bad "aether doctor is clean after the upgrade" "$(printf '%s' "$dout" | grep -E '^  ✗' | head -3)"
+    fi
   } || warn "could not export $tag — skipped"
 fi
 fi   # MODE != perf
@@ -276,6 +304,12 @@ PY
   [ "${got:-0}" -ge "$2" ] && ok "$1 answers a handshake ($got tools)" \
                            || bad "$1 answers a handshake" "expected ≥$2, got ${got:-no response}"
 done
+NEUTRAL_B=$(mk)
+out=$( cd "$NEUTRAL_B" && env HOME="$HB" bash "$REPO/bin/aether" doctor --install --deep 2>&1 )
+case "$out" in
+  *"answers tools/list"*) ok "aether doctor --deep handshakes them too" ;;
+  *) bad "aether doctor --deep handshakes them too" "$(printf '%s' "$out" | grep -E 'MCP' | head -3)" ;;
+esac
 fi
 
 # ── summary ──────────────────────────────────────────────────────────────────

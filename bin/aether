@@ -24,11 +24,14 @@ Usage:
   aether status                         Show install state for all plugins
   aether config show [section]          Resolved values, where each came from
   aether config explain <section>.<key> One key in full
-  aether config doctor                  Validate: unknown keys, dead paths
+  aether doctor [--fix] [--deep]        Check the install, config and trust
+                                        against what the manifests declare
+  aether config doctor                  Just the config and trust half
   aether config set <section>.<key> <v> [global]
   aether config path|edit [global]      Print or open the config file
   aether migrate                        Move a pre-1.0 layout into ~/.aether/
-  aether trust [status|forget]          Allow this project's [project] commands
+  aether trust [status|list|forget|prune]
+                                        Allow this project's [project] commands
                                         and rules.md to be used
   aether rules                          Print the prose the critics will read
   aether enable  [local|global]         Enable all plugins (default: local)
@@ -655,6 +658,72 @@ _json_backend() {
 # PreToolUse, so upgrading left a PostToolUse entry pointing into the retired
 # ~/.local/share/aether/ — a script Claude Code would then try to run on every
 # Bash, Write and Edit call.
+# _json_probe <settings.json> <claude.json>
+#
+# Everything the doctor needs out of both files, in one pass per backend, as
+# tab-separated lines:
+#
+#   hook<TAB>phase<TAB>matcher<TAB>command
+#   perm<TAB>value
+#   mcp<TAB>name<TAB>command<TAB>arg arg …
+#
+# One reader rather than three, because three would mean nine backend branches
+# for the same traversal. With no interpreter the doctor says so and skips the
+# checks that need it, which is the same degradation the installer has.
+_json_probe() {
+  local settings="$1" claudejson="$2"
+  case "$(_json_backend)" in
+   python3)
+    python3 - "$settings" "$claudejson" <<'PYEOF'
+import json, sys
+def load(p):
+    try:
+        with open(p) as fh: return json.load(fh)
+    except Exception: return {}
+s, c = load(sys.argv[1]), load(sys.argv[2])
+for phase, entries in (s.get("hooks") or {}).items():
+    for e in entries or []:
+        for h in e.get("hooks") or []:
+            print("hook\t%s\t%s\t%s" % (phase, e.get("matcher", ""), h.get("command", "")))
+for v in ((s.get("permissions") or {}).get("allow") or []):
+    print("perm\t%s" % v)
+for name, cfg in (c.get("mcpServers") or {}).items():
+    print("mcp\t%s\t%s\t%s" % (name, cfg.get("command", ""), " ".join(cfg.get("args") or [])))
+PYEOF
+    ;;
+   node)
+    node - "$settings" "$claudejson" <<'JSEOF'
+const fs = require("fs");
+const load = p => { try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) { return {}; } };
+const [s, c] = [load(process.argv[2]), load(process.argv[3])];
+for (const [phase, entries] of Object.entries(s.hooks || {}))
+  for (const e of entries || [])
+    for (const h of e.hooks || [])
+      console.log(`hook\t${phase}\t${e.matcher || ""}\t${h.command || ""}`);
+for (const v of (s.permissions || {}).allow || []) console.log(`perm\t${v}`);
+for (const [name, cfg] of Object.entries(c.mcpServers || {}))
+  console.log(`mcp\t${name}\t${cfg.command || ""}\t${(cfg.args || []).join(" ")}`);
+JSEOF
+    ;;
+   jq)
+    # Each `|| true`, and an explicit `return 0`: ~/.claude.json does not exist
+    # until bonsai installs, and jq exits non-zero on a missing file. Without this
+    # the caller read that as "cannot inspect settings.json" and skipped every hook
+    # check — so on a jq-only machine the doctor quietly checked nothing. python3
+    # and node swallow the missing file in their loaders.
+    jq -r '(.hooks // {}) | to_entries[] as $p | $p.value[]? as $e | $e.hooks[]? |
+           "hook\t" + $p.key + "\t" + ($e.matcher // "") + "\t" + (.command // "")' \
+       "$settings" 2>/dev/null || true
+    jq -r '((.permissions // {}).allow // [])[] | "perm\t" + .' "$settings" 2>/dev/null || true
+    jq -r '((.mcpServers // {}) | to_entries[]) |
+           "mcp\t" + .key + "\t" + (.value.command // "") + "\t" + ((.value.args // []) | join(" "))' \
+       "$claudejson" 2>/dev/null || true
+    return 0
+    ;;
+   *) return 1 ;;
+  esac
+}
+
 _json_drop_hooks_matching() {
   local file="$1" needle="$2"
   _dry && return 0
@@ -1363,8 +1432,8 @@ cmd_config_explain() {
 # The mistakes hand-editing actually produces. A typo is the one worth catching
 # most: today it is silently ignored, the default applies, and the setting
 # simply appears to have no effect.
-cmd_config_doctor() {
-  local schema resolved=0 problems=0
+_doctor_config() {
+  local schema resolved=0
   schema=$(_schema_all)
 
   local f scope pair section key known suggestion
@@ -1378,9 +1447,8 @@ cmd_config_doctor() {
       if [ -n "$known" ]; then
         resolved=$((resolved + 1))
       else
-        problems=$((problems + 1))
-        printf '  ✗ [%s] %s — unknown key  (%s:%s)\n' "$section" "$key" "$f" \
-          "$(aether_cfg_lineno "$f" "$section" "$key")"
+        _dr_bad "$(printf '[%s] %s — unknown key  (%s:%s)' "$section" "$key" \
+          "$(_dr_tilde "$f")" "$(aether_cfg_lineno "$f" "$section" "$key")")"
         # Longest shared prefix within the same section, which is what a typo
         # in a long key like auto_nudge_lines actually looks like.
         suggestion=$(printf '%s\n' "$schema" | awk -F'|' -v s="$section" -v k="$key" '
@@ -1390,7 +1458,7 @@ cmd_config_doctor() {
             if (n > best && n >= 4) { best = n; cand = $2 }
           }
           END { if (cand != "") print cand }')
-        [ -n "$suggestion" ] && printf '      did you mean %s?\n' "$suggestion"
+        [ -n "$suggestion" ] && _dr_note "did you mean $suggestion?"
       fi
     done <<EOKEYS
 $(aether_cfg_keys "$f")
@@ -1433,36 +1501,431 @@ EOKEYS
 $(printf '%s' "$val" | tr '|;' '\n\n' | sed 's/&&/\n/g')
 EOSEG
     [ -n "$missing" ] && {
-      problems=$((problems + 1))
-      printf '  ! [project] %s: %s\n' "$cmdkey" "$val"
-      printf '      not on PATH:%s — that step will be skipped\n' "$missing"
+      _dr_warn "[project] $cmdkey: $val"
+      _dr_note "not on PATH:$missing — that step will be skipped"
     }
   done
 
-  command -v aether_cfg_get >/dev/null 2>&1 || {
-    problems=$((problems + 1))
-    printf '  ✗ aether-config.sh not found — every value is falling back to its default\n'
-  }
+  command -v aether_cfg_get >/dev/null 2>&1 \
+    || _dr_bad "aether-config.sh not found — every value is falling back to its default"
 
   if [ -f .aether/config ] || [ -f .aether/rules.md ]; then
     case "$(aether_trust_state)" in
       nohash)
-        problems=$((problems + 1))
-        printf '  ! no SHA-256 on this machine — nothing can be trusted\n'
-        printf '      install shasum, sha256sum or openssl\n' ;;
+        _dr_warn "no SHA-256 on this machine — nothing can be trusted"
+        _dr_note "install shasum, sha256sum or openssl" ;;
       changed)
-        problems=$((problems + 1))
-        printf '  ! .aether/ changed since it was trusted\n'
-        printf '      [project] commands and rules.md are being ignored — review, then: aether trust\n' ;;
+        _dr_warn ".aether/ changed since it was trusted"
+        _dr_note "[project] commands and rules.md are being ignored"
+        _dr_fix "aether trust, after reviewing the change" ;;
       none)
-        problems=$((problems + 1))
-        printf '  ! .aether/ is untrusted\n'
-        printf '      [project] commands and rules.md are being ignored — review, then: aether trust\n' ;;
+        _dr_warn ".aether/ is untrusted"
+        _dr_note "[project] commands and rules.md are being ignored"
+        _dr_fix "aether trust, after reviewing it" ;;
     esac
   fi
 
-  printf '  ✓ %s key(s) resolved\n' "$resolved"
-  [ "$problems" -eq 0 ] && printf '\nNo problems found.\n'
+  _dr_ok "$resolved key(s) resolved"
+  return 0
+}
+
+# `aether config doctor` predates `aether doctor` by one release and is documented,
+# so it stays — as the config half plus its own summary, not a second copy.
+cmd_config_doctor() {
+  _DR_BAD=0; _DR_WARN=0
+  _doctor_config
+  _doctor_trust
+  printf '\n'
+  if [ "$_DR_BAD" -eq 0 ] && [ "$_DR_WARN" -eq 0 ]; then printf 'No problems found.\n'; return 0; fi
+  printf '%s problem(s), %s warning(s).  `aether doctor` also checks the install.\n' \
+    "$_DR_BAD" "$_DR_WARN"
+  [ "$_DR_BAD" -gt 0 ] && return 1
+  return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DOCTOR
+#
+# v1.1.0 fixed twelve bugs, and the ones that mattered shared a shape: the tool
+# reported success and had done nothing. The engine registered no MCP servers for
+# six commits. An upgrade left a PostToolUse hook pointing into a deleted
+# directory. post-cairn.sh fired twice. All of it invisible from the outside — in
+# a tool whose entire job is noticing problems.
+#
+# Every check here answers one question: does the state on disk match what the
+# manifests say it should be. The manifests are the source of truth, exactly as
+# they are for the engine — a second list of what aether owns would drift from the
+# first.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_DR_BAD=0; _DR_WARN=0; _DR_FIXABLE=""
+
+_dr_ok()   { printf '  ✓ %s\n' "$*"; }
+_dr_bad()  { _DR_BAD=$((_DR_BAD + 1));   printf '  ✗ %s\n' "$*"; }
+_dr_warn() { _DR_WARN=$((_DR_WARN + 1)); printf '  ! %s\n' "$*"; }
+_dr_note() { printf '      %s\n' "$*"; }
+_dr_fix()  { printf '      fix: %s\n' "$*"; }
+
+# ── install ──────────────────────────────────────────────────────────────────
+
+_doctor_hooks() {
+  local settings probe n_suite=0 dup="" seen="" missing=""
+  settings=$(_settings "$1")
+  probe=$(_json_probe "$settings" "$HOME/.claude.json" 2>/dev/null) || {
+    _dr_warn "cannot read settings.json (needs python3, node or jq)"
+    _dr_note "hook, permission and MCP checks skipped"; return 0; }
+
+  local line phase cmd base
+  while IFS=$'\t' read -r kind phase _matcher cmd; do
+    [ "$kind" = hook ] || continue
+    [ -n "$cmd" ] || continue
+    base=$(basename "$cmd")
+    case "$base" in enforce-suite.sh) n_suite=$((n_suite + 1)) ;; esac
+    if [ ! -f "$cmd" ]; then
+      missing="$missing$phase|$cmd
+"
+    elif [ ! -x "$cmd" ]; then
+      _dr_bad "$phase: $(_dr_tilde "$cmd") is registered but not executable"
+      _dr_fix "aether install $1"
+    fi
+    # Same script name at two paths means it runs twice per tool call.
+    case "$seen" in *" $base "*) dup="$dup $base" ;; *) seen="$seen $base " ;; esac
+  done <<EOF
+$probe
+EOF
+
+  if [ -n "$missing" ]; then
+    while IFS='|' read -r phase cmd; do
+      [ -n "$cmd" ] || continue
+      _dr_bad "$phase: $(_dr_tilde "$cmd") is registered but does not exist"
+      _dr_note "Claude Code tries to run it on every matching tool call"
+      _dr_fix "aether doctor --fix"
+    done <<EOF
+$missing
+EOF
+    _DR_FIXABLE="$_DR_FIXABLE missing-hooks"
+  fi
+
+  local d
+  for d in $(printf '%s\n' $dup | sort -u); do
+    _dr_bad "$d is registered more than once — it fires once per registration"
+    while IFS=$'\t' read -r kind _phase _matcher cmd; do
+      [ "$kind" = hook ] && [ "$(basename "${cmd:-x}")" = "$d" ] \
+        && _dr_note "$(_dr_tilde "$cmd")$([ -f "$cmd" ] || printf '   (missing)')"
+    done <<EOF
+$probe
+EOF
+    _dr_fix "aether doctor --fix"
+    _DR_FIXABLE="$_DR_FIXABLE duplicate-hooks"
+  done
+
+  case "$n_suite" in
+    1) [ -z "$missing$dup" ] && _dr_ok "suite hook registered once, present and executable" ;;
+    0) _dr_bad "the suite hook is not registered"; _dr_fix "aether install $1" ;;
+    *) _dr_bad "the suite hook is registered $n_suite times"; _dr_fix "aether install $1" ;;
+  esac
+  return 0
+}
+
+_doctor_mcp() {
+  local deep="$2" probe plugin names n
+  probe=$(_json_probe "$(_settings "$1")" "$HOME/.claude.json" 2>/dev/null) || return 0
+  for plugin in $(_plugins_available); do
+    names=$(_dr_mcp_names "$plugin"); [ -n "$names" ] || continue
+    # Only judge a plugin that is actually installed.
+    case " $(_manifest_get plugins) " in *" $plugin "*) ;; *) continue ;; esac
+    for n in $names; do
+      local got cmd args
+      got=$(printf '%s\n' "$probe" | awk -F'\t' -v n="$n" '$1=="mcp" && $2==n {print $3"\t"$4; exit}')
+      if [ -z "$got" ]; then
+        _dr_bad "MCP $n is not registered in ~/.claude.json, but $plugin is installed"
+        _dr_fix "aether install $plugin $1"
+        continue
+      fi
+      cmd="${got%%	*}"; args="${got#*	}"
+      if [ -z "$cmd" ]; then
+        _dr_bad "MCP $n is registered with an empty command"
+        _dr_fix "aether install $plugin $1"; continue
+      fi
+      command -v "$cmd" >/dev/null 2>&1 \
+        || { _dr_bad "MCP $n: $cmd is not on PATH"; _dr_fix "install $cmd, then aether install $plugin $1"; continue; }
+      local a bad_path=""
+      for a in $args; do
+        case "$a" in /*) [ -e "$a" ] || bad_path="$a" ;; esac
+      done
+      if [ -n "$bad_path" ]; then
+        _dr_bad "MCP $n: $(_dr_tilde "$bad_path") does not exist"
+        _dr_note "the clone may have moved, or $plugin was never built"
+        _dr_fix "aether install $plugin $1"; continue
+      fi
+      if [ "$deep" = true ]; then
+        if _dr_handshake "$cmd" $args; then _dr_ok "MCP $n answers tools/list"
+        else _dr_bad "MCP $n is registered but does not answer a handshake"
+             _dr_fix "aether install $plugin $1"; fi
+      else
+        _dr_ok "MCP $n: $cmd, paths present"
+      fi
+    done
+  done
+  return 0
+}
+
+# Every mcp.<name>.command key a plugin declares, ignoring the mcp.published.*
+# variants, which describe how the servers would be fetched rather than run.
+_dr_mcp_names() {
+  local repo f; repo=$(_repo_root) || return 0
+  f="$repo/plugins/$1/aether.plugin"; [ -f "$f" ] || return 0
+  sed -n 's/^mcp\.\([a-z0-9-]*\)\.command:.*/\1/p' "$f" | sort -u
+}
+
+_dr_handshake() {
+  printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"aether-doctor","version":"1"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+  | "$@" 2>/dev/null | grep -q '"tools"'
+}
+
+_doctor_manifest() {
+  local scope="$1" mf; mf=$(_manifest_for "$scope")
+  [ -f "$mf" ] || { _dr_warn "no install manifest at $(_dr_tilde "$mf")"
+                    _dr_fix "aether install $scope"; return 0; }
+  local n=0 gone=0 c cdir; cdir=$(_commands_dir "$scope")
+  for c in $(_manifest_get commands); do
+    n=$((n + 1)); [ -f "$cdir/$c" ] || { gone=$((gone + 1)); _dr_bad "$c is recorded but not in $(_dr_tilde "$cdir")"; }
+  done
+  local rec
+  for key in hook gates; do
+    rec=$(_manifest_get "$key"); [ -n "$rec" ] || continue
+    n=$((n + 1)); [ -e "$rec" ] || { gone=$((gone + 1)); _dr_bad "$key is recorded at $(_dr_tilde "$rec") but is not there"; }
+  done
+  [ "$gone" -eq 0 ] && _dr_ok "$n manifest entries all present on disk" \
+                    || _dr_fix "aether install $scope"
+
+  # A command from before the rename is not inert: it stays in the palette and
+  # runs the stale copy.
+  local stale="" plugin lc
+  for plugin in $(_plugins_available); do
+    for lc in $(_mf "$plugin" legacy_commands); do
+      [ -f "$cdir/$lc" ] && stale="$stale $lc"
+    done
+  done
+  if [ -n "$stale" ]; then
+    _dr_warn "$(printf '%s' "$stale" | wc -w | tr -d ' ') command(s) from a pre-1.0 install are still in the palette"
+    _dr_note "$(printf '%s' "${stale# }")"
+    _dr_fix "aether install $scope"
+  fi
+  return 0
+}
+
+_doctor_layout() {
+  local scope="$1" left=""
+  [ -e "$LEGACY_HOOK_DIR" ] && left="$left $(_dr_tilde "$LEGACY_HOOK_DIR")"
+  [ -f "$LEGACY_GLOBAL_MANIFEST" ] && left="$left $(_dr_tilde "$LEGACY_GLOBAL_MANIFEST")"
+  local sec
+  for sec in $AETHER_LEGACY_SECTIONS; do
+    [ -f "$HOME/.claude/$sec.config" ] && left="$left $(_dr_tilde "$HOME/.claude/$sec.config")"
+    [ -f "./$sec.config" ] && left="$left ./$sec.config"
+  done
+  [ -f .claude/plans/CRITIQUE.md ] && left="$left .claude/plans/CRITIQUE.md"
+  [ -f .claude/plans/TEMPER.md ]   && left="$left .claude/plans/TEMPER.md"
+  if [ -n "$left" ]; then
+    _dr_warn "the pre-1.0 layout is still on disk"
+    _dr_note "${left# }"
+    _dr_fix "aether migrate"
+  else
+    _dr_ok "nothing left from the pre-1.0 layout"
+  fi
+  return 0
+}
+
+_doctor_clone() {
+  local rec; rec=$(_manifest_get repo)
+  if [ -z "$rec" ]; then
+    _dr_warn "the manifest records no clone path"; _dr_fix "aether install $1"; return 0
+  fi
+  if [ -d "$rec/plugins" ]; then _dr_ok "clone present at $(_dr_tilde "$rec")"
+  else
+    _dr_bad "the recorded clone is gone: $(_dr_tilde "$rec")"
+    _dr_note "aether update needs it, and bonsai's MCP servers point into it"
+    _dr_fix "re-clone there, or run install.sh from the new location"
+  fi
+  return 0
+}
+
+_doctor_perms() {
+  local probe want have missing="" p
+  probe=$(_json_probe "$(_settings "$1")" "$HOME/.claude.json" 2>/dev/null) || return 0
+  have=" $(printf '%s\n' "$probe" | awk -F'\t' '$1=="perm"{print $2}' | tr '\n' ' ')"
+  want="Bash Read Write"
+  for p in $(_manifest_get plugins); do want="$want $(_mf "$p" permissions)"; done
+  for p in $(printf '%s\n' $want | sort -u); do
+    case "$have" in *" $p "*) ;; *) missing="$missing $p" ;; esac
+  done
+  [ -z "$missing" ] && _dr_ok "permissions match what the installed plugins declare" \
+    || { _dr_bad "permissions missing from settings.json:$missing"; _dr_fix "aether install $1"; }
+  return 0
+}
+
+_doctor_gates() {
+  local gates g bad="" n=0
+  gates=$(_gates_dir "$1")
+  [ -d "$gates" ] || { _dr_warn "no gates directory at $(_dr_tilde "$gates")"; _dr_fix "aether install $1"; return 0; }
+  for g in "$gates"/enforce-*.sh; do
+    [ -f "$g" ] || continue
+    n=$((n + 1)); bash -n "$g" 2>/dev/null || bad="$bad $(basename "$g")"
+  done
+  [ "$n" -eq 0 ] && { _dr_warn "no gates installed"; _dr_fix "aether install $1"; return 0; }
+  [ -z "$bad" ] && _dr_ok "$n gates parse" \
+    || { _dr_bad "gates that fail to parse and are being skipped:$bad"; _dr_fix "aether install $1"; }
+  return 0
+}
+
+# ── trust ────────────────────────────────────────────────────────────────────
+
+_doctor_trust() {
+  local dead="" changed="" ok=0 state path
+  while IFS=$'\t' read -r state path; do
+    [ -n "$path" ] || continue
+    case "$state" in
+      dead)    dead="$dead$path
+" ;;
+      changed) changed="$changed$path
+" ;;
+      ok)      ok=$((ok + 1)) ;;
+    esac
+  done <<EOF
+$(aether_trust_entries)
+EOF
+  [ "$ok" -gt 0 ] && _dr_ok "$ok project(s) trusted and unchanged"
+  if [ -n "$dead" ]; then
+    _dr_warn "$(printf '%s' "$dead" | grep -c . || true) entry(ies) point at a directory that no longer exists"
+    printf '%s' "$dead" | while IFS= read -r path; do [ -n "$path" ] && _dr_note "$(_dr_tilde "$path")"; done
+    _dr_fix "aether trust prune"
+    _DR_FIXABLE="$_DR_FIXABLE dead-trust"
+  fi
+  if [ -n "$changed" ]; then
+    _dr_warn "$(printf '%s' "$changed" | grep -c . || true) project(s) edited since being trusted"
+    printf '%s' "$changed" | while IFS= read -r path; do [ -n "$path" ] && _dr_note "$(_dr_tilde "$path")"; done
+    _dr_note "their [project] commands and rules.md are being ignored"
+    _dr_fix "aether trust, in that directory, after reviewing the change"
+  fi
+  [ -z "$dead$changed" ] && [ "$ok" -eq 0 ] && _dr_ok "no projects trusted yet"
+  return 0
+}
+
+_dr_tilde() { printf '%s' "${1/#$HOME/~}"; }
+
+# ── --fix ────────────────────────────────────────────────────────────────────
+# Only where the correct action is unambiguous. A doctor that guesses is worse
+# than one that reports, so everything else prints the command instead.
+
+_doctor_fix() {
+  local scope="$1" settings probe
+  settings=$(_settings "$scope")
+  probe=$(_json_probe "$settings" "$HOME/.claude.json" 2>/dev/null) || return 0
+
+  # Work out everything to do BEFORE touching anything, so a run with nothing to
+  # fix leaves the home directory byte-identical — including not writing a .bak.
+  local drop="" kind cmd base seen="" dup="" ours
+  ours=$(_hook_dir "$scope")
+
+  while IFS=$'\t' read -r kind _phase _matcher cmd; do
+    [ "$kind" = hook ] && [ -n "$cmd" ] || continue
+    [ -f "$cmd" ] || drop="$drop$cmd
+"
+    base=$(basename "$cmd")
+    case "$seen" in *" $base "*) dup="$dup $base" ;; *) seen="$seen $base " ;; esac
+  done <<EOF
+$probe
+EOF
+
+  # A duplicate where both files exist: keep the one under this scope's hook
+  # directory, which is the one the engine installed.
+  for base in $(printf '%s\n' $dup | sort -u); do
+    while IFS=$'\t' read -r kind _phase _matcher cmd; do
+      [ "$kind" = hook ] && [ "$(basename "${cmd:-x}")" = "$base" ] || continue
+      case "$cmd" in "$ours"/*) continue ;; esac
+      [ -f "$cmd" ] || continue                     # already in $drop
+      case "$drop" in *"$cmd
+"*) ;; *) drop="$drop$cmd
+" ;; esac
+    done <<EOF
+$probe
+EOF
+  done
+
+  local dead; dead=$(DRY_RUN=true _trust_prune_dead)
+
+  if [ -z "$drop" ] && [ "${dead:-0}" -eq 0 ]; then
+    printf '  nothing to fix automatically.\n'; return 0
+  fi
+
+  [ -n "$drop" ] && _backup "$settings" 2>/dev/null || true
+  printf '%s' "$drop" | while IFS= read -r cmd; do
+    [ -n "$cmd" ] || continue
+    if _json_drop_hooks_matching "$settings" "$cmd"; then
+      if [ -f "$cmd" ]; then printf '  ✓ deregistered the duplicate %s\n' "$(_dr_tilde "$cmd")"
+      else printf '  ✓ deregistered %s (the file does not exist)\n' "$(_dr_tilde "$cmd")"; fi
+    fi
+  done
+
+  if [ "${dead:-0}" -gt 0 ]; then
+    local n; n=$(_trust_prune_dead)
+    printf '  ✓ pruned %s trust entry(ies) whose directory no longer exists\n' "$n"
+  fi
+  return 0
+}
+
+cmd_doctor() {
+  local scope="" want=all fix=false deep=false a
+  for a in "$@"; do
+    case "$a" in
+      --fix)      fix=true ;;
+      --deep)     deep=true ;;
+      --install)  want=install ;;
+      --config)   want=config ;;
+      global|--global) scope=global ;;
+      local)      scope=local ;;
+      *) printf 'Unknown option: %s\n' "$a"; return 1 ;;
+    esac
+  done
+  # Default to whichever scope is actually installed here.
+  [ -n "$scope" ] || { scope=$(_manifest_get scope); scope="${scope:-global}"; }
+
+  _DR_BAD=0; _DR_WARN=0; _DR_FIXABLE=""
+
+  if [ "$want" = all ] || [ "$want" = install ]; then
+    printf '\ninstall (%s)\n' "$scope"
+    _doctor_hooks    "$scope"
+    _doctor_mcp      "$scope" "$deep"
+    _doctor_manifest "$scope"
+    _doctor_perms    "$scope"
+    _doctor_gates    "$scope"
+    _doctor_layout   "$scope"
+    _doctor_clone    "$scope"
+  fi
+  if [ "$want" = all ] || [ "$want" = config ]; then
+    printf '\nconfig\n'
+    _doctor_config
+    printf '\ntrust\n'
+    _doctor_trust
+  fi
+
+  if [ "$fix" = true ]; then
+    printf '\nfixing\n'
+    _doctor_fix "$scope"
+    printf '\nRe-run `aether doctor` to confirm.\n'
+    return 0
+  fi
+
+  printf '\n'
+  if [ "$_DR_BAD" -eq 0 ] && [ "$_DR_WARN" -eq 0 ]; then
+    printf 'No problems found.\n'; return 0
+  fi
+  printf '%s problem(s), %s warning(s).\n' "$_DR_BAD" "$_DR_WARN"
+  [ -n "$_DR_FIXABLE" ] && printf 'Some of this is repairable: aether doctor --fix\n'
+  [ "$_DR_BAD" -gt 0 ] && return 1
   return 0
 }
 
@@ -1558,6 +2021,23 @@ _trust_record() {
   mv "$tmp" "$f"
 }
 
+# Prints how many it removed, so the caller can stay quiet when there were none.
+_trust_prune_dead() {
+  local f tmp n=0 state path
+  f=$(aether_trust_file); [ -f "$f" ] || { printf 0; return 0; }
+  tmp="$f.tmp"; : > "$tmp"
+  while IFS=$'\t' read -r state path; do
+    [ -n "$path" ] || continue
+    if [ "$state" = dead ]; then n=$((n + 1)); continue; fi
+    grep -F -- " $path" "$f" >> "$tmp" 2>/dev/null || true
+  done <<EOF
+$(aether_trust_entries)
+EOF
+  if _dry; then rm -f "$tmp"; printf '%s' "$n"; return 0; fi
+  mv "$tmp" "$f"
+  printf '%s' "$n"
+}
+
 _trust_forget() {
   local f here tmp
   f=$(aether_trust_file); here=$(pwd -P)
@@ -1593,6 +2073,21 @@ _trust_preview() {
 cmd_trust() {
   local sub="${1:-set}"
   case "$sub" in
+    list)
+      local state path any=""
+      while IFS=$'\t' read -r state path; do
+        [ -n "$path" ] || continue
+        any=1; printf '  %-8s %s\n' "$state" "${path/#$HOME/~}"
+      done <<EOF
+$(aether_trust_entries)
+EOF
+      [ -n "$any" ] || printf '  no projects trusted yet\n'
+      return 0 ;;
+    prune)
+      local n; n=$(_trust_prune_dead)
+      [ "${n:-0}" -gt 0 ] && printf '  ✓ removed %s entry(ies) whose directory no longer exists\n' "$n" \
+                          || printf '  nothing to prune\n'
+      return 0 ;;
     --forget|forget|remove)
       _trust_forget; printf '  ✓ %s is no longer trusted\n' "$(pwd -P)" ;;
     status)
@@ -1932,6 +2427,7 @@ case "$COMMAND" in
   enable)    cmd_enable "$@" ;;
   disable)   cmd_disable "$@" ;;
   config)    cmd_config "$@" ;;
+  doctor)    cmd_doctor "$@" ;;
   trust)     cmd_trust "$@" ;;
   rules)     aether_rules ;;
   migrate)   for _s in global local; do _migrate_layout "$_s"; _retire_legacy_hooks "$_s"; done

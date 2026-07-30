@@ -275,3 +275,33 @@ aether_rules() {
       printf '     Say so in the report header. Review it, then: aether trust -->\n' ;;
   esac
 }
+
+# aether_trust_entries — one "state<TAB>path" line per recorded project.
+#
+#   ok       trusted, and unchanged since
+#   changed  trusted once, edited since — its commands and prose are being ignored
+#   dead     the directory no longer exists
+#
+# `dead` is the one nothing used to report. Entries accumulate for every project
+# ever trusted, so a path deleted months ago still grants consent if a directory
+# is ever recreated there — and there was no way to see that from the outside.
+aether_trust_entries() {
+  local f line h p state
+  f="${AETHER_HOME:-$HOME/.aether}/trusted"
+  [ -f "$f" ] || return 0
+  while IFS= read -r line; do
+    case "$line" in ''|' '*) continue ;; esac
+    h="${line%% *}"; p="${line#* }"
+    # A line with no space is malformed; skip rather than treat the hash as a path.
+    [ -n "$p" ] && [ "$p" != "$line" ] || continue
+    if [ ! -d "$p" ]; then
+      state=dead
+    else
+      # Subshell, so a doctor run does not change the caller's directory.
+      state=$( cd "$p" 2>/dev/null && { [ "$(aether_hash_project)" = "$h" ] \
+                 && printf ok || printf changed; } )
+      [ -n "$state" ] || state=dead
+    fi
+    printf '%s\t%s\n' "$state" "$p"
+  done < "$f"
+}

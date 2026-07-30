@@ -108,20 +108,33 @@ plan file as known risks to revisit during temper review.
 
 ### Plan file conventions
 
-Plans stay in `.claude/plans/`, which is plan mode's own directory. Generated
-review output lives under `.aether/out/`, which aether owns:
+Plans live wherever they are written — `.claude/plans/` in a project, or
+`~/.claude/plans/`, which is where Claude Code's plan mode puts them. The critique
+lives **inside the plan it critiques**:
+
+```markdown
+…the plan…
+
+<!-- aether:critique sha=3f9a1c… date=2026-07-30 blockers=0 -->
+## Critique
+…the report…
+<!-- /aether:critique -->
+```
+
+That is the only file writable in plan mode, so it is the only place a critique made
+there can be recorded. It is also per plan: one shared `CRITIQUE.md` meant critiquing
+one plan satisfied the gate for every other.
+
+`sha` is the hash of the plan with the critique block removed, so the gate can tell a
+plan that changed from one that was merely re-saved. `aether plan status` reports which
+plan the gate sees and whether it considers it critiqued.
+
+Generated review output still lives under `.aether/out/`:
 
 ```
-.claude/plans/<plan-name>.md   # the plan (one file per plan) — yours
-.aether/out/CRITIQUE.md        # the latest /critique-plan output, appended
-.aether/out/TEMPER.md          # the latest /critique-diff output, appended
+.aether/out/CRITIQUE.md   accumulating history across plans
+.aether/out/TEMPER.md     /critique-diff output
 ```
-
-The hook (`enforce-suite.sh`) detects a stale critique by comparing the newest
-plan file's modification time against `CRITIQUE.md`. Always write critiques to
-`.aether/out/CRITIQUE.md` so the hook can find them; a project without a
-`.aether/` directory falls back to `~/.aether/out/`.
-
 ### Severity handoff
 
 | whetstone finding | What to do |

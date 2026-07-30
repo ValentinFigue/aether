@@ -9,9 +9,19 @@ config_section: whetstone
 commands: critique-plan.md
 legacy_commands: autocritic.md
 
-# The only gate matching Write/Edit/MultiEdit as well as Bash — it branches on
-# the tool name and serves both paths from one function.
-hook.1: PreToolUse | Bash\|Write\|Edit\|MultiEdit | hooks/enforce-whetstone.sh | suite_owned
+# The only gate matching Write/Edit/MultiEdit as well as Bash — it branches on the
+# tool name and serves all three paths from one function.
+#
+# ExitPlanMode is here because presenting a plan is precisely when its critique should
+# already exist, and nothing else in the flow is that precise. Note the PreToolUse
+# matcher is SHARED: the suite hook registers one entry, so every gate is invoked on
+# ExitPlanMode too. The other three branch on tool name and return 0, which is correct,
+# but it is a suite-wide matcher widened for one plugin.
+hook.1: PreToolUse | Bash\|Write\|Edit\|MultiEdit\|ExitPlanMode | hooks/enforce-whetstone.sh | suite_owned
+
+# Records which plan this project is working on. Silent — plan mode rewrites the plan
+# file repeatedly while it is being built, so nudging here would fire on every edit.
+hook.2: PostToolUse | Write\|Edit\|MultiEdit | hooks/post-whetstone.sh
 
 cli: whetstone
 cli.strategy: copy

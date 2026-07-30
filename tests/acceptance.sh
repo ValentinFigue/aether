@@ -187,6 +187,66 @@ b4=$(snapd)
 [ "$b4" = "$(snapd)" ] && ok "--fix changes nothing when there is nothing to fix" \
                        || bad "--fix changes nothing when there is nothing to fix"
 
+# ── 6c. the plan flow, on a real install ─────────────────────────────────────
+# The gate had never seen a plan written by plan mode, because it globbed the project
+# plans directory and plan mode writes to ~/.claude/plans/. This is that end to end,
+# through an actual install rather than by calling the gate directly.
+grp "the plan flow after a real install"
+HPL=$(mk); PPL=$(mk)
+env HOME="$HPL" bash install.sh --global --no-bonsai >/dev/null 2>&1
+mkdir -p "$HPL/.claude/plans" "$PPL/src"
+( cd "$PPL" && git init -q . && git config user.email t@t && git config user.name t )
+PLAN="$HPL/.claude/plans/acceptance.md"
+printf '# A plan\n\nDo the thing.\n' > "$PLAN"
+
+# The registered matcher must cover ExitPlanMode, or the trigger can never fire.
+m=$(python3 - "$HPL" <<'PYEOF'
+import json, sys
+d = json.load(open(sys.argv[1] + "/.claude/settings.json"))
+print(next((e["matcher"] for e in d["hooks"]["PreToolUse"]
+            if any("enforce-suite" in h.get("command","") for h in e.get("hooks",[]))), ""))
+PYEOF
+)
+case "$m" in *ExitPlanMode*) ok "the installed matcher covers ExitPlanMode ($m)" ;;
+             *) bad "the installed matcher covers ExitPlanMode" "got: $m" ;; esac
+
+# The PostToolUse recorder is registered and records the plan.
+printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$PLAN" \
+  | ( cd "$PPL" && env HOME="$HPL" bash "$HPL/.aether/hooks/plugin-hooks/post-whetstone.sh" ) >/dev/null 2>&1
+got=$( cd "$PPL" && env HOME="$HPL" bash "$HPL/.local/bin/aether" plan path 2>/dev/null )
+[ "$got" = "$PLAN" ] && ok "the recorder pointed the gate at the plan-mode plan" \
+                     || bad "the recorder pointed the gate at the plan-mode plan" "got: ${got:-nothing}"
+
+# Uncritiqued: the suite hook nudges at commit and never exits 2.
+out=$( cd "$PPL" && printf '{"tool_name":"Bash","tool_input":{"command":"git commit -m wip"}}' \
+       | env HOME="$HPL" bash "$HPL/.aether/hooks/enforce-suite.sh" 2>&1 ); rc=$?
+case "$rc$out" in
+  1*Whetstone*) ok "an uncritiqued plan nudges through the suite hook" ;;
+  2*) bad "the gate never exits 2" "exit 2 blocks the tool call" ;;
+  *) bad "an uncritiqued plan nudges through the suite hook" "exit=$rc out=${out:0:60}" ;;
+esac
+
+# ExitPlanMode prints but must never gate.
+out=$( cd "$PPL" && printf '{"tool_name":"ExitPlanMode","tool_input":{}}' \
+       | env HOME="$HPL" bash "$HPL/.aether/hooks/enforce-suite.sh" 2>&1 ); rc=$?
+[ "$rc" -eq 0 ] && ok "ExitPlanMode is never gated (exit 0)" \
+               || bad "ExitPlanMode is never gated" "exit=$rc"
+case "$out" in *Whetstone*) ok "…and still says the plan is uncritiqued" ;;
+               *) bad "…and still says the plan is uncritiqued" "${out:0:60}" ;; esac
+
+# Critique it in place, the way /critique-plan is told to, and everything goes quiet.
+h=$( . "$REPO/hooks/aether-config.sh"; aether_plan_hash "$PLAN" )
+printf '\n<!-- aether:critique sha=%s date=2026-07-30 blockers=0 -->\n## Critique\nfine\n<!-- /aether:critique -->\n' \
+  "$h" >> "$PLAN"
+out=$( cd "$PPL" && printf '{"tool_name":"Bash","tool_input":{"command":"git commit -m wip"}}' \
+       | env HOME="$HPL" bash "$HPL/.aether/hooks/enforce-suite.sh" 2>&1 ); rc=$?
+# cairn also nudges here, about the weak commit message — correct and unrelated. The
+# claim is about whetstone, so assert about whetstone rather than the combined exit.
+case "$out" in
+  *Whetstone*) bad "a critique inside the plan silences whetstone" "${out:0:70}" ;;
+  *) ok "a critique inside the plan silences whetstone" ;;
+esac
+
 # ── 7. upgrading from the last release ───────────────────────────────────────
 grp "upgrade from $(git describe --tags --abbrev=0 2>/dev/null || echo 'the previous release')"
 tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")

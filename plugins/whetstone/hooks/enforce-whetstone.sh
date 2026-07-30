@@ -38,10 +38,38 @@ fi
 CRITIQUE_FILE="$(aether_out_dir 2>/dev/null)/CRITIQUE.md"
 [ -f "$CRITIQUE_FILE" ] || [ ! -f .claude/plans/CRITIQUE.md ] || CRITIQUE_FILE=".claude/plans/CRITIQUE.md"
 
+# Nudge at most once per uncritiqued plan *version*, not once per project for ever.
+# The old sentinel was a single empty file, so after the first nudge this gate was
+# decorative — silent for every later plan, in every later month.
+_ws_nudged() {
+  local key="$1" f=".aether/out/.nudged"
+  [ -f "$f" ] && grep -qxF "$key" "$f" 2>/dev/null && return 0
+  # Pre-1.4 sentinel: an empty marker file meaning "this project was nudged once".
+  # Honoured so an existing project does not get one fresh nudge on upgrade.
+  [ -f .claude/plans/.whetstone-nudged ] && return 0
+  [ -s "$f" ] || [ ! -f "$f" ] || return 0
+  return 1
+}
+_ws_mark_nudged() {
+  local key="$1" f=".aether/out/.nudged"
+  mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
+  printf '%s\n' "$key" >> "$f" 2>/dev/null || true
+}
+
+# Records that this gate has ever seen an ExitPlanMode payload. Whether Claude Code
+# delivers PreToolUse for that tool could not be determined from outside, so rather
+# than guess, the gate reports what it observes and `aether plan status` prints it.
+_ws_seen_exitplanmode() {
+  local f=".aether/out/.exitplanmode-seen"
+  [ -f "$f" ] && return 0
+  mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
+  date -u '+%Y-%m-%dT%H:%M:%SZ' > "$f" 2>/dev/null || true
+  return 0
+}
+
 # ── Gate ─────────────────────────────────────────────────────────────────────
 # Reads: $tool_name, $cmd_or_path.  Returns: 1 to nudge, 0 to stay silent.
-# Handles both the Bash and the Write/Edit/MultiEdit paths — the suite calls
-# this one function for either, rather than keeping two separate entry points.
+# Serves the Bash, Write/Edit/MultiEdit and ExitPlanMode paths from one function.
 gate_whetstone() {
   local tool="${tool_name:-}" target="${cmd_or_path:-}"
   [ -z "$tool" ] && return 0
@@ -49,67 +77,87 @@ gate_whetstone() {
   # Bypass markers
   printf '%s' "$target" | grep -qE '#\s*(whetstone|suite):skip' && return 0
 
-  # ── Gate 1: git push or commit ─────────────────────────────────────────────
-  if printf '%s' "$target" | grep -qE '^git (push|commit)'; then
-    # Find the newest plan file in .claude/plans/ (any .md except CRITIQUE.md)
-    local plan_file stale
-    plan_file=$(python3 -c '
-import os, glob
-plans = [f for f in glob.glob(".claude/plans/*.md")
-         if os.path.basename(f) not in ("CRITIQUE.md",)
-         and not os.path.basename(f).startswith(".")]
-print(max(plans, key=os.path.getmtime) if plans else "")
-' 2>/dev/null) || plan_file=""
+  local plan state
+  plan=$(aether_plan_file 2>/dev/null) || plan=""
+  state=$(aether_plan_state "$plan" 2>/dev/null) || state=none
 
-    if [ -n "$plan_file" ] && [ ! -f "$CRITIQUE_FILE" ]; then
-      printf 'Whetstone: a plan exists but has not been critiqued yet.\n'
-      printf '  Run /critique-plan before committing to surface blockers now.\n'
-      printf '  Append  # whetstone:skip  to your git command to bypass.\n'
-      return 1
-    fi
-
-    if [ -n "$plan_file" ] && [ -f "$CRITIQUE_FILE" ]; then
-      stale=$(python3 -c "
-import os
-plan = os.path.getmtime('$plan_file')
-crit = os.path.getmtime('$CRITIQUE_FILE')
-print('stale' if plan > crit else 'ok')
-" 2>/dev/null) || return 0
-      if [ "$stale" = "stale" ]; then
-        printf 'Whetstone: plan was modified after the last critique — critique is stale.\n'
-        printf '  Re-run /critique-plan on the updated plan before committing.\n'
-        printf '  Append  # whetstone:skip  to your git command to bypass.\n'
-        return 1
-      fi
-    fi
-
+  # ── ExitPlanMode: the moment the critique should already exist ──────────────
+  #
+  # Returns 0 unconditionally — it prints, it never gates. Whether a non-zero exit
+  # would block leaving plan mode is not knowable from here, and a nudge that traps
+  # you in the mode it is nudging about, while intercepting the very tool calls the
+  # critique needs, would be far worse than no nudge at all.
+  if [ "$tool" = ExitPlanMode ]; then
+    _ws_seen_exitplanmode
+    case "$state" in
+      uncritiqued)
+        printf 'Whetstone: this plan has no critique on record.\n'
+        printf '  Run /critique-plan before presenting it — blockers are cheapest now.\n' ;;
+      stale)
+        printf 'Whetstone: the plan changed after its last critique.\n'
+        printf '  Re-run /critique-plan on the current version.\n' ;;
+    esac
     return 0
   fi
 
-  # ── Gate 2: first source-file write with no critique on record ─────────────
+  # ── git push or commit ─────────────────────────────────────────────────────
+  if printf '%s' "$target" | grep -qE '^git (push|commit)'; then
+    [ -n "$plan" ] || return 0
+
+    # A plan carrying its own critique settles it without any generated file, which
+    # is the plan-mode case: nothing but the plan is writable there.
+    case "$state" in
+      critiqued) return 0 ;;
+      uncritiqued)
+        # Pre-1.4 state: no in-plan marker, but a CRITIQUE.md newer than the plan.
+        # Kept so a project that critiqued the old way is not told to do it again.
+        if [ -f "$CRITIQUE_FILE" ] && [ ! -f "$(aether_plan_pointer)" ]; then
+          python3 -c "
+import os, sys
+sys.exit(0 if os.path.getmtime('$plan') <= os.path.getmtime('$CRITIQUE_FILE') else 1)
+" 2>/dev/null && return 0
+        fi
+        printf 'Whetstone: a plan exists but has not been critiqued yet.\n'
+        printf '  %s\n' "$plan"
+        printf '  Run /critique-plan before committing to surface blockers now.\n'
+        printf '  Append  # whetstone:skip  to your git command to bypass.\n'
+        return 1 ;;
+      stale)
+        printf 'Whetstone: the plan changed after its last critique.\n'
+        printf '  %s\n' "$plan"
+        printf '  Re-run /critique-plan on the updated plan before committing.\n'
+        printf '  Append  # whetstone:skip  to your git command to bypass.\n'
+        return 1 ;;
+    esac
+    return 0
+  fi
+
+  # ── first source-file write with no critique on record ─────────────────────
   if printf '%s' "$tool" | grep -qE '^(Write|Edit|MultiEdit)$'; then
-    local is_source sentinel
+    local is_source key
     is_source=$(python3 -c "
 import re, sys
 print('yes' if re.search(r'\.(py|ts|tsx|js|jsx|mjs)$', sys.argv[1]) else 'no')
 " "$target" 2>/dev/null) || return 0
+    [ "$is_source" = yes ] || return 0
 
-    if [ "$is_source" = "yes" ] && [ ! -f "$CRITIQUE_FILE" ]; then
-      # Always project-relative, unlike CRITIQUE.md. This gate nudges once per
-      # project; routing it through aether_out_dir would put it in ~/.aether/out
-      # for any project without a .aether/, so the first project to be nudged
-      # would silence every other one on the machine.
-      sentinel=".aether/out/.nudged"
-      [ -f "$sentinel" ] || [ ! -f .claude/plans/.whetstone-nudged ] \
-        || sentinel=".claude/plans/.whetstone-nudged"
-      [ -f "$sentinel" ] && return 0
-      mkdir -p "$(dirname "$sentinel")" 2>/dev/null || true
-      touch "$sentinel" 2>/dev/null || true
+    case "$state" in critiqued) return 0 ;; none) ;; esac
+    # Keyed on the plan's own hash, so a second uncritiqued plan nudges again while
+    # the same one never nudges twice.
+    key="$(aether_plan_hash "$plan" 2>/dev/null)"
+    key="${key:-noplan}"
+    _ws_nudged "$key" && return 0
+    _ws_mark_nudged "$key"
+
+    if [ -n "$plan" ]; then
+      printf 'Whetstone: writing source with no critiqued plan on record.\n'
+      printf '  %s\n' "$plan"
+    else
       printf 'Whetstone: writing source code with no critiqued plan on record.\n'
-      printf '  If this is a planned change, run /critique-plan first.\n'
-      printf '  Append  # whetstone:skip  to your path to bypass.\n'
-      return 1
     fi
+    printf '  If this is a planned change, run /critique-plan first.\n'
+    printf '  Append  # whetstone:skip  to your path to bypass.\n'
+    return 1
   fi
 
   return 0

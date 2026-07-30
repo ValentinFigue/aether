@@ -278,6 +278,25 @@ assert_contains "$out" "differs — kept the parent" "…and the conflict is rep
 assert_contains "$(cat "$R/.aether/rules.md" 2>/dev/null)" "Backend prose." \
   "its rules.md is carried across"
 
+# The nested path may have been trusted on its own. Its config is gone after the
+# fold, so the entry can never match again and the doctor would report it `changed`
+# for ever — a permanent warning in the tool whose whole job is signalling.
+H4=$(mk); R4=$(mk)
+( cd "$R4" && git init -q . && git config user.email t@t && git config user.name t
+  printf 'x\n' > a.txt && git add -A >/dev/null 2>&1 && git commit -qm init >/dev/null 2>&1 )
+mkdir -p "$R4/backend/.aether"
+printf '[project]\ntest: true\n' > "$R4/backend/.aether/config"
+( cd "$R4/backend" && env HOME="$H4" bash "$CLI" trust >/dev/null 2>&1 )
+assert_contains "$(at "$H4" "$R4" trust list)" "backend" "the nested path is trusted to begin with"
+( cd "$R4" && env HOME="$H4" bash "$CLI" migrate >/dev/null 2>&1 )
+case "$(at "$H4" "$R4" trust list)" in
+  *"/backend"*) fail "migrating drops the nested path's trust entry" "$(at "$H4" "$R4" trust list)" ;;
+  *) pass "migrating drops the nested path's trust entry" ;;
+esac
+out=$(at "$H4" "$R4" doctor --config)
+case "$out" in *"edited since being trusted"*) fail "…so the doctor stays quiet about it" "$out" ;;
+               *) pass "…so the doctor stays quiet about it" ;; esac
+
 out=$( cd "$R" && env HOME="$H" bash "$CLI" migrate 2>&1 )
 case "$out" in *"project:backend"*) fail "re-running migrate is a no-op" "$out" ;;
                *) pass "re-running migrate is a no-op" ;; esac

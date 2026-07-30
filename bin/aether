@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="1.3.0"
+VERSION="1.3.1"
 
 # Pre-1.0 locations. Kept only so migration and uninstall can find and clear
 # what an older install left behind; nothing writes here any more.
@@ -2338,6 +2338,18 @@ EOF
   printf '%s' "$n"
 }
 
+# <path> — drop one recorded project, wherever it is. _trust_forget is this for the
+# current directory; the migration needs it for a subdirectory it just emptied.
+_trust_forget_path() {
+  local f tmp target="$1"
+  [ -n "$target" ] || return 0
+  f=$(aether_trust_file); [ -f "$f" ] || return 0
+  _dry && return 0
+  tmp="$f.tmp"
+  awk -v p="$target" '{ i = index($0, " "); if (substr($0, i + 1) != p) print }' "$f" > "$tmp"
+  mv "$tmp" "$f"
+}
+
 _trust_forget() {
   local f here tmp
   f=$(aether_trust_file); here=$(pwd -P)
@@ -2617,6 +2629,11 @@ EONK
       printf '    %s/.aether/rules.md → %s\n' "$dir" "$(_rules_file local)"
     fi
     _retire "$dir/.aether"
+    # The nested path may have been trusted in its own right. Its config is gone now,
+    # so the entry can never match again and `aether doctor` would report it as
+    # `changed` for ever — a permanent warning in the one tool whose job is
+    # signalling, which teaches people to ignore it.
+    _trust_forget_path "$(cd "$dir" 2>/dev/null && pwd -P)"
     printf '    %s/.aether/ → [%s]  (backup at %s/.aether.bak)\n' "$dir" "$sub" "$dir"
     moved=$((moved + 1))
   done <<EONESTED

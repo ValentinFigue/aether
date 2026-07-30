@@ -5,6 +5,8 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 . "$REPO/tests/lib.sh"
 
 CLI="$REPO/bin/aether"
+# Read from the source rather than restated, so a release does not fail the tests.
+VER=$(sed -n 's/^VERSION="\(.*\)"/\1/p' "$CLI")
 
 FAKE_HOMES=()
 new_home() { local h; h=$(mktemp -d); FAKE_HOMES+=("$h"); printf '%s' "$h"; }
@@ -17,7 +19,7 @@ jsonq() { python3 -c "$2" "$1" 2>/dev/null; }
 suite "basics"
 out=$(bash "$CLI" version 2>&1); e=$?
 assert_exit 0 "$e" "aether version exits 0"
-assert_contains "$out" "1.0.0" "aether version reports 1.0.0"
+assert_contains "$out" "$VER" "aether version reports $VER"
 
 out=$(bash "$CLI" help 2>&1); e=$?
 assert_exit 0 "$e" "aether help exits 0"
@@ -38,7 +40,7 @@ assert_contains "$out" "Gates:" "status reports the gates directory"
 assert_contains "$out" "3 loaded" "status counts the three installed gates"
 assert_contains "$out" "Clone:" "status reports the clone path"
 assert_contains "$out" "$REPO" "status resolves the clone to this checkout"
-assert_contains "$out" "Installed version: 1.0.0" "status reports the installed version"
+assert_contains "$out" "Installed version: $VER" "status reports the installed version"
 
 # ── enable / disable ─────────────────────────────────────────────────────────
 suite "enable / disable"

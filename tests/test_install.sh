@@ -12,6 +12,8 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 . "$REPO/tests/lib.sh"
 
 FAKE_HOMES=()
+VER=$(sed -n 's/^VERSION="\(.*\)"/\1/p' "$REPO/bin/aether")
+
 new_home() {
   local h; h=$(mktemp -d)
   FAKE_HOMES+=("$h")
@@ -108,7 +110,7 @@ done
 # ── manifest ─────────────────────────────────────────────────────────────────
 suite "manifest"
 M="$H/.aether/manifest"
-assert_contains "$(cat "$M")" "version=1.0.0" "manifest records the version"
+assert_contains "$(cat "$M")" "version=$VER" "manifest records the version"
 assert_contains "$(cat "$M")" "repo=$REPO"    "manifest records the clone path"
 assert_contains "$(cat "$M")" "gates="        "manifest records the gates directory"
 

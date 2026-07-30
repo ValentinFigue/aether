@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 
 # Pre-1.0 locations. Kept only so migration and uninstall can find and clear
 # what an older install left behind; nothing writes here any more.

@@ -7,7 +7,7 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
-## [Unreleased]
+## [1.3.0] — 2026-07-30
 
 ### Added
 

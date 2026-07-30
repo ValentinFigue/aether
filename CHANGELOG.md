@@ -38,6 +38,12 @@ number. Their individual histories are preserved under
 
 ### Fixed
 
+- **`aether trust` showed no commands at all on a monorepo.** The preview read only
+  `[project]`, so a repo whose commands all live in areas authorised thirteen of them
+  while displaying none — turning the preview into a formality, which is the one thing
+  it exists to prevent. It now walks every area, and reads the keys straight from the
+  file rather than through the trust-gated resolver, which during a preview returns
+  almost nothing by definition. Found by running it on a real repo, not by a test.
 - **A path section bypassed the trust gate entirely.** The check was
   `[ "$section" = project ]`, an equality test, so `[project:web]` returned its
   commands from an untrusted repo. Harmless only while nothing read them — and

@@ -62,6 +62,27 @@ assert_contains "$out" "Review .aether/config" "…telling you to review it firs
 [ -f "$P2/PWNED" ] && fail "check ran nothing while untrusted" "the command executed" \
                    || pass "check ran nothing while untrusted"
 
+# `aether trust` must show what you are consenting to — from every area. Reading only
+# [project] showed nothing at all on a monorepo whose commands all live in areas,
+# which turns the preview into a formality: the one thing it exists to prevent.
+suite "the trust preview covers every area"
+H3=$(mk); P3=$(mk); mkdir -p "$H3/.aether" "$P3/.aether" "$P3/web" "$P3/backend"
+cat > "$P3/.aether/config" <<'EOF'
+[project:web]
+lint: bun run lint-ci
+typecheck: bun run tsc
+
+[project:backend]
+test: uv run pytest
+check.lockfile: uv lock --check
+EOF
+out=$(at "$H3" "$P3" trust)
+assert_contains "$out" "Commands the critics would run" "the preview lists commands"
+for c in "web/lint" "web/typecheck" "backend/test" "backend/check.lockfile"; do
+  assert_contains "$out" "$c" "…including $c"
+done
+assert_contains "$out" "bun run tsc" "…with the command itself, not just the key"
+
 # ── 2. the regression guard ──────────────────────────────────────────────────
 # The entire safety argument is that a repo with no path sections is unaffected.
 suite "a repo with no path areas is unchanged"

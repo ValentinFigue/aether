@@ -2351,14 +2351,31 @@ _trust_forget() {
 # What the user is consenting to, shown before they consent to it. Anything else
 # would make `aether trust` a formality.
 _trust_preview() {
-  local any=0 v k
+  local any=0 v k sec
   if [ -f .aether/config ]; then
-    for k in test lint format typecheck build coverage; do
-      v=$(aether_cfg_read .aether/config project "$k")
-      [ -n "$v" ] || continue
-      [ "$any" -eq 0 ] && { printf '\n  Commands the critics would run:\n'; any=1; }
-      printf '    %-11s %s\n' "$k" "$v"
-    done
+    # Every area, not just the root. In a monorepo all the commands live in
+    # [project:<path>] sections, so reading only [project] showed nothing at all
+    # while authorising a dozen — which turns the preview into a formality, the
+    # exact thing it exists to prevent.
+    while IFS= read -r sec; do
+      [ -n "$sec" ] || continue
+      # Keys come straight from the file, not from _check_keys — that resolves
+      # through the trust gate, and during a preview the project is untrusted by
+      # definition, so it would show almost nothing. Showing you the file is the point.
+      while IFS= read -r k; do
+        [ -n "$k" ] || continue
+        _cfg_is_command "$k" || continue
+        v=$(aether_cfg_read .aether/config "$sec" "$k")
+        [ -n "$v" ] || continue
+        [ "$any" -eq 0 ] && { printf '\n  Commands the critics would run:\n'; any=1; }
+        if [ "$sec" = project ]; then printf '    %-24s %s\n' "$k" "$v"
+        else printf '    %-24s %s\n' "${sec#project:}/$k" "$v"; fi
+      done <<EOTK
+$(aether_cfg_keys .aether/config | awk -F'|' -v s="$sec" '$1 == s { print $2 }')
+EOTK
+    done <<EOTS
+$(_project_areas)
+EOTS
   fi
   if [ -f .aether/rules.md ]; then
     printf '\n  Prose that would reach a critic (.aether/rules.md, %s line(s)):\n' \

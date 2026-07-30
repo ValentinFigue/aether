@@ -7,6 +7,21 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
+## [1.3.1] — 2026-07-30
+
+### Fixed
+
+- **Folding a nested install into an area left its trust entry behind.** The
+  subfolder may have been trusted in its own right, and after the fold its config no
+  longer exists — so the entry could never match again and `aether doctor` reported it
+  as `changed` for ever. A permanent spurious warning in the one tool whose job is
+  signalling teaches people to ignore it, which is the failure mode the doctor exists
+  to prevent. `aether migrate` now drops the entry, and `_trust_forget_path` exists so
+  forgetting a project is not limited to the current directory.
+
+  Found by running `aether doctor` on a machine right after the 1.3.0 migration, not
+  by a test — which is why there is now a test, verified to fail against 1.3.0.
+
 ## [1.3.0] — 2026-07-30
 
 ### Added

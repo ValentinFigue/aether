@@ -66,6 +66,13 @@ number. Their individual histories are preserved under
   indefinitely. It writes commands but never runs them, and says so.
 - `aether rules` — prints the prose the critics will read, global then project,
   with its own trust state stated in the output.
+- **`tests/acceptance.sh`** — end-to-end checks against a throwaway HOME, for what
+  a unit test cannot reach: a path containing spaces, nine hostile hook inputs
+  (none may exit 2 or write to stderr), `--dry-run` leaving the home directory
+  byte-identical with bonsai included, four consecutive installs producing
+  identical state, upgrading from the last tag with no dangling hooks, and the
+  hook's per-tool-call cost measured against that tag rather than an absolute
+  budget. `--full` additionally builds bonsai and handshakes both MCP servers.
 - `tests/test_config.sh` — 70 assertions on per-key merge, schema completeness,
   `doctor`, comment-preserving writes, pre-migration fallback, and migration
   including its idempotence.

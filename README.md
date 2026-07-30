@@ -849,10 +849,27 @@ Run without `--suite` (as above) and a plugin registers its own `PreToolUse` hoo
 
 ## Tests
 
+Two layers. The unit suite asserts behaviour; the acceptance script exercises the
+things that only appear in a real install.
+
 ```bash
-bash tests/run.sh              # everything
-bash tests/run.sh gates        # just the gate tests
+bash tests/run.sh                  # 420 assertions, ~3 min
+bash tests/run.sh gates            # one file
+bash tests/run.sh config           # the config, trust and migration tests
+
+bash tests/acceptance.sh           # end to end against a throwaway HOME, ~4 min
+bash tests/acceptance.sh --full     # also build bonsai and handshake its MCP servers
+bash tests/acceptance.sh --perf-only  # just what the hook costs per tool call
 ```
+
+`acceptance.sh` covers what a unit test cannot: installing into a path with
+spaces, nine hostile hook inputs (none may exit 2, which would block the tool
+call, and none may write to stderr), `--dry-run` leaving the home directory
+byte-identical with bonsai included, four consecutive installs producing identical
+state, upgrading from the last release with no dangling hooks, and the per-tool-call
+cost of the hook measured **against that release** rather than an absolute budget,
+so a loaded machine does not produce a false alarm. It never touches your real
+`$HOME`.
 
 Plain bash and python3, no packages to install. The suite covers dual-mode gate equivalence (each gate behaves identically standalone and under the dispatcher), bypass markers, fail-open on malformed input, install idempotence, migration from a standalone install, and uninstall.
 

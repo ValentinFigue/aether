@@ -593,7 +593,7 @@ want.
 
 ```
 $ aether status
-aether v1.1.0
+aether v1.2.0
 
   bonsai       enabled  MCP: bonsai-py bonsai-ts
   whetstone    enabled
@@ -604,7 +604,7 @@ aether v1.1.0
   Suite hook: enforce-suite.sh registered (global)
   Gates:      4 loaded from /Users/you/.aether/hooks/gates
   Clone:      /Users/you/Code/aether
-  Installed version: 1.1.0
+  Installed version: 1.2.0
 ```
 
 ### `aether doctor`

@@ -7,64 +7,7 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
-## [Unreleased]
-
-### Fixed
-
-- **The documentation said aether blocks things. It does not.** A `PreToolUse` hook can
-  stop a tool call only by exiting 2; every path in `enforce-suite.sh` exits 0 or 1, and
-  `tests/acceptance.sh` fails the build if any payload makes it exit 2 — because one
-  corrupt gate file would otherwise lock you out of every command you type. Six places
-  across the README, BYPASS.md, temper's README and temper's own header comment promised
-  that temper "blocks" a push or is a "hard gate". They now say what happens: temper's
-  unreviewed-push and critical-path-commit verdicts are *exempt from the nudge budget* —
-  they print in full, alone, and suppress every other plugin — and the command still
-  runs. An opt-in strict mode that would make those two exit 2 is on the roadmap, with
-  an honest account of what it would and would not buy.
-
-- **Two config examples could not match anything.** `critical_paths` is pipe-separated,
-  but the README's example was space-separated and temper's README's was
-  comma-separated, so each parsed to a single pattern matching no path. Copying either
-  silently disabled the critical-path check.
-
-- **`--suite` was documented but never existed.** The README described running an
-  installer with and without a `--suite` flag. `cmd_install` rejects unrecognised
-  options, `_engine_install` has one call site and hardcodes suite mode, and no install
-  path ever registers a per-plugin `PreToolUse` hook. The section now describes what a
-  single-plugin install actually does.
-
-- **Four plugin READMEs documented the pre-1.1 configuration system** — `temper.config`,
-  `~/.claude/cairn.config`, `whetstone.config`, `whetstone.config.md` — three releases
-  after one sectioned `.aether/config` and `rules.md` replaced them. Those files are
-  still read as a migration fallback, so following the old instructions half-worked with
-  nothing reporting an error. Each now documents the current form and keeps a one-line
-  pointer to `aether migrate`.
-
-- **Three plugin READMEs documented `<plugin> config set` and `config reset`.** The
-  plugin shim's `config` case is hardcoded to `show`, so `temper config set
-  auto_nudge_lines=300` prints the config and changes nothing. They now show
-  `aether config set <section>.<key> <value>`.
-
-- Stale in the README: the `PreToolUse` matcher (missing `ExitPlanMode` since 1.4.0),
-  the gate diagram (no `ExitPlanMode` branch), the assertion count (473 → 710), where
-  `/critique-plan` writes its findings, and a `Co-Authored-By` trailer example.
-
-### Changed
-
-- **The roadmap is reordered against its own binding constraint**, and the shipped
-  `aether check` item is gone — it landed in 1.3.0 and a skimmer would conclude the
-  flagship was unbuilt. Distribution moves near the top, since at zero stars discovery
-  is the constraint rather than readiness. Three items added: *Five people, one week*,
-  *Strict mode*, and *One trigger surface* — the last recording that whetstone, temper
-  and cairn needed a lifecycle-ordered budget to stop talking over each other, which is
-  evidence they express one idea through three of everything.
-
-- The README leads with the receipts (test counts, hostile-payload coverage, this repo's
-  own `critical_paths` covering `hooks/` and `bin/aether`) instead of scattering them,
-  and signposts the config layer, which was useful with zero gates installed and started
-  at line 340 of 878.
-
-## [Unreleased]
+## [1.6.0] — 2026-07-31
 
 ### Added
 
@@ -108,6 +51,19 @@ number. Their individual histories are preserved under
 
 ### Changed
 
+- **The roadmap is reordered against its own binding constraint**, and the shipped
+  `aether check` item is gone — it landed in 1.3.0 and a skimmer would conclude the
+  flagship was unbuilt. Distribution moves near the top, since at zero stars discovery
+  is the constraint rather than readiness. Three items added: *Five people, one week*,
+  *Strict mode*, and *One trigger surface* — the last recording that whetstone, temper
+  and cairn needed a lifecycle-ordered budget to stop talking over each other, which is
+  evidence they express one idea through three of everything.
+
+- The README leads with the receipts (test counts, hostile-payload coverage, this repo's
+  own `critical_paths` covering `hooks/` and `bin/aether`) instead of scattering them,
+  and signposts the config layer, which was useful with zero gates installed and started
+  at line 340 of 878.
+
 - **The Documentation critic runs by default.** `[temper] critics` becomes
   `correctness, design, risk, coverage, docs`. It asks the question no script can: this
   diff changed a behaviour, so is every sentence describing that behaviour still true?
@@ -116,6 +72,44 @@ number. Their individual histories are preserved under
   keeps exactly what they set, since resolution is per key.
 
 ### Fixed
+
+- **The documentation said aether blocks things. It does not.** A `PreToolUse` hook can
+  stop a tool call only by exiting 2; every path in `enforce-suite.sh` exits 0 or 1, and
+  `tests/acceptance.sh` fails the build if any payload makes it exit 2 — because one
+  corrupt gate file would otherwise lock you out of every command you type. Six places
+  across the README, BYPASS.md, temper's README and temper's own header comment promised
+  that temper "blocks" a push or is a "hard gate". They now say what happens: temper's
+  unreviewed-push and critical-path-commit verdicts are *exempt from the nudge budget* —
+  they print in full, alone, and suppress every other plugin — and the command still
+  runs. An opt-in strict mode that would make those two exit 2 is on the roadmap, with
+  an honest account of what it would and would not buy.
+
+- **Two config examples could not match anything.** `critical_paths` is pipe-separated,
+  but the README's example was space-separated and temper's README's was
+  comma-separated, so each parsed to a single pattern matching no path. Copying either
+  silently disabled the critical-path check.
+
+- **`--suite` was documented but never existed.** The README described running an
+  installer with and without a `--suite` flag. `cmd_install` rejects unrecognised
+  options, `_engine_install` has one call site and hardcodes suite mode, and no install
+  path ever registers a per-plugin `PreToolUse` hook. The section now describes what a
+  single-plugin install actually does.
+
+- **Four plugin READMEs documented the pre-1.1 configuration system** — `temper.config`,
+  `~/.claude/cairn.config`, `whetstone.config`, `whetstone.config.md` — three releases
+  after one sectioned `.aether/config` and `rules.md` replaced them. Those files are
+  still read as a migration fallback, so following the old instructions half-worked with
+  nothing reporting an error. Each now documents the current form and keeps a one-line
+  pointer to `aether migrate`.
+
+- **Three plugin READMEs documented `<plugin> config set` and `config reset`.** The
+  plugin shim's `config` case is hardcoded to `show`, so `temper config set
+  auto_nudge_lines=300` prints the config and changes nothing. They now show
+  `aether config set <section>.<key> <value>`.
+
+- Stale in the README: the `PreToolUse` matcher (missing `ExitPlanMode` since 1.4.0),
+  the gate diagram (no `ExitPlanMode` branch), the assertion count (473 → 710), where
+  `/critique-plan` writes its findings, and a `Co-Authored-By` trailer example.
 
 - **`<plugin> config set` printed the config and changed nothing.** The plugin shim's
   `config` case forwarded everything to `cmd_config show` as trailing arguments, which

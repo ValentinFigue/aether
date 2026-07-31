@@ -147,9 +147,18 @@ assert_contains "$OUT" "Whetstone" "the earliest stage in the lifecycle prints"
 assert_contains "$OUT" "also had notes" "the rest are one line, not three nudges"
 
 suite "a block is never budgeted"
-run_hook Bash 'git push origin main'; e=$?
-assert_exit 1 "$e" "an unreviewed push still exits non-zero"
-assert_contains "$OUT" "temper: about to push" "the block prints in full"
+# A critical-path commit, not a push. Since `aether review` landed, the push verdict is
+# conditional on evidence: with no review record the answer is `unknown`, which is
+# advisory and therefore budgeted like any other nudge. The critical-path commit is
+# decidable from the staged diff alone, so it is still a block and is the right subject
+# for a test about blocks.
+# Clear the large diff the budget suite staged: temper checks size before critical
+# path, so commit_large (a nudge) would win and there would be no block to test.
+git reset -q >/dev/null 2>&1; rm -f big.txt
+printf 'secret\n' > auth.py; git add auth.py >/dev/null 2>&1
+run_hook Bash 'git commit -m x'; e=$?
+assert_exit 1 "$e" "a critical-path commit still exits non-zero"
+assert_contains "$OUT" "temper: critical path" "the block prints in full"
 case "$OUT" in
   *"also had notes"*) fail "a block prints alone" "the summary line appeared beside a block" ;;
   *) pass "a block prints alone" ;;
@@ -162,6 +171,7 @@ esac
 # only way to find them.
 assert_contains "$("$REPO/bin/aether" status --notes 2>&1)" "Whetstone" \
   "…but recorded, since nothing announced them"
+git reset -q >/dev/null 2>&1; rm -f auth.py
 
 # ── 4. the notes file belongs to the project ─────────────────────────────────
 # Third time this rule has had to be rediscovered: the v1.1.0 nudge sentinel and

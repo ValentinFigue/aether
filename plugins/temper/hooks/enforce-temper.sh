@@ -67,6 +67,23 @@ _temper_cfg() {
 # position 0 only succeeds when the first character is a word character.
 _tp_word_end='([^[:alnum:]_]|$)'
 
+# reviewed | no | unknown, via the CLI so there is one implementation of the answer.
+# Falls back to `no` only when the CLI is absent entirely — an install too old to know
+# about reviews behaves exactly as it did before.
+_temper_review_state() {
+  local a out=""
+  for a in "$HOME/.local/bin/aether" aether; do
+    command -v "$a" >/dev/null 2>&1 && { out=$("$a" review status --raw 2>/dev/null); break; }
+  done
+  # Validate rather than trust. An install predating `aether review` prints its usage
+  # error here, and an unrecognised string must not be read as evidence of anything —
+  # it lands on `unknown`, which nudges exactly as this gate did before reviews existed.
+  case "$out" in
+    reviewed|no|unknown) printf '%s' "$out" ;;
+    *)                   printf 'unknown' ;;
+  esac
+}
+
 # Sum of insertions and deletions in the staged diff — python's
 # re.findall(r'(\d+) (?:insertion|deletion)', shortstat), summed.
 _temper_staged_lines() {
@@ -116,7 +133,15 @@ gate_temper() {
   if [[ $cmd =~ ^git[[:space:]]+push$_tp_word_end ]]; then
     # Allow dry-run passes through
     [ -n "${AETHER_IS_DRY_RUN:-}" ] && return 0
-    result=push
+    # Consult the review record. This used to fire unconditionally, which is tolerable
+    # as a nudge and useless as anything stronger — a verdict that is always the same
+    # carries no information. `unknown` (no sha256 tool, no .aether/, no base branch)
+    # is not a soft no: the question could not be answered, so nothing is claimed.
+    case "$(_temper_review_state)" in
+      reviewed) return 0 ;;
+      unknown)  result=push_unknown ;;
+      *)        result=push ;;
+    esac
 
   # ── git commit ─────────────────────────────────────────────────────────────
   elif [[ $cmd =~ ^git[[:space:]]+commit$_tp_word_end ]]; then
@@ -176,6 +201,14 @@ gate_temper() {
   fi
 
   case "$result" in
+    push_unknown)
+      cat <<'MSG'
+temper: about to push — have you run /critique-diff to review your changes?
+  Whether this branch has been reviewed could not be determined here.
+  Append  # temper:skip  (or  # suite:skip) to your push command to bypass this check.
+MSG
+      return 1   # advisory: nothing is known, so nothing is escalated
+      ;;
     push)
       cat <<'MSG'
 temper: about to push — have you run /critique-diff to review your changes?

@@ -30,6 +30,7 @@ Usage:
                                         per monorepo area
   aether project for <file...>          Which areas those files belong to
   aether plan [status|path|hash]        The plan the gate sees, and its critique state
+  aether review [record|status]         Has what you are about to push been reviewed?
   aether doctor [--fix] [--deep]        Check the install, config and trust
   aether docs                           Check the docs against the code and config
                                         against what the manifests declare
@@ -1914,17 +1915,150 @@ EOALL
 # Files changed against the base branch, for the default invocation. Reuses cairn's
 # base resolution; on a detached HEAD or a repo with no base there is nothing to diff
 # against, so the caller falls back to --all and says so.
-_check_changed_files() {
-  local base; base=$(_cfg_get cairn pr.base)
+# The base branch, resolved once. cairn's pr.base wins; otherwise ask the remote what
+# its HEAD is, and fall back to the two names that cover almost everything.
+_base_ref() {
+  local base b; base=$(_cfg_get cairn pr.base)
   [ -n "$base" ] && [ "$base" != auto ] || {
     base=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
     [ -n "$base" ] || { for b in main master; do
         git rev-parse --verify "origin/$b" >/dev/null 2>&1 && { base="$b"; break; }; done; }
   }
-  [ -n "$base" ] || return 0
+  [ -n "$base" ] || return 1
+  printf '%s' "$base"
+}
+
+_check_changed_files() {
+  local base; base=$(_base_ref) || return 0
   { git diff --name-only "origin/$base"...HEAD 2>/dev/null
     git diff --name-only 2>/dev/null
     git diff --name-only --staged 2>/dev/null; } | sort -u
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# REVIEW
+#
+# "Has what I am about to push been reviewed?" — a question nothing could answer
+# before this. temper's push verdict fires unconditionally, which is tolerable as a
+# nudge and useless as a gate: a check that always says no teaches people to ignore it.
+#
+# **Content, not commits.** Recording the SHA at review time breaks on the most ordinary
+# flow there is — review the staged diff, commit it, and the SHA has moved while the
+# content has not. Hashing the diff text survives commit, amend and rebase, and it is
+# the thing you actually meant to ask about.
+# ═══════════════════════════════════════════════════════════════════════════
+
+_review_file() { [ -d .aether ] || return 1; printf '.aether/out/.reviewed'; }
+
+# The diff text for a scope, on stdout.
+_review_diff() {
+  case "${1:-staged}" in
+    staged) git diff --staged 2>/dev/null ;;
+    all)    git diff HEAD 2>/dev/null ;;
+    *)      git diff "$1"...HEAD 2>/dev/null ;;
+  esac
+}
+
+# What is about to be pushed: the upstream if the branch has one, else the base branch.
+_review_push_range() {
+  local up base
+  up=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null)
+  [ -n "$up" ] && { printf '%s..HEAD' "$up"; return 0; }
+  base=$(_base_ref) || return 1
+  git rev-parse --verify "origin/$base" >/dev/null 2>&1 || return 1
+  printf 'origin/%s..HEAD' "$base"
+}
+
+cmd_review() {
+  local sub="${1:-status}"; shift 2>/dev/null || true
+  case "$sub" in
+    record)  _review_record "$@" ;;
+    status)  _review_status "$@" ;;
+    *) printf 'Unknown: aether review %s\n\nTry: record, status\n' "$sub"; return 1 ;;
+  esac
+}
+
+_review_record() {
+  local scope=staged a
+  for a in "$@"; do
+    case "$a" in --scope=*) scope="${a#--scope=}" ;;
+                 -*) printf 'Unknown option: %s\n' "$a"; return 1 ;; esac
+  done
+  git rev-parse --git-dir >/dev/null 2>&1 || { printf 'Not a git repository.\n'; return 1; }
+
+  local f; f=$(_review_file) || {
+    printf 'No .aether/ in this project, so there is nowhere to record a review.\n'
+    printf '  Reviews are project state; `aether config set` or trellis creates the directory.\n'
+    return 0; }
+
+  local h; h=$(_review_diff "$scope" | aether_sha)
+  # aether_sha prints nothing when no sha256 tool exists. A record with an empty hash
+  # would match every other empty one, so record nothing and say why — `review status`
+  # reports `unknown` on the same machine and nothing escalates on unknown.
+  [ -n "$h" ] || {
+    printf 'No sha256 tool available (shasum, sha256sum or openssl), so nothing was recorded.\n'
+    return 0; }
+
+  local empty; empty=$(printf '' | aether_sha)
+  [ "$h" = "$empty" ] && { printf 'Nothing in scope `%s` to review.\n' "$scope"; return 0; }
+
+  mkdir -p "$(dirname "$f")" 2>/dev/null || return 0
+  printf '%s\t%s\t%s\t%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$scope" "$(git rev-parse --short HEAD 2>/dev/null)" "$h" >> "$f"
+  printf '  ✓ recorded a review of the %s diff (%s)\n' "$scope" "${h%"${h#???????}"}"
+}
+
+# reviewed | no | unknown, and why. `unknown` is not a soft `no`: it means the question
+# could not be answered, and nothing downstream may escalate on it.
+_review_status() {
+  local raw=false a
+  for a in "$@"; do case "$a" in --raw) raw=true ;;
+    -*) printf 'Unknown option: %s\n' "$a"; return 1 ;; esac; done
+
+  _rv() { $raw && printf '%s\n' "$1" || printf '%s\n' "$2"; }
+
+  git rev-parse --git-dir >/dev/null 2>&1 || { _rv unknown 'unknown — not a git repository.'; return 0; }
+  [ -n "$(printf '' | aether_sha)" ] || {
+    _rv unknown 'unknown — no sha256 tool available, so reviews cannot be hashed.'; return 0; }
+
+  local f; f=$(_review_file) || { _rv unknown 'unknown — no .aether/ in this project.'; return 0; }
+
+  local range; range=$(_review_push_range) || {
+    _rv unknown 'unknown — no upstream or base branch to compare against.'; return 0; }
+
+  # "Nothing to push" comes before "nothing recorded": a branch level with its upstream
+  # has no unreviewed work by definition, and answering `no` there would be a check that
+  # complains on a clean tree — the fastest way to be ignored.
+  local n; n=$(git rev-list --count "$range" 2>/dev/null) || n=0
+  [ "${n:-0}" -gt 0 ] || { _rv reviewed 'reviewed — nothing to push.'; return 0; }
+
+  [ -s "$f" ] || { _rv no 'no — nothing has been recorded as reviewed here.
+      fix: /critique-diff'; return 0; }
+
+  local hashes; hashes=$(cut -f4 "$f")
+  local whole; whole=$(git diff "${range%%..*}...HEAD" 2>/dev/null | aether_sha)
+
+  # Reviewed if the whole range was reviewed in one go…
+  if printf '%s\n' "$hashes" | grep -qxF "$whole"; then
+    _rv reviewed "reviewed — the diff being pushed matches a recorded review."
+    return 0
+  fi
+  # …or if every commit in it was. That is the two-reviews-two-commits-one-push case,
+  # which is the ordinary way of working and would otherwise read as unreviewed.
+  local c uncovered=0
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    printf '%s\n' "$hashes" | grep -qxF "$(git show --format= "$c" 2>/dev/null | aether_sha)" \
+      || uncovered=$((uncovered + 1))
+  done <<EOF
+$(git rev-list --no-merges "$range" 2>/dev/null)
+EOF
+
+  if [ "$uncovered" -eq 0 ]; then
+    _rv reviewed 'reviewed — every commit being pushed matches a recorded review.'
+  else
+    _rv no "$(printf 'no — %s of %s commit(s) being pushed have not been reviewed.\n      fix: /critique-diff' "$uncovered" "$n")"
+  fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3410,6 +3544,7 @@ case "$COMMAND" in
   docs)      cmd_docs "$@" ;;
   check)     cmd_check "$@" ;;
   plan)      cmd_plan "$@" ;;
+  review)    cmd_review "$@" ;;
   project)   cmd_project "$@" ;;
   trust)     cmd_trust "$@" ;;
   rules)     aether_rules ;;

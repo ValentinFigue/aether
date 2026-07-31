@@ -282,6 +282,18 @@ After the report:
 ## Persist output
 
 After printing the report, determine the target directory:
+Then **record that the review happened**, so anything downstream can tell reviewed work
+from unreviewed:
+
+```bash
+aether review record --scope=staged     # or --scope=all, or the ref you reviewed
+```
+
+Run it with the scope you actually reviewed. It hashes the diff content rather than the
+commit, so the record survives committing, amending and rebasing — and
+`aether review status` can then answer whether what is about to be pushed has been
+reviewed, which nothing could answer before. Skip it only if you reviewed nothing.
+
 - If the project has a `.aether/` directory → write to `.aether/out/TEMPER.md`
 - Otherwise → write to `~/.aether/out/TEMPER.md`
 

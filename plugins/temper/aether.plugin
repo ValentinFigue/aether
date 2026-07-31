@@ -61,6 +61,11 @@ config.auto_nudge_files.doc: Same, for number of files changed
 config.auto_nudge_files.used_by: enforce-temper.sh
 
 config.critical_paths.default: *auth*|*permission*|*token*|migrations/|*alembic*|\.sql|*schema*|*secret*|*credential*|\.env
+config.strict.default: off
+config.strict.type: enum:off,blocks
+config.strict.doc: Escalate temper's blocking verdicts to a permission prompt the agent cannot answer — read from ~/.aether/config only
+config.strict.used_by: enforce-suite.sh
+
 config.critical_paths.type: patternlist
 config.critical_paths.doc: Pipe-separated patterns that always trigger a review nudge, whatever the diff size
 config.critical_paths.used_by: enforce-temper.sh

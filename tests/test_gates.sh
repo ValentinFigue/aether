@@ -130,7 +130,10 @@ assert_dual_mode "$TEMPER" gate_temper Bash 'git commit -m x'        "small comm
 # dispatcher's budget may hold back.
 suite "gate severity"
 printf 'x\n' > auth.py; git add auth.py
-assert_severity "$TEMPER" gate_temper Bash 'git push origin main' 2 "temper: push is a block"
+# Without a review record — no .aether/ in this fixture — the state is `unknown`, and
+# "we cannot tell" is not a block. It nudges, exactly as this gate did before reviews
+# existed, which is what keeps old installs behaving as they always did.
+assert_severity "$TEMPER" gate_temper Bash 'git push origin main' 1 "temper: push with no evidence is a nudge"
 assert_severity "$TEMPER" gate_temper Bash 'git commit -m x'      2 "temper: critical-path commit is a block"
 git reset -q; rm -f auth.py
 : > many.txt; for i in $(seq 1 250); do printf 'l\n' >> many.txt; done; git add many.txt

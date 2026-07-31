@@ -118,7 +118,7 @@ config.ticket.used_by: /draft-commit /draft-pr /critique-pr
 
 config.trailers.section: git
 config.trailers.default:
-config.trailers.doc: Trailers every commit message must carry, e.g. Co-Authored-By
+config.trailers.doc: Trailers every commit message must carry, e.g. Signed-off-by
 config.trailers.used_by: /draft-commit
 
 config.base.section: git

@@ -1435,6 +1435,30 @@ _cfg_origin() {
   printf 'default||'
 }
 
+# _plugin_section_for <plugin> <key> -> the [section] that plugin declares <key> under
+#
+# Not always the plugin's own section: cairn declares `trailers` under [git], because a
+# house rule about commit text is not a cairn setting. The schema already records that
+# (`config.<key>.section:`), so this is a lookup rather than a second place to encode it.
+_plugin_section_for() {
+  # No `exit` in the awk — see the note under _schema_plugin_for. Exiting early closes
+  # the pipe while _schema_all is still writing, and bash on Linux reports the EPIPE as
+  # `printf: write error: Broken pipe` into whatever the caller captured.
+  local s
+  s=$(_schema_all | awk -F'|' -v p="$1" -v k="$2" '$3 == p && $2 == k && !f { print $1; f = 1 }')
+  [ -n "$s" ] && { printf '%s' "$s"; return 0; }
+  # Unknown key: fall back to the plugin's own section so `cmd_config set` reaches its
+  # "no plugin declares this" warning instead of us inventing a section here.
+  s=$(_mf "$1" config_section); printf '%s' "${s:-$1}"
+}
+
+# _is_known_section <name> -> 0 when some manifest declares keys under it
+# The `exit` here is in END, after all input is read, so it cannot close the pipe early.
+_is_known_section() {
+  [ -n "$1" ] || return 1
+  _schema_all | awk -F'|' -v s="$1" '$1 == s { found = 1 } END { exit !found }'
+}
+
 _split_key() {           # temper.auto_nudge_lines -> "temper auto_nudge_lines"
   case "$1" in
     *.*) printf '%s %s' "${1%%.*}" "${1#*.}" ;;
@@ -2976,7 +3000,41 @@ case "$COMMAND" in
         # `aether uninstall` and the three plugin updates before it.
         update)    cmd_install "$_PLUGIN" "$(_manifest_get scope)" "$@" ;;
         hook)      cmd_hook "$@" "$_PLUGIN" ;;
-        config)    cmd_config show "$(_mf "$_PLUGIN" config_section || printf '%s' "$_PLUGIN")" "$@" ;;
+        # `temper config set auto_nudge_lines 300` used to reach `cmd_config show` with
+        # the rest as trailing arguments, which ignores them — so it printed the config
+        # and exited 0 having changed nothing. Forward the subcommand instead, and
+        # namespace the key, since the shim exists precisely so you do not have to know
+        # which section a key lives in.
+        config)
+          _csub="${1:-show}"
+          case "$_csub" in
+            show|'')
+              shift 2>/dev/null || true
+              cmd_config show "$(_mf "$_PLUGIN" config_section || printf '%s' "$_PLUGIN")" "$@" ;;
+            doctor|path|edit)
+              # Not section-scoped — these answer for the whole config file.
+              shift; cmd_config "$_csub" "$@" ;;
+            get|explain|set|unset)
+              shift
+              _ckey="${1:-}"
+              if [ -z "$_ckey" ]; then
+                printf 'Usage: %s config %s <key> %s\n' "$_PLUGIN" "$_csub" \
+                  "$([ "$_csub" = set ] && printf '<value> ' )[global]"
+                exit 1
+              fi
+              shift
+              # A key given fully qualified is passed through: prefixing again would
+              # write temper.temper.auto_nudge_lines.
+              if _is_known_section "$(_split_key "$_ckey" | cut -d' ' -f1)"; then
+                cmd_config "$_csub" "$_ckey" "$@"
+              else
+                cmd_config "$_csub" "$(_plugin_section_for "$_PLUGIN" "$_ckey").$_ckey" "$@"
+              fi ;;
+            *)
+              printf 'Unknown %s config subcommand: %s\n\n' "$_PLUGIN" "$_csub"
+              printf 'Try: show, get, set, unset, explain, doctor, path, edit\n'
+              exit 1 ;;
+          esac ;;
         help|--help|-h) usage ;;
         *) printf 'Unknown %s subcommand: %s\n' "$_PLUGIN" "$sub"; exit 1 ;;
       esac

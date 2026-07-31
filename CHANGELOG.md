@@ -64,6 +64,32 @@ number. Their individual histories are preserved under
   and signposts the config layer, which was useful with zero gates installed and started
   at line 340 of 878.
 
+## [Unreleased]
+
+### Fixed
+
+- **`<plugin> config set` printed the config and changed nothing.** The plugin shim's
+  `config` case forwarded everything to `cmd_config show` as trailing arguments, which
+  ignores them — so `temper config set auto_nudge_lines 300` exited 0 having set
+  nothing, and `cairn config reset local` did the same. That is the *reports success,
+  did nothing* failure mode, in the CLI of a tool built to catch it.
+
+  The shim now forwards the subcommand and resolves the key's section from the manifest
+  schema, which is the point of having a shim at all:
+
+  ```bash
+  temper config set auto_nudge_lines 300   # → [temper] auto_nudge_lines
+  cairn  config set trailers Signed-off-by # → [git] trailers — cairn declares it there
+  cairn  config set pr.base develop        # → [cairn] pr.base, dots intact
+  ```
+
+  `get`, `unset` and `explain` are namespaced the same way; `doctor`, `path` and `edit`
+  pass through unchanged; an already-qualified key is not prefixed twice; and an
+  unrecognised subcommand now exits 1 naming the real ones instead of silently showing.
+
+- The `trailers` doc string suggested `Co-Authored-By`, and that text is written into
+  every config file the tool generates. It now suggests `Signed-off-by`.
+
 ## [1.5.0] — 2026-07-31
 
 ### Changed

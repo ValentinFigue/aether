@@ -719,6 +719,15 @@ Every plugin answers to its own name — `aether cairn status` — and the `cair
 `temper`, `whetstone` and `bonsai` binaries are 24-line shims that exec exactly
 that, so there is one implementation.
 
+A plugin's `config` subcommand takes the same verbs as `aether config` and resolves the
+section from the schema, so you do not have to know which one a key lives in — including
+the keys cairn declares under `[git]`:
+
+```
+cairn config set trailers Signed-off-by     ≡  aether config set git.trailers Signed-off-by
+temper config set auto_nudge_lines 300      ≡  aether config set temper.auto_nudge_lines 300
+```
+
 `enable`/`disable` writes `enabled: false` for the gate to read; `hook
 enable`/`disable` stops the gate being loaded. The soft mute is usually what you
 want.

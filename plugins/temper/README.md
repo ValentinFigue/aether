@@ -189,13 +189,21 @@ temper status                     Install state and resolved config
 temper enable  [local|global]     Enable temper
 temper disable [local|global]     Disable temper
 temper config                     Show the resolved [temper] section
+temper config set <key> <value>   Set a key, without naming the section
+temper config get|unset <key>     Read or remove one
 temper update                     Reinstall temper from the clone
 temper uninstall [global] [--claude-md]
 ```
 
 `temper` is a shim that execs `aether temper …`, so `aether temper status` is the same
-command. **Changing a value is `aether config set`**, not `temper config set` — the
-plugin shim's `config` only shows.
+command. `temper config set` resolves the section for you from the schema, which is the
+point of the shim:
+
+```bash
+temper config set auto_nudge_lines 300          # → [temper] auto_nudge_lines
+temper config set auto_nudge_lines 300 global   # → ~/.aether/config
+aether config set temper.auto_nudge_lines 300   # the explicit form, always available
+```
 
 ---
 

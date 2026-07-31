@@ -84,11 +84,12 @@ for the same string. They used to spell the whitespace three different ways.
 reasons, and the second is the stronger one:
 
 1. The agent writes the commands the hook inspects, so the agent can write the marker.
-2. **Nothing exits 2, so nothing is stopped.** A `PreToolUse` hook can only stop a tool
-   call by exiting 2. Every path in `enforce-suite.sh` exits 0 or 1, and
+2. **Nothing exits 2.** Every path in `enforce-suite.sh` exits 0 or 1, and
    `tests/acceptance.sh` fails the build if any payload makes it exit 2 — because a
    corrupt or half-written gate file would otherwise lock you out of every command you
-   type. Failing open is a deliberate trade, not an oversight.
+   type. Failing open is a deliberate trade, not an oversight. Strict mode does not change
+   it: escalation travels as a decision printed on **exit 0**, so breakage — which exits 2
+   — can neither be mistaken for a deliberate stop nor forge one.
 
 Nothing here is a permission boundary, and it is not trying to be — the suite exists to
 make the right thing the default when nobody is paying attention, not to stop someone
@@ -107,16 +108,31 @@ Two consequences worth stating plainly:
 - **The marker has to be hard to trip over by accident, not hard to type.** That is why
   it must be a trailing comment. A marker that fires on any substring is not more
   secure, only more surprising — it silences commits that merely mention it.
-- **Two verdicts are exempt from the nudge budget, which is not the same as blocking.**
-  temper's unreviewed-push and critical-path-commit messages print in full, alone, and
-  suppress every other nudge — the strongest signal the hook has. The command still
-  runs. A nudge you miss costs you a better commit message; one of these you miss is
-  unreviewed code on a shared branch, which is why they get the whole output and no
-  bypass marker is needed to explain them away.
+- **Two verdicts are exempt from the nudge budget.** temper's unreviewed-push and
+  critical-path-commit messages print in full, alone, and suppress every other nudge. A
+  nudge you miss costs you a better commit message; one of these you miss is unreviewed
+  code on a shared branch. The unreviewed-push verdict now also requires *evidence* —
+  `aether review status` — rather than firing on every push, because a verdict that is
+  always the same carries no information and gets ignored.
 
-An opt-in `strict` mode that lets those two exit 2 for real is on the roadmap. Even then
-it would raise the cost of a bypass rather than remove it — the agent could edit the
-config, deregister the hook, or route around the matcher.
+**Strict mode changes what those two do.** With `strict: blocks`, they stop being printed
+and become a permission prompt — and **the agent cannot answer that prompt.** You do. It
+is the one mechanism here that takes the decision away from the thing writing the command.
+
+```
+[temper]
+strict: off      # off | blocks — default off, read from ~/.aether/config only
+```
+
+Global-only on purpose: a project-level switch would sit in the tree the agent is editing,
+and the value of this is that turning it off is a write outside the work, which is
+conspicuous. It escalates rather than refuses, so approving the prompt *is* the bypass —
+no separate marker to learn.
+
+What it still does not do: the agent can edit `~/.aether/config`, deregister the hook, or
+route a command so the matcher misses it. Strict mode raises the cost of a bypass from
+*appending a comment* — invisible, deniable, one token — to *editing a file outside the
+repository*. A real change, and not a boundary.
 
 **If you need an actual gate, run it where the agent cannot edit it:** a pre-receive
 hook on the server, or a required CI check. That is the boundary; this file is not.

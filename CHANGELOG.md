@@ -7,6 +7,59 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
+## [Unreleased]
+
+### Added
+
+- **`aether review` — evidence that a review happened.** Nothing could answer "has what I
+  am about to push been reviewed?", which is why temper's push verdict fired on every
+  push: tolerable as a nudge, useless as anything stronger, because a verdict that is
+  always the same carries no information.
+
+  `/critique-diff` and `/critique-pr` now call `aether review record` when they finish.
+  It **hashes the content of the diff, not the commit**, which is the decision the whole
+  feature turns on — recording a SHA breaks on the most ordinary flow there is: review
+  the staged diff, commit it, and the SHA has moved while the content has not. Content
+  hashing survives committing, amending and rebasing.
+
+  ```
+  $ aether review status
+    no — 2 of 3 commit(s) being pushed have not been reviewed.
+        fix: /critique-diff
+  ```
+
+  Reviewed means the whole push diff matches a record, **or** every commit in it does —
+  the second case being two reviews across two commits and one push, which is the
+  ordinary way of working and would otherwise read as unreviewed.
+
+  A third state, `unknown`, covers a machine with no sha256 tool, a project with no
+  `.aether/`, and a branch with no base to compare against. **`unknown` never escalates
+  and never blocks.** Absence of evidence is not evidence, and a check nobody can satisfy
+  is the fastest way to get the whole thing switched off.
+
+- **Strict mode** — `[temper] strict: blocks` in `~/.aether/config`. temper's two
+  blocking verdicts stop being printed and become a **permission prompt the agent cannot
+  answer**. For a tool whose threat model is "the agent writes the command the hook
+  inspects", this is the first mechanism that puts the decision somewhere the agent
+  cannot reach. Approving the prompt is the bypass, so there is no new marker.
+
+  It escalates by printing `permissionDecision: ask` on **exit 0**, not by exiting 2.
+  That matters: exit 2 is exactly what bash returns for a syntax error, so a deliberate
+  block and a half-written file would be indistinguishable. A syntax error cannot print
+  valid JSON and exit 0, so breakage can neither be mistaken for a stop nor forge one.
+
+  Global-only, deliberately: a project-level switch would sit in the tree the agent is
+  editing, and the value of this is that turning it off is conspicuous. Default `off`,
+  and with it off the hook's behaviour is byte-identical to 1.6.0.
+
+### Changed
+
+- **temper's push verdict now requires evidence.** It consults `aether review status`
+  instead of firing unconditionally: silent when the branch has been reviewed, a block
+  when it demonstrably has not, and an advisory nudge when the question cannot be
+  answered. An install without the new CLI reads as `unknown` and behaves exactly as it
+  did before.
+
 ## [1.6.0] — 2026-07-31
 
 ### Added

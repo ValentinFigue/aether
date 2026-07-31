@@ -216,6 +216,37 @@ if [ -n "$_notes" ] && [ -n "$_suppressed" ]; then
   mkdir -p "$(dirname "$_notes")" 2>/dev/null && printf '%s' "$_suppressed" > "$_notes" 2>/dev/null
 fi
 
+# ── Strict mode ──────────────────────────────────────────────────────────────
+# A PreToolUse hook can stop a tool call two ways. Exit 2 is the blunt one, and it is
+# exactly what bash returns for a syntax error — a deliberate block and a half-written
+# file would be indistinguishable, which is why nothing here has ever used it.
+#
+# The other way is to exit 0 and print a decision. `ask` escalates to the human, and
+# **the agent cannot answer it** — the first mechanism in this suite that takes the
+# decision away from the thing writing the command. It needs no bypass marker either:
+# approving the prompt is the bypass. And breakage cannot forge it, because a syntax
+# error cannot print valid JSON and exit 0.
+#
+# Read from the global config only: a project-level switch would sit in the tree the
+# agent is editing, and the entire value of this is that switching it off is conspicuous.
+# aether_cfg_read reads the one file it is given, so naming the global file is what
+# makes this global-only — no resolution, no project override.
+if [ -n "$blocks" ] && \
+   [ "$(aether_cfg_read "$(aether_cfg_file global)" temper strict 2>/dev/null)" = blocks ]; then
+  _reason=$(printf '%s' "$blocks" | python3 -c 'import json,sys
+r = sys.stdin.read().strip()
+print(json.dumps({"hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "ask",
+    "permissionDecisionReason": r}}))' 2>/dev/null)
+  # Nothing else may reach stdout on this path or the JSON is corrupt. If python3 is
+  # somehow gone, degrade to today's plain text rather than emit something malformed.
+  if [ -n "$_reason" ]; then
+    printf '%s\n' "$_reason"
+    exit 0
+  fi
+fi
+
 if [ -n "$blocks" ]; then
   printf '%s' "$blocks"
   exit 1

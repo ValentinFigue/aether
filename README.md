@@ -40,9 +40,11 @@ unreviewed code and committing to a path you marked critical are the two verdict
 print in full and alone — nothing else shares the output with them — but they do not
 stop the command, and `# aether:skip` silences the rest for one call. A `PreToolUse`
 hook can only stop a tool call by exiting 2, and aether never does: one corrupt gate
-file would otherwise lock you out of every command you type. See
-[Bypass](#bypass) for the threat model, and the roadmap for the opt-in strict mode
-that would trade that safety for real teeth.
+file would otherwise lock you out of every command you type.
+
+**Unless you turn strict mode on**, in which case those two verdicts become a permission
+prompt — and the agent cannot answer it, you do. See [Strict mode](#strict-mode) and
+[Bypass](#bypass) for what that is and is not worth.
 
 ### Does it hold up
 
@@ -708,6 +710,7 @@ aether config path|edit [global]
 aether check [path...] [--all] [--raw]   Run this project's [project] commands
 aether project for <file...>             Which monorepo areas those files touch
 aether plan [status|path|hash]           The plan the gate sees, and its critique state
+aether review [record|status]            Has what you are about to push been reviewed?
 aether trust [status|list|forget|prune]
 aether rules                             The prose the critics will read
 aether migrate                           Move a pre-1.0 layout into ~/.aether/
@@ -836,6 +839,53 @@ non-zero on problems, so CI can use it too.
 
 `[project]` commands are ignored until you run `aether trust`; without it the first
 family cannot run, and `aether docs` says so rather than quietly checking less.
+
+---
+
+## Strict mode
+
+Everything above is advice: the hook prints, and the command runs. Strict mode changes
+that for temper's two strongest verdicts — an unreviewed push, and a commit touching a
+path you marked critical.
+
+```
+# ~/.aether/config
+[temper]
+strict: blocks        # off | blocks — default off
+```
+
+They stop being printed and become a **permission prompt the agent cannot answer.** You
+do. That is the point: for a tool whose threat model is "the agent writes the command the
+hook inspects", this is the first mechanism that takes the decision somewhere the agent
+cannot reach. Approving the prompt is the bypass, so there is no new marker to learn.
+
+**It runs on evidence, not on suspicion.** The push verdict used to fire on every push,
+which is tolerable as a nudge and useless as a prompt — a question with the same answer
+every time gets clicked through within a week. `/critique-diff` now records what it
+reviewed, and the verdict consults it:
+
+```
+$ aether review status
+  no — 2 of 3 commit(s) being pushed have not been reviewed.
+      fix: /critique-diff
+```
+
+The record hashes the **content** of the diff, not the commit, so it survives committing,
+amending and rebasing — the flows that would otherwise make it wrong immediately. A third
+state, `unknown`, covers a machine with no sha256 tool, a project with no `.aether/`, and
+a branch with no base to compare against. **`unknown` never escalates**: absence of
+evidence is not evidence, and a prompt nobody can satisfy is the fastest way to get this
+switched off.
+
+Three deliberate limits:
+
+- **Global-only.** A project-level switch would sit in the tree the agent is editing.
+  Turning it off should mean writing outside the work, where it is conspicuous.
+- **It escalates, it does not refuse.** `ask`, not `deny`.
+- **It is still not a boundary.** The agent can edit `~/.aether/config` or deregister the
+  hook. This raises the cost of a bypass from appending a comment to editing a file
+  outside the repository. For an actual boundary, use a pre-receive hook or a required CI
+  check — [BYPASS.md](BYPASS.md) says so at more length.
 
 ---
 

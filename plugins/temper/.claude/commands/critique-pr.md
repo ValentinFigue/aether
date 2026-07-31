@@ -177,3 +177,13 @@ has no `.aether/`), with the header:
 `# Review — PR #<n> <title> — <current date>`
 
 Appending, never overwriting, so the file accumulates a history across reviews.
+
+Then **record that the review happened**, against the range the PR actually covers:
+
+```bash
+aether review record --scope=<base>      # the PR's base branch, e.g. origin/main
+```
+
+It hashes the diff content rather than the commit, so the record survives a rebase or a
+force-push that changes SHAs without changing what the PR does. `aether review status`
+then knows this branch has been reviewed.

@@ -21,6 +21,15 @@ lint: git ls-files '*.sh' 'bin/*' 'plugins/*/bin/*' | xargs shellcheck --severit
 # bonsai is the only plugin with build output; this is the same script install runs.
 # It takes about a minute, which is why only /critique-pr uses it.
 build: bash plugins/bonsai/scripts/build.sh
+
+# A real CI check that fits no standard key — the same shape as the check.lockfile
+# example in the README, and the first time this repo has used the escape hatch it
+# advertises. /critique-diff and /critique-pr call `aether check`, so this puts the
+# documentation check in front of every review.
+#
+# `bash bin/aether` rather than `aether`: the installed copy on PATH may predate this
+# command, and a check that silently does nothing is the thing being guarded against.
+check.docs: bash bin/aether docs
 # typecheck is deliberately unset for the ROOT area: the top level is bash, which has
 # no type checker. The two bonsai areas below have their own.
 
@@ -61,3 +70,11 @@ critical_paths: *auth*|*permission*|*token*|migrations/|*alembic*|\.sql|*schema*
 # auto_nudge_lines is deliberately unset. The 75th percentile of recent commits is
 # 398 lines, but that is inflated by one large branch; the median is 136. The
 # default of 200 sits between them and is the better threshold.
+
+[docs]
+# Which markdown `aether docs` checks. The plugin READMEs are the ones that
+# drifted three releases behind in the 1.5.0 audit, so they are explicitly in.
+paths: README.md BYPASS.md plugins/*/README.md
+# CHANGELOG is a historical record: it is *supposed* to describe old behaviour,
+# and every retired path and removed flag legitimately appears in it.
+ignore: CHANGELOG.md

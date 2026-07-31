@@ -474,7 +474,7 @@ imports that a text replace silently misses. Always dry-run a mutating tool firs
 ### Review — temper
 
 ```bash
-/critique-diff                      # four critics over the staged diff
+/critique-diff                      # five critics over the staged diff
 /critique-diff --diff=all           # staged + unstaged
 /critique-diff --target=src/auth.py # one file
 /critique-diff --only=correctness,risk
@@ -485,9 +485,10 @@ imports that a text replace silently misses. Always dry-run a mutating tool firs
 /critique-pr --severity=red         # blockers only, before merging
 ```
 
-The four critics are Correctness, Design, Risk and Coverage. `/critique-pr` adds
-a fifth that only makes sense for a PR: whether the description still matches the
-code. An *omitted* change is weighted above an inaccurate one — a reviewer who
+The five critics are Correctness, Design, Risk, Coverage and Documentation — the last
+asking whether any sentence describing a behaviour this diff changes is still true.
+`/critique-pr` adds a sixth that only makes sense for a PR: whether the description
+still matches the code. An *omitted* change is weighted above an inaccurate one — a reviewer who
 trusts the description will not go looking for what it does not name.
 
 With `[project]` set and the repo trusted, Correctness and Coverage run your real
@@ -595,7 +596,7 @@ Then, once the PR is open and CI has gone green — which is exactly when nobody
 re-reads it:
 
 ```bash
-/critique-pr             # the same four critics over the whole PR, plus description accuracy
+/critique-pr             # the same five critics over the whole PR, plus description accuracy
 ```
 
 Commits landed after the description was written? Then the description is the most
@@ -698,6 +699,7 @@ aether uninstall [plugin...] [global] [--claude-md]
 aether status                            Plugin state, gates, clone, version
 aether status --notes                    Nudges the hook's budget held back
 aether doctor [--fix] [--deep]           Check the install against the manifests
+aether docs                              Check the docs against the code and config
 aether config show [section] [--values|--raw]
 aether config explain <section>.<key>
 aether config doctor                     Just the config and trust half
@@ -784,6 +786,56 @@ noticing problems.
 deregister a hook whose script is gone, drop a duplicate registration, prune dead
 trust entries. Everything else prints the command. `--deep` also handshakes each
 MCP server, which spawns `uv` and `node`.
+
+### `aether docs`
+
+`doctor` checks the install; `docs` checks what your documentation *claims*. Every defect
+in the 1.5.0 documentation audit was found by hand, and most of them were mechanically
+detectable — this is the mechanism, and it works in any repository, not just this one.
+
+```
+$ aether docs
+README.md
+  ✗ README.md:230  [temper] critical_paths is pipe-separated; this example is
+                   space-separated and matches nothing
+      fix: join the patterns with |
+  ! README.md:88   [project] test runs this as `uv run --frozen pytest`
+      the doc omits the wrapper, so following it skips what the wrapper does
+
+1 problem(s), 1 warning(s) across 7 file(s).
+```
+
+Four families, in rough order of what they are worth:
+
+| | |
+|---|---|
+| **Prose contradicting `[project]`** | Your config already declares how the repo really runs. A README saying `pytest` where the config says `uv run --frozen pytest` is what a new joiner follows on day one. Per area, so a monorepo command that is right for `web/` and wrong for `backend/` is caught |
+| **Commands that do not exist** | `npm run X` with no such script, `make Y` with no such target, `bash scripts/z.sh` that moved |
+| **Dead references** | Relative links, and `](#anchor)` against the headings actually in the file |
+| **aether's own claims** | Config keys and values against the manifest schema, subcommands and flags against the engine, retired paths outside a migration note |
+
+Deliberately narrow: **nothing is inferred.** Every check compares a documented string
+against a declared or on-disk fact, because a checker that reports plausible-but-wrong
+findings gets switched off within a week. Judgement — *is this sentence still true after
+my change?* — belongs to the Documentation critic in `/critique-diff`.
+
+Scope it with `[docs]`, and wire it into review with one line:
+
+```
+[docs]
+paths:  README.md docs/ plugins/*/README.md    # default: *.md at the root, plus docs/
+ignore: CHANGELOG.md                           # a changelog is meant to describe old behaviour
+
+[project]
+check.docs: aether docs
+```
+
+`aether check` runs any `check.<name>` key, and `/critique-diff` and `/critique-pr` call
+`aether check` — so that one line puts the check in front of every review. It exits
+non-zero on problems, so CI can use it too.
+
+`[project]` commands are ignored until you run `aether trust`; without it the first
+family cannot run, and `aether docs` says so rather than quietly checking less.
 
 ---
 

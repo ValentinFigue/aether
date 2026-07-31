@@ -10,7 +10,7 @@ It is the symmetric counterpart to [whetstone](../whetstone/): where whetstone c
 
 ## What it does
 
-Run `/critique-diff` before committing or pushing. Temper reads your staged diff (or any diff you point it at), runs four critic personas against the code, and produces a structured review with severity ratings:
+Run `/critique-diff` before committing or pushing. Temper reads your staged diff (or any diff you point it at), runs five critic personas against the code, and produces a structured review with severity ratings:
 
 ```
 ### Review report
@@ -30,7 +30,7 @@ If blockers are found, temper gates the push until they're resolved.
 
 ---
 
-## The four critics
+## The five critics
 
 | Critic | Focus |
 |--------|-------|
@@ -38,6 +38,7 @@ If blockers are found, temper gates the push until they're resolved.
 | **Design** | Coupling, misleading names, duplication, premature complexity |
 | **Risk** | Security vulnerabilities, data loss, breaking API changes, missing observability |
 | **Coverage** | Untested paths, invalidated tests, untestable code |
+| **Documentation** | Sentences this diff makes false, stale sample output, sections describing a state the code can no longer reach |
 
 ---
 
@@ -93,6 +94,8 @@ No Python, npm, or build step required. Just bash and Claude Code.
 /critique-diff --diff=HEAD~3       Review last 3 commits
 /critique-diff --only=risk         Run only the Risk critic
 /critique-diff --skip=coverage     Run all critics except Coverage
+/critique-diff --only=docs         Just the Documentation critic
+/critique-diff --skip=docs         Everything except it
 /critique-diff --severity=red      Report only blockers
 /critique-diff --target=src/auth.py  Scope to one file
 ```
@@ -143,7 +146,7 @@ critic that only makes sense for a PR: whether the description still matches the
 /critique-pr --only=risk  # same flags as /critique-diff
 ```
 
-It reuses the four critic definitions from `critique-diff.md` rather than restating
+It reuses the five critic definitions from `critique-diff.md` rather than restating
 them, so the two can never drift. Requires `gh`, authenticated.
 
 ## Configuration

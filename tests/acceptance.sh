@@ -91,8 +91,14 @@ PY
 )
 [ -n "$hp" ] && [ -f "$hp" ] && ok "the path registered in settings.json resolves" \
                             || bad "the path registered in settings.json resolves" "${hp:-not registered}"
-out=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git commit -m wip"}}' \
-      | env HOME="$H" bash "$hp" 2>&1)
+# From a scratch directory, not the checkout. Since 1.5.0 the hook prints only the
+# earliest lifecycle stage with something to say, so running this in a repo that
+# happens to have an uncritiqued plan gets whetstone's nudge instead of cairn's —
+# and whether the developer has a plan lying about is not what this test is for.
+# What it tests is that a gate resolves and fires when the install path has spaces.
+sp=$(mk)
+out=$( cd "$sp" && printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git commit -m wip"}}' \
+      | env HOME="$H" bash "$hp" 2>&1 )
 case "$out" in *Cairn*) ok "a gate fires from a spaced path" ;;
                *) bad "a gate fires from a spaced path" "${out:0:70}" ;; esac
 env HOME="$H" bash uninstall.sh --global >/dev/null 2>&1

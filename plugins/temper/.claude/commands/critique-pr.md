@@ -1,4 +1,4 @@
-Critique an open PR before merge — temper's four critics plus description accuracy (temper).
+Critique an open PR before merge — temper's five critics plus description accuracy (temper).
 
 Parse $ARGUMENTS for flags. Supported flags:
 
@@ -129,7 +129,7 @@ full definitions were unavailable:
 - **Coverage** — new code paths without tests, existing tests invalidated by the change,
   untested edge cases, changes that make code harder to test.
 
-## Step 5 — Critic 5 — Description accuracy
+## Step 5 — Critic 6 — Description accuracy
 
 The critic that only exists here, because only a PR has a description.
 

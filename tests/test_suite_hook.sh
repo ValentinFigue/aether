@@ -41,13 +41,56 @@ run_hook Bash 'git push origin main'; e=$?
 assert_exit 1 "$e" "temper gate reached through the dispatcher"
 assert_contains "$OUT" "temper:" "temper's message comes from the plugin"
 
-# ── accumulation ─────────────────────────────────────────────────────────────
-# A single git push trips both temper and cairn; the dispatcher must show both
-# rather than stopping at the first.
-suite "accumulation"
+# ── the nudge budget ─────────────────────────────────────────────────────────
+# A single git push trips temper and cairn, and may trip whetstone too. Before
+# the budget the dispatcher printed all of them — fifteen lines from three
+# plugins on one commit, which is how a guardrail teaches people to bypass it.
+#
+# temper's push is a block, so it prints in full and alone: the nudges beside it
+# are dropped rather than appended. Suppressing a block would turn "you cannot
+# push unreviewed" into "you might not hear about it".
+suite "the nudge budget"
 run_hook Bash 'git push origin main'
-assert_contains "$OUT" "temper:"     "push surfaces the temper nudge"
-assert_contains "$OUT" "Cairn nudge" "push surfaces the cairn nudge too"
+assert_contains "$OUT" "temper:" "a block prints"
+case "$OUT" in
+  *"Cairn nudge"*) fail "a block suppresses the nudges beside it" "cairn's nudge printed alongside the block" ;;
+  *) pass "a block suppresses the nudges beside it" ;;
+esac
+
+# A commit with no block: one nudge in full, then one line naming the rest.
+: > big.txt; i=0; while [ "$i" -lt 250 ]; do printf 'l\n' >> big.txt; i=$((i + 1)); done
+git add big.txt >/dev/null 2>&1
+run_hook Bash 'git commit -m wip'
+assert_contains "$OUT" "temper:"       "the earliest stage still to speak prints in full"
+assert_contains "$OUT" "also had notes" "the rest are named on one line"
+case "$OUT" in
+  *"Cairn nudge"*) fail "only one nudge prints in full" "cairn's full nudge printed too" ;;
+  *) pass "only one nudge prints in full" ;;
+esac
+assert_contains "$OUT" "cairn" "the summary line names who was held back"
+
+# And what was held back outlives the hook, or "+ cairn also had notes" is a dead end.
+# .aether/ is what makes the notes file project-relative: without one there is
+# nowhere in *this* repo to put them, and writing to ~/.aether/out instead would
+# let one project's nudges surface in another.
+mkdir -p .aether
+run_hook Bash 'git commit -m wip'
+if [ -s .aether/out/.notes ]; then
+  pass "suppressed nudges are recorded"
+  assert_contains "$(cat .aether/out/.notes)" "Cairn nudge" "…in full, not just by name"
+else
+  fail "suppressed nudges are recorded" ".aether/out/.notes is missing or empty"
+fi
+assert_contains "$("$REPO/bin/aether" status --notes 2>&1)" \
+  "Cairn nudge" "aether status --notes shows them"
+
+# The other half of project-relative: it must never land in $HOME.
+if [ -e "$HOME/.aether/out/.notes" ]; then
+  fail "the notes file never lands in HOME" "found $HOME/.aether/out/.notes"
+else
+  pass "the notes file never lands in HOME"
+fi
+git reset -q >/dev/null 2>&1; rm -f big.txt
 
 # ── suite-wide bypass ────────────────────────────────────────────────────────
 suite "suite-wide bypass"
@@ -184,11 +227,13 @@ for needle in 'WEAK_SINGLE' 'pyfindrefs' 'auto_nudge_lines' 'Conventional Commit
     pass "dispatcher does not re-implement '$needle'"
   fi
 done
-lines=$(wc -l < "$SUITE_HOOK" | tr -d ' ')
-if [ "$lines" -lt 200 ]; then
-  pass "dispatcher stayed small ($lines lines, was 467)"
+# Code lines, not total lines: the budget arrived with a long explanation of why
+# a block is exempt, and a rule that counts comments punishes writing it down.
+lines=$(grep -cvE '^[[:space:]]*(#|$)' "$SUITE_HOOK")
+if [ "$lines" -lt 150 ]; then
+  pass "dispatcher stayed small ($lines code lines, was 300+ when it carried the gates)"
 else
-  fail "dispatcher stayed small" "$lines lines — gate logic may have crept back in"
+  fail "dispatcher stayed small" "$lines code lines — gate logic may have crept back in"
 fi
 
 cd "$REPO" || exit 1

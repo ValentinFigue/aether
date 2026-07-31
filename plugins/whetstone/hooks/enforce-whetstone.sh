@@ -75,7 +75,7 @@ gate_whetstone() {
   [ -z "$tool" ] && return 0
 
   # Bypass markers
-  printf '%s' "$target" | grep -qE '#\s*(whetstone|suite):skip' && return 0
+  aether_bypassed whetstone && return 0
 
   local plan state
   plan=$(aether_plan_file 2>/dev/null) || plan=""
@@ -111,11 +111,11 @@ gate_whetstone() {
       uncritiqued)
         # Pre-1.4 state: no in-plan marker, but a CRITIQUE.md newer than the plan.
         # Kept so a project that critiqued the old way is not told to do it again.
-        if [ -f "$CRITIQUE_FILE" ] && [ ! -f "$(aether_plan_pointer)" ]; then
-          python3 -c "
-import os, sys
-sys.exit(0 if os.path.getmtime('$plan') <= os.path.getmtime('$CRITIQUE_FILE') else 1)
-" 2>/dev/null && return 0
+        # `! -nt` is "not strictly newer", i.e. the `<=` the python did — and it is
+        # a bash builtin rather than a third interpreter on the commit path.
+        if [ -f "$CRITIQUE_FILE" ] && [ ! -f "$(aether_plan_pointer)" ] \
+           && [ ! "$plan" -nt "$CRITIQUE_FILE" ]; then
+          return 0
         fi
         printf 'Whetstone: a plan exists but has not been critiqued yet.\n'
         printf '  %s\n' "$plan"
@@ -134,12 +134,10 @@ sys.exit(0 if os.path.getmtime('$plan') <= os.path.getmtime('$CRITIQUE_FILE') el
 
   # ── first source-file write with no critique on record ─────────────────────
   if printf '%s' "$tool" | grep -qE '^(Write|Edit|MultiEdit)$'; then
-    local is_source key
-    is_source=$(python3 -c "
-import re, sys
-print('yes' if re.search(r'\.(py|ts|tsx|js|jsx|mjs)$', sys.argv[1]) else 'no')
-" "$target" 2>/dev/null) || return 0
-    [ "$is_source" = yes ] || return 0
+    # The shared parse already classified the path; re-deriving it here was the
+    # third python start on a Write.
+    local key
+    [ -n "${AETHER_IS_SOURCE:-}" ] || return 0
 
     case "$state" in critiqued) return 0 ;; none) ;; esac
     # Keyed on the plan's own hash, so a second uncritiqued plan nudges again while
@@ -169,17 +167,17 @@ print('yes' if re.search(r'\.(py|ts|tsx|js|jsx|mjs)$', sys.argv[1]) else 'no')
 if [ -z "${SUITE_MODE:-}" ]; then
   set -euo pipefail
 
-  input=$(cat)
-
-  eval "$(printf '%s' "$input" | python3 -c '
-import json, sys, shlex
-data = json.loads(sys.stdin.read())
-tool = data.get("tool_name", "")
-inp  = data.get("tool_input", {})
-val  = inp.get("command", "") or inp.get("file_path", "")
-print("tool_name=" + shlex.quote(tool))
-print("cmd_or_path=" + shlex.quote(val))
-' 2>/dev/null)" || exit 0
+  _here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+  for _lib in "$_here/../aether-config.sh" "$_here/aether-config.sh" \
+              "$_here/../../../hooks/aether-config.sh" \
+              "${AETHER_HOME:-$HOME/.aether}/hooks/aether-config.sh"; do
+    # shellcheck source=/dev/null
+    [ -f "$_lib" ] && { . "$_lib"; break; }
+  done
+  unset _lib _here
+  command -v aether_parse_command >/dev/null 2>&1 || exit 0
+  # The same parse the suite runs, so standalone and suite modes cannot drift.
+  aether_parse_command "$(cat)" || exit 0
 
   gate_whetstone
   exit $?

@@ -95,13 +95,19 @@ run_standalone() {
 # Invokes the same gate the way enforce-suite.sh does: sourced with SUITE_MODE=1
 # and pre-parsed variables. Sets $OUT and returns the gate's exit code.
 run_suite() {
-  local hook="$1" fn="$2" tool="$3" val="$4"
+  local hook="$1" fn="$2" tool="$3" val="$4" repo
+  repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
   OUT=$(
-    SUITE_MODE=1 bash -c '
-      hook="$1"; fn="$2"; tool_name="$3"; cmd_or_path="$4"
-      . "$hook"
-      "$fn"
-    ' _ "$hook" "$fn" "$tool" "$val" 2>&1
+    payload "$tool" "$val" | SUITE_MODE=1 bash -c '
+      . "$3/hooks/aether-config.sh"
+      # Exactly what enforce-suite.sh does before it dispatches: one parse, which
+      # sets tool_name, cmd_or_path and the AETHER_* the gates read. Setting those
+      # by hand here would have made the equivalence assertion vacuous — the whole
+      # point is that both modes go through this same function.
+      aether_parse_command "$(cat)"
+      . "$1"
+      "$2"
+    ' _ "$hook" "$fn" "$repo" 2>&1
   )
   return $?
 }
@@ -114,11 +120,33 @@ assert_dual_mode() {
   local so su se ue
   run_standalone "$hook" "$tool" "$val"; se=$?; so="$OUT"
   run_suite "$hook" "$fn" "$tool" "$val"; ue=$?; su="$OUT"
-  if [ "$so" = "$su" ] && [ "$se" -eq "$ue" ]; then
-    pass "$label (exit $se, identical in both modes)"
+  # Identical output, and the same verdict — but not necessarily the same number.
+  # A gate returns 2 for a block and 1 for a nudge so the dispatcher's budget can
+  # tell them apart; standalone, the entrypoint clamps both to 1 because the hook
+  # contract is exit 0 or 1 and never 2. assert_severity pins the distinction the
+  # clamp erases.
+  local sv uv
+  sv=$([ "$se" -eq 0 ] && echo silent || echo speaks)
+  uv=$([ "$ue" -eq 0 ] && echo silent || echo speaks)
+  if [ "$so" = "$su" ] && [ "$sv" = "$uv" ]; then
+    pass "$label ($sv, identical in both modes)"
   else
     fail "$label" \
       "standalone: exit=$se output=${so:0:90}" \
       "suite:      exit=$ue output=${su:0:90}"
+  fi
+}
+
+# assert_severity <hook> <gate-fn> <tool> <value> <expected-rc> <label>
+# The gate's return code in suite mode: 0 silent, 1 nudge, 2 block. The budget in
+# enforce-suite.sh suppresses nudges and never suppresses blocks, so a gate that
+# returns the wrong number is a guardrail that silently stops guarding.
+assert_severity() {
+  local hook="$1" fn="$2" tool="$3" val="$4" want="$5" label="$6" got
+  run_suite "$hook" "$fn" "$tool" "$val"; got=$?
+  if [ "$got" -eq "$want" ]; then
+    pass "$label (rc=$got)"
+  else
+    fail "$label" "expected rc=$want, got rc=$got"
   fi
 }

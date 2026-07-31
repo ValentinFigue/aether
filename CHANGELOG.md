@@ -7,6 +7,59 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
+## [Unreleased]
+
+### Changed
+
+- **The hook starts one interpreter per tool call instead of three.** `enforce-suite.sh`
+  parsed stdin with python3, and then temper and cairn each started python3 again to
+  analyse a command the dispatcher had already read — three starts on a `git commit`,
+  two on a Write, at roughly 18ms each, on a path that runs on every Bash, Write and
+  Edit of every session. There is now one parse, `aether_parse_command`, and temper's,
+  cairn's and bonsai's rules are bash, git and awk. Every rule was ported literally and
+  diffed against the old implementation over the same inputs — 35 commit messages, all
+  five of temper's branches at, above and below each threshold, 26 bonsai commands —
+  and all three are byte-identical. `tests/test_hookcost.sh` counts interpreters rather
+  than timing them, so a loaded CI machine cannot raise a false alarm.
+
+- **One nudge per tool call.** A single `git commit` could print fifteen lines from
+  three plugins. The hook now prints the earliest lifecycle stage with something to say
+  and names the rest on one line; `aether status --notes` shows what was held back.
+  Nudge fatigue is how guardrails die — the fastest way to stop the noise is
+  `# aether:skip` on everything, which is worse than any single nudge.
+
+  A **block** is never budgeted. temper's unreviewed-push and critical-path-commit
+  messages print in full and alone, and the nudges beside them are dropped rather than
+  appended. Suppressing one would turn "you cannot push unreviewed" into "you might not
+  hear about it".
+
+### Fixed
+
+- **A bypass marker anywhere in a command silenced the suite.** Every gate grepped for
+  its own marker as a substring, so a commit *documenting* one turned the gates off:
+
+  ```bash
+  git commit -m "docs: explain the # aether:skip marker"   # all four went silent
+  ```
+
+  A marker is now only honoured in a trailing comment — after a `#` that starts a word,
+  outside quotes, with nothing but further markers behind it. The five greps were also
+  three different spellings of the whitespace (`#\s*`, `# *`, `#[[:space:]]*`) across
+  three files; there is now one implementation, and a test asserts all four gates and
+  the dispatcher agree on the same string. See [BYPASS.md](BYPASS.md), which now also
+  states the threat model plainly: the agent writes the commands the hook inspects, so
+  every nudge is advisory by construction, and blocks are the one place that bites.
+
+- **`# aether:skip` did nothing for a standalone plugin install.** It was resolved only
+  by the dispatcher. Both it and `# suite:skip` now work either way.
+
+### Added
+
+- `aether status --notes` — the nudges the budget held back on the last tool call.
+  Recorded in `.aether/out/.notes`, project-relative and never through
+  `aether_out_dir`, whose `~/.aether/out` fallback is what made v1.1.0's nudge sentinel
+  once-per-machine instead of once-per-project.
+
 ## [1.4.0] — 2026-07-30
 
 ### Fixed

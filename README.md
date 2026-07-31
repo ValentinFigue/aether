@@ -627,9 +627,33 @@ git commit / git push / Write source file
        (weak commit message? push?)
 ```
 
-Each gate is defined once, in its own plugin's `hooks/enforce-<plugin>.sh`, and runs either standalone or sourced by the suite. Gates run top to bottom and their messages accumulate, so a single `git push` can surface both a temper and a cairn nudge.
+Each gate is defined once, in its own plugin's `hooks/enforce-<plugin>.sh`, and runs either standalone or sourced by the suite.
 
 `enforce-suite.sh` skips any plugin whose config says `enabled: false`, and any gate that is not installed. All gates are non-blocking nudges, except temper which blocks high-risk operations (push without review, critical-path commit).
+
+**One nudge per tool call.** Gates run top to bottom, but their output does not
+accumulate: the hook prints the earliest stage with something to say and names the rest
+on one line. A `git commit` that tripped whetstone, temper and cairn used to print
+fifteen lines from three plugins, and nudge fatigue is how guardrails die — the fastest
+way to stop the noise becomes `# aether:skip` on everything.
+
+```
+Whetstone: a plan exists but has not been critiqued yet.
+  .claude/plans/p.md
+  Run /critique-plan before committing to surface blockers now.
+  Append  # whetstone:skip  to your git command to bypass.
+  + temper and cairn also had notes — `aether status --notes` to see them.
+```
+
+A **block** is exempt: it prints in full and alone, and the nudges beside it are
+dropped. Whatever was held back goes to `.aether/out/.notes`, overwritten each call.
+
+**One interpreter per tool call.** The hook used to start three python3 processes on a
+`git commit` — its own stdin parse plus temper's and cairn's rules — at roughly 18ms
+each, on a path that runs on every Bash, Write and Edit of every session. There is now
+a single parse in `aether_parse_command`, and every rule is bash, git and awk.
+`tests/test_hookcost.sh` counts the interpreters rather than timing them, so a loaded
+CI machine cannot produce a false alarm.
 
 ---
 
@@ -639,6 +663,7 @@ Each gate is defined once, in its own plugin's `hooks/enforce-<plugin>.sh`, and 
 aether install [plugin...] [global] [--claude-md] [--no-bonsai] [--dry-run]
 aether uninstall [plugin...] [global] [--claude-md]
 aether status                            Plugin state, gates, clone, version
+aether status --notes                    Nudges the hook's budget held back
 aether doctor [--fix] [--deep]           Check the install against the manifests
 aether config show [section] [--values|--raw]
 aether config explain <section>.<key>
@@ -768,6 +793,8 @@ things that only appear in a real install.
 bash tests/run.sh                  # 473 assertions, ~4 min
 bash tests/run.sh doctor           # one file
 bash tests/run.sh config           # the config, trust and migration tests
+bash tests/run.sh hookcost         # interpreter count, bypass precision, the budget
+bash tests/run.sh rules            # what each gate's rule decides, case by case
 
 bash tests/acceptance.sh           # end to end against a throwaway HOME, ~4 min
 bash tests/acceptance.sh --full     # also build bonsai and handshake its MCP servers

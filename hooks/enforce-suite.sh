@@ -46,39 +46,6 @@ _gate_file() {
   fi
 }
 
-# ── Parse stdin ──────────────────────────────────────────────────────────────
-
-input=$(cat)
-
-eval "$(printf '%s' "$input" | python3 -c '
-import json, sys, shlex
-data = json.loads(sys.stdin.read())
-tool = data.get("tool_name", "")
-inp  = data.get("tool_input", {})
-val  = inp.get("command", "") or inp.get("file_path", "")
-print("tool_name=" + shlex.quote(tool))
-print("cmd_or_path=" + shlex.quote(val))
-' 2>/dev/null)" || exit 0
-
-[ -z "${tool_name:-}" ] && exit 0
-cmd_or_path="${cmd_or_path:-}"
-
-# ── Bypass resolution ────────────────────────────────────────────────────────
-
-bypass_all=false
-bypass_whetstone=false
-bypass_bonsai=false
-bypass_temper=false
-bypass_cairn=false
-
-printf '%s' "$cmd_or_path" | grep -qE '#[[:space:]]*(aether|suite):skip'    && bypass_all=true
-printf '%s' "$cmd_or_path" | grep -qE '#[[:space:]]*whetstone:skip'          && bypass_whetstone=true
-printf '%s' "$cmd_or_path" | grep -qE '#[[:space:]]*bonsai:skip'             && bypass_bonsai=true
-printf '%s' "$cmd_or_path" | grep -qE '#[[:space:]]*temper:skip'             && bypass_temper=true
-printf '%s' "$cmd_or_path" | grep -qE '#[[:space:]]*cairn:skip'              && bypass_cairn=true
-
-$bypass_all && exit 0
-
 # ── Config reader ────────────────────────────────────────────────────────────
 # One parser, shared with bin/aether, and sourcing it here means the gates get it
 # for free. The engine installs it beside this file, and $_suite_dir is already
@@ -100,6 +67,24 @@ if ! command -v aether_cfg_resolve >/dev/null 2>&1; then
   aether_cfg_get()     { :; }
   aether_out_dir()     { [ -d .aether ] && printf '.aether/out' || printf '%s/out' "${AETHER_HOME:-$HOME/.aether}"; }
 fi
+
+# ── Parse stdin ──────────────────────────────────────────────────────────────
+# One interpreter for the whole hook. This used to be the first of three python
+# starts on a `git commit` — the other two were temper's and cairn's rules, both
+# now bash. `tests/test_hookcost.sh` asserts the count stays at one.
+
+input=$(cat)
+command -v aether_parse_command >/dev/null 2>&1 || exit 0
+aether_parse_command "$input" || exit 0
+[ -z "${tool_name:-}" ] && exit 0
+
+# ── Bypass resolution ────────────────────────────────────────────────────────
+# Five greps became one shared answer. They had already drifted — `#\s*`, `# *`
+# and `#[[:space:]]*` in three files — and all five matched the marker anywhere in
+# the command, so `git commit -m "docs: explain # aether:skip"` silenced the suite.
+# aether_bypassed only honours a marker in a trailing comment. See BYPASS.md.
+
+aether_bypassed aether && exit 0
 
 # ── Plugin enabled check ─────────────────────────────────────────────────────
 # Sourcing the reader here also means the gates get it for free.
@@ -136,38 +121,73 @@ done
 unset _p _f
 
 # ── Dispatch ─────────────────────────────────────────────────────────────────
-# Run gates in pipeline order, accumulating exit codes so one git command can
-# surface several nudges at once.
+# Gates run in lifecycle order — plan, build, review, ship — and their output is
+# collected rather than printed. One `git commit` used to be able to emit fifteen
+# lines from three plugins, which is how a guardrail teaches people to bypass it.
+#
+# The budget is: one nudge per tool call, the earliest stage wins, and a single
+# line names who else had something to say. A **block** is exempt. Suppressing one
+# would turn "you cannot push unreviewed" into "you might not hear about it", so a
+# block prints in full and alone, and the nudges beside it are dropped entirely —
+# being told you cannot push is the only thing that matters at that moment.
 
-# _run_gate <plugin> <gate-fn> <bypass-flag>
-# Centralises the bypass and enabled checks that each inline gate used to
-# repeat, and skips cleanly when a plugin is not installed.
+# _run_gate <plugin> <gate-fn>
+# Centralises the bypass and enabled checks each inline gate used to repeat, skips
+# cleanly when a plugin is not installed, and captures rather than prints.
+#
+# Return codes from a gate: 0 silent, 1 nudge, 2 block.
 _run_gate() {
-  local plugin="$1" fn="$2" bypass="$3"
-  [ "$bypass" = true ] && return 0
+  local plugin="$1" fn="$2" out rc
+  aether_bypassed "$plugin" && return 0
   _plugin_enabled "$plugin" || return 0
   declare -F "$fn" >/dev/null 2>&1 || return 0
-  "$fn"
+
+  out=$("$fn" 2>/dev/null); rc=$?
+  # Output, not the return code, is what decides whether a gate had something to
+  # say. whetstone on ExitPlanMode prints and returns 0 on purpose — leaving plan
+  # mode must never be gated — and an early `[ $rc -eq 0 ] && return 0` here
+  # silently ate that message.
+  [ -n "$out" ] || return 0
+  [ "$rc" -ne 0 ] && spoke=1
+
+  if [ "$rc" -ge 2 ]; then
+    blocks="${blocks}${out}
+"
+  elif [ -z "$first_plugin" ]; then
+    first_plugin="$plugin"
+    first_nudge="$out"
+  else
+    others="$others $plugin"
+    later="${later}## ${plugin}
+${out}
+"
+  fi
+  return 0
 }
 
 # -e is already off (see the gate-loading section). The gates are written to run
 # without it, so a non-zero intermediate command inside one cannot abort the
 # hook — that is the fail-open guarantee.
 
-_exit=0
+blocks=""
+spoke=""
+first_plugin=""
+first_nudge=""
+later=""
+others=""
 
 case "$tool_name" in
   Bash)
-    _run_gate whetstone gate_whetstone "$bypass_whetstone" || _exit=1
-    _run_gate bonsai    gate_bonsai    "$bypass_bonsai"    || _exit=1
-    _run_gate temper    gate_temper    "$bypass_temper"    || _exit=1
-    _run_gate cairn     gate_cairn     "$bypass_cairn"     || _exit=1
+    _run_gate whetstone gate_whetstone
+    _run_gate bonsai    gate_bonsai
+    _run_gate temper    gate_temper
+    _run_gate cairn     gate_cairn
     ;;
   Write|Edit|MultiEdit)
     # bonsai, temper and cairn only ever inspect Bash commands. whetstone's
     # single gate handles both paths by branching on $tool_name, replacing the
     # separate gate_whetstone_write the suite used to carry.
-    _run_gate whetstone gate_whetstone "$bypass_whetstone" || _exit=1
+    _run_gate whetstone gate_whetstone
     ;;
   ExitPlanMode)
     # Only whetstone has anything to say when a plan is presented. Its gate returns 0
@@ -177,8 +197,50 @@ case "$tool_name" in
     # Widening the matcher in the manifest is not enough on its own: without this
     # branch the hook is invoked and dispatches nothing, which is how the trigger
     # first appeared to work and did not.
-    _run_gate whetstone gate_whetstone "$bypass_whetstone" || _exit=1
+    _run_gate whetstone gate_whetstone
     ;;
 esac
 
-exit $_exit
+# ── One voice ────────────────────────────────────────────────────────────────
+
+# Everything held back is recorded whether or not the summary line can point at
+# it, so `aether status --notes` is useful in the block case too, where nothing
+# announces that anything was suppressed.
+_notes=$(aether_notes_file 2>/dev/null)
+_suppressed="$later"
+[ -n "$blocks" ] && [ -n "$first_plugin" ] && _suppressed="## $first_plugin
+$first_nudge
+$later"
+
+if [ -n "$_notes" ] && [ -n "$_suppressed" ]; then
+  mkdir -p "$(dirname "$_notes")" 2>/dev/null && printf '%s' "$_suppressed" > "$_notes" 2>/dev/null
+fi
+
+if [ -n "$blocks" ]; then
+  printf '%s' "$blocks"
+  exit 1
+fi
+
+[ -n "$first_nudge" ] || exit 0
+printf '%s\n' "$first_nudge"
+# Falls through to exit 0 when every gate that spoke also returned 0.
+
+if [ -n "$others" ]; then
+  # "temper", "temper and cairn", "bonsai, temper and cairn"
+  _list=""
+  for _o in $others; do
+    if [ -z "$_list" ]; then _list="$_o"
+    else _list="$_list, $_o"; fi
+  done
+  case "$_list" in
+    *,*) _list="${_list%,*} and ${_list##*, }" ;;
+  esac
+  if [ -n "$_notes" ]; then
+    printf '  + %s also had notes — `aether status --notes` to see them.\n' "$_list"
+  else
+    printf '  + %s also had notes.\n' "$_list"
+  fi
+fi
+
+[ -n "$spoke" ] && exit 1
+exit 0

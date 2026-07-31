@@ -7,7 +7,7 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
-## [Unreleased]
+## [1.7.0] — 2026-07-31
 
 ### Added
 
@@ -59,6 +59,17 @@ number. Their individual histories are preserved under
   when it demonstrably has not, and an advisory nudge when the question cannot be
   answered. An install without the new CLI reads as `unknown` and behaves exactly as it
   did before.
+
+### Fixed
+
+- **`aether review` printed `aether_sha: command not found` on a degraded install.**
+  `aether_sha` lives in `hooks/aether-config.sh`, and `bin/aether` carries on with
+  defaults when it cannot find that file — so the function can genuinely be absent, and
+  `review` called it anyway. The outcome was already safe, since an empty hash falls
+  through to `unknown` and nothing escalates on unknown, but the gate calls
+  `review status` with `2>/dev/null`, so the noise was invisible exactly where anyone
+  would look for it. Found by walking the feature through a real install rather than by
+  a test: every test ran with the library present.
 
 ## [1.6.0] — 2026-07-31
 

@@ -138,7 +138,7 @@ assert_contains "$(cat "$D/.aether/out/.reviewed")" "staged" "the scope is recor
 
 out=$(rv "$D" bogus); e=$?
 assert_exit 1 "$e" "an unknown subcommand exits 1"
-assert_contains "$out" "Try: record, status" "…and names the real ones"
+assert_contains "$out" "Try: status, show, list, record" "…and names the real ones"
 
 # ── the commands call it ─────────────────────────────────────────────────────
 # A slash command told to write a file *format* would drift; told to run a command, it

@@ -303,4 +303,24 @@ appending there rather than starting a second history — `aether migrate` moves
 
 Prepend a header: `# Review — <diff target description> — <current date>`
 
+**Wrap the report in a marker**, so it can be read back individually:
+
+```
+<!-- aether:review date=<ISO 8601 UTC, e.g. 2026-07-31T12:04Z> scope=<staged|all|the ref> blockers=<n> significant=<n> minor=<n> -->
+# Review — <target> — <date>
+
+…the report…
+<!-- /aether:review -->
+```
+
+`aether review show` and `aether review list` read these. Reports written before the
+marker existed are still found by their heading, but carry no scope and no time of day —
+which is why two reviews on the same day used to be indistinguishable.
+
+The counts in the marker must match the ones in the report body. They exist so the list
+view does not have to parse prose: across one real history the same three numbers appear
+as `**Blockers:** 0`, `**Blockers:** 0 | **Significant:** 3 | **Minor:** 4`, and
+`**Blockers:** 0 — … — Good to ship`, which is not a format anything should depend on.
+
+
 If `TEMPER.md` already exists at the resolved path, **append** rather than overwrite, accumulating a history of reviews over time.

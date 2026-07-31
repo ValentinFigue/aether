@@ -710,7 +710,8 @@ aether config path|edit [global]
 aether check [path...] [--all] [--raw]   Run this project's [project] commands
 aether project for <file...>             Which monorepo areas those files touch
 aether plan [status|path|hash]           The plan the gate sees, and its critique state
-aether review [record|status]            Has what you are about to push been reviewed?
+aether review [status|show|list|record]  Reviews: was it reviewed, and what did it say
+aether plan critique [--history]         whetstone's critique for the plan the gate sees
 aether trust [status|list|forget|prune]
 aether rules                             The prose the critics will read
 aether migrate                           Move a pre-1.0 layout into ~/.aether/
@@ -839,6 +840,39 @@ non-zero on problems, so CI can use it too.
 
 `[project]` commands are ignored until you run `aether trust`; without it the first
 family cannot run, and `aether docs` says so rather than quietly checking less.
+
+### Reading the critiques back
+
+The critics write to `.aether/out/` and the files accumulate. One repository reached 21
+reviews in 357 lines, at which point seeing the latest meant
+`awk '/^# Review/{n++} n==21'`.
+
+```
+$ aether review list
+.aether/out/TEMPER.md
+
+  #    when               scope       🔴   🟡   🟢
+  21   2026-07-31T12:04Z  all          0    1    4
+  20   2026-07-29         —            0    0    0
+   2   2026-05-07         —            0    1    3
+   1   2026-05-07         —            0    1    5
+
+  21 entries.  `aether review show <#>` for one of them.
+
+$ aether review show          # the latest
+$ aether review show 16       # one of them
+$ aether review show --raw | glow -
+```
+
+`aether plan critique` does the same for whetstone, reading the block **inside the plan**
+— the authoritative copy, and the one the gate hashes. It says so when the plan has
+changed since the critique was written. `--history` reads the accumulated
+`.aether/out/CRITIQUE.md` instead.
+
+Reports written from 1.8.0 carry a marker with a timestamp, the scope and the counts.
+Older ones are still listed and shown, from their heading — they simply have no scope and
+no time of day, which is why two reviews on the same day used to be indistinguishable and
+why the number, not the date, is what you address.
 
 ---
 

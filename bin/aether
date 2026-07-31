@@ -1979,8 +1979,70 @@ cmd_review() {
   case "$sub" in
     record)  _review_record "$@" ;;
     status)  _review_status "$@" ;;
-    *) printf 'Unknown: aether review %s\n\nTry: record, status\n' "$sub"; return 1 ;;
+    show)    _review_show "$@" ;;
+    list)    _review_list "$@" ;;
+    help|--help|-h)
+      printf 'aether review <subcommand>\n\n'
+      printf '  status [--raw]   Has what you are about to push been reviewed?\n'
+      printf '  show [N] [--raw] The latest review report, or the Nth from `list`\n'
+      printf '  list [--raw]     Every report, with its severity counts\n'
+      printf '  record [--scope=staged|all|<ref>]\n'
+      printf '                   Record that a review happened — /critique-diff calls this\n'
+      return 0 ;;
+    *) printf 'Unknown: aether review %s\n\nTry: status, show, list, record\n' "$sub"; return 1 ;;
   esac
+}
+
+_review_show() {
+  local want="" raw=false a
+  for a in "$@"; do
+    case "$a" in --raw) raw=true ;; [0-9]*) want="$a" ;;
+      *) printf 'Usage: aether review show [N] [--raw]\n'; return 1 ;; esac
+  done
+  local f; f=$(_reports_file TEMPER.md)
+  if [ ! -f "$f" ]; then
+    printf 'No reviews recorded here yet.\n'
+    printf '  Run /critique-diff; it writes to %s\n' "$f"
+    return 0
+  fi
+  # `x=$(...); rc=$?` aborts the function under `set -e` before the case can run — the
+  # same trap cmd_check hit, with the same fix.
+  local body rc=0
+  body=$(_reports_show "$f" Review "$want") && rc=0 || rc=$?
+  case "$rc" in
+    1) printf '%s exists but holds no reviews.\n' "$f"; return 0 ;;
+    2) printf 'No review numbered %s. `aether review list` shows what there is.\n' "$want"; return 0 ;;
+  esac
+  $raw || printf '%s\n\n' "$(_dr_tilde "$f")"
+  printf '%s\n' "$body"
+}
+
+_review_list() { _reports_list "$(_reports_file TEMPER.md)" Review review "$@"; }
+
+# Shared by `review list` and `plan critique --history`: same file shape, same table.
+_reports_list() {
+  local f="$1" kind="$2" noun="$3" raw=false a
+  shift 3
+  for a in "$@"; do case "$a" in --raw) raw=true ;;
+    *) printf 'Usage: aether %s list [--raw]\n' "$noun"; return 1 ;; esac; done
+
+  local rows; rows=$(_reports_split "$f" "$kind")
+  if [ -z "$rows" ]; then
+    [ -f "$f" ] && printf '%s holds no %ss.\n' "$(_dr_tilde "$f")" "$(printf '%s' "$kind" | tr 'A-Z' 'a-z')" \
+                || printf 'No %ss recorded here yet.\n' "$(printf '%s' "$kind" | tr 'A-Z' 'a-z')"
+    return 0
+  fi
+  if $raw; then printf '%s\n' "$rows"; return 0; fi
+
+  printf '%s\n\n' "$(_dr_tilde "$f")"
+  printf '  %-4s %-18s %-9s %s\n' '#' 'when' 'scope' '  🔴   🟡   🟢'
+  # Newest first — that is what you came for — while the number stays file order, so it
+  # keeps meaning the same report as new ones are appended.
+  printf '%s\n' "$rows" | sort -rn -t"$(printf '\t')" -k1 \
+    | awk -F'\t' '{ printf "  %-4s %-18s %-9s %4d %4d %4d\n", $1, $2, $3, $4, $5, $6 }'
+  local n; n=$(printf '%s\n' "$rows" | grep -c .)
+  printf '\n  %s entr%s.  `aether %s show <#>` for one of them.\n' \
+    "$n" "$([ "$n" = 1 ] && printf y || printf ies)" "$noun"
 }
 
 _review_record() {
@@ -2067,6 +2129,148 @@ EOF
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# REPORTS
+#
+# Reading back what the critics wrote. Both files accumulate — one repository had 21
+# reviews in 357 lines, and seeing the latest took
+# `awk '/^# Review/{n++} n==21' .aether/out/TEMPER.md`.
+#
+# whetstone already had the right idea: it wraps each critique in an
+# `<!-- aether:critique … -->` block inside the plan, which is addressable and carries
+# its own metadata. temper wrote only a `# Review — <target> — <date>` heading, with no
+# delimiter and the date as the only field — so two reviews on the same day are
+# genuinely indistinguishable, which is not hypothetical: the oldest two entries in that
+# repository are byte-identical headings.
+#
+# So temper's reports get the same treatment going forward, and the reader accepts both
+# shapes. That is load-bearing rather than polite: a reader that only understood the new
+# marker would make every report already on disk invisible, which is worse than the awk.
+# ═══════════════════════════════════════════════════════════════════════════
+
+AETHER_REVIEW_MARKER='<!-- aether:review'
+AETHER_REVIEW_MARKER_END='<!-- /aether:review -->'
+
+# _reports_file <TEMPER.md|CRITIQUE.md> — where that history actually lives.
+#
+# Mirrors the *writer's* rule from critique-diff.md exactly, because the two disagreeing
+# means reading a file nobody appends to. `aether doctor` also names the pre-1.0 path,
+# but as a leftover to migrate away from — the opposite job, and not reusable here.
+_reports_file() {
+  local name="$1"
+  if [ -d .aether ]; then
+    printf '%s/out/%s' ".aether" "$name"
+  elif [ -f ".claude/plans/$name" ]; then
+    printf '.claude/plans/%s' "$name"      # pre-1.1, still written to while it exists
+  else
+    printf '%s/out/%s' "$(aether_root global)" "$name"
+  fi
+}
+
+# _reports_split <file> <Review|Critique>
+# One line per entry: index<TAB>when<TAB>scope<TAB>red<TAB>yellow<TAB>green<TAB>start<TAB>end
+# where start/end are 1-based inclusive line numbers of the entry body.
+#
+# Marked entries take their metadata from the marker. Unmarked ones fall back to the
+# heading's date and the `**Blockers:** N` counts in the prose, which is all a pre-1.7
+# report carries. Fenced code blocks are skipped when looking for headings, or a report
+# quoting a line that begins `# Review` would split in the middle of itself.
+_reports_split() {
+  local file="$1" kind="$2"
+  [ -f "$file" ] || return 0
+  awk -v kind="$kind" -v m="$AETHER_REVIEW_MARKER" -v pm="$AETHER_PLAN_MARKER" \
+      -v me="$AETHER_REVIEW_MARKER_END" -v pe="$AETHER_PLAN_MARKER_END" '
+    # `last` is the final line of the entry. No apostrophes in here: the whole awk
+    # program is single-quoted, so one would end it and hand the rest to bash.
+    # A new heading ends the previous entry on the line before it; end-of-file ends it
+    # on the last line there is. Using NR-1 for both silently dropped the closing line
+    # of the newest report — the one you actually read.
+    function flush(last,   i) {
+      if (start == 0) return
+      end = last
+      while (end > start && lines[end] ~ /^[[:space:]]*$/) end--
+      printf "%d\t%s\t%s\t%d\t%d\t%d\t%d\t%d\n",
+             ++n, (when == "" ? "—" : when), (scope == "" ? "—" : scope),
+             (red < 0 ? 0 : red), (yellow < 0 ? 0 : yellow), (green < 0 ? 0 : green),
+             start, end
+      start = 0; when = ""; scope = ""; red = -1; yellow = -1; green = -1; marked = 0
+    }
+    function num(line, label,   t) {
+      if (match(line, "[*][*]" label ":[*][*][^0-9]*[0-9]+")) {
+        t = substr(line, RSTART, RLENGTH); gsub(/[^0-9]/, "", t); return t + 0
+      }
+      return -1
+    }
+    function meta(line, key,   v) {
+      if (match(line, key "=[^ >]+")) {
+        v = substr(line, RSTART + length(key) + 1, RLENGTH - length(key) - 1)
+        return v
+      }
+      return ""
+    }
+    BEGIN { red = -1; yellow = -1; green = -1 }
+    { lines[NR] = $0 }
+    /^[[:space:]]*```/ { fence = !fence }
+    # A marker opens a new entry and carries everything we need.
+    (index($0, m) == 1) || (kind == "Critique" && index($0, pm) == 1) {
+      flush(NR - 1)
+      start = NR + 1
+      when = meta($0, "date"); scope = meta($0, "scope")
+      red = meta($0, "blockers") + 0; yellow = meta($0, "significant") + 0
+      green = meta($0, "minor") + 0
+      marked = 1; in_marked = 1
+      next
+    }
+    (index($0, me) == 1) || (kind == "Critique" && index($0, pe) == 1) {
+      if (start) { end = NR - 1
+        printf "%d\t%s\t%s\t%d\t%d\t%d\t%d\t%d\n",
+               ++n, (when == "" ? "—" : when), (scope == "" ? "—" : scope),
+               (red < 0 ? 0 : red), (yellow < 0 ? 0 : yellow), (green < 0 ? 0 : green),
+               start, end
+        start = 0; when = ""; scope = ""; red = -1; yellow = -1; green = -1; marked = 0 }
+      in_marked = 0
+      next
+    }
+    # An unmarked heading opens one too, but only outside a fence.
+    # A marked entry carries a heading too. Without this guard the marker opens the
+    # entry and the heading immediately closes it and opens another, so every marked
+    # report counted twice.
+    !fence && !in_marked && index($0, "# " kind " — ") == 1 {
+      flush(NR - 1)
+      start = NR
+      # `# Review — staged diff — 2026-05-07` → the last dash-separated field.
+      if (match($0, /[0-9]{4}-[0-9]{2}-[0-9]{2}/)) when = substr($0, RSTART, RLENGTH)
+      next
+    }
+    # Take the number that follows each label, not every digit on the line. The prose
+    # is model-written and its shape genuinely varies across real files — all of
+    # `**Blockers:** 0`, `**Blockers:** 0 | **Significant:** 3 | **Minor:** 4` and
+    # `**Blockers:** 0 — ... — Good to ship; address the gap` occur in one history.
+    # Stripping non-digits from the whole line turned `2 | 3 | 4` into 234.
+    start && !marked {
+      if (red    < 0) red    = num($0, "Blockers")
+      if (yellow < 0) yellow = num($0, "Significant")
+      if (green  < 0) green  = num($0, "Minor")
+    }
+    END { flush(NR) }
+  ' "$file"
+}
+
+# _reports_show <file> <kind> <index|""> — print one entry, markers excluded.
+_reports_show() {
+  local file="$1" kind="$2" want="${3:-}" rows row start end
+  rows=$(_reports_split "$file" "$kind")
+  [ -n "$rows" ] || return 1
+  if [ -n "$want" ]; then
+    row=$(printf '%s\n' "$rows" | awk -F'\t' -v i="$want" '$1 == i')
+  else
+    row=$(printf '%s\n' "$rows" | tail -1)
+  fi
+  [ -n "$row" ] || return 2
+  start=$(printf '%s' "$row" | cut -f7); end=$(printf '%s' "$row" | cut -f8)
+  sed -n "${start},${end}p" "$file"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # PLANS
 #
 # `aether plan status` exists because the failure this replaces was invisible: the
@@ -2076,9 +2280,57 @@ EOF
 # should be one command away.
 # ═══════════════════════════════════════════════════════════════════════════
 
+# whetstone's critique for the plan the gate is judging. Read from the plan itself,
+# because that is the authoritative copy and the one aether_plan_state hashes —
+# .aether/out/CRITIQUE.md is the accumulating history, behind --history.
+_plan_critique() {
+  local hist=false raw=false a
+  for a in "$@"; do
+    case "$a" in --history) hist=true ;; --raw) raw=true ;;
+      *) printf 'Usage: aether plan critique [--history] [--raw]\n'; return 1 ;; esac
+  done
+  $hist && { _reports_list "$(_reports_file CRITIQUE.md)" Critique "plan critique" \
+               $($raw && printf -- --raw); return $?; }
+
+  local f; f=$(aether_plan_file)
+  if [ -z "$f" ]; then
+    printf 'No plan recorded for this project.  `aether plan status` explains.\n'
+    return 0
+  fi
+  local state; state=$(aether_plan_state "$f")
+  case "$state" in
+    uncritiqued)
+      printf '%s\n' "${f/#$HOME/~}"
+      _dr_warn "no critique on record"; _dr_fix "/critique-plan"; return 0 ;;
+    none)
+      printf 'The recorded plan file is gone.  `aether plan status` explains.\n'; return 0 ;;
+  esac
+
+  $raw || {
+    printf '%s\n' "${f/#$HOME/~}"
+    # A stale critique is still worth reading — it is what was said, about an older
+    # version of the plan. Saying so beats printing it as though it were current.
+    [ "$state" = stale ] && { _dr_warn "the plan changed after this critique"; _dr_fix "/critique-plan"; }
+    printf '\n'
+  }
+  awk -v m="$AETHER_PLAN_MARKER" -v e="$AETHER_PLAN_MARKER_END" '
+    index($0, m) == 1 { inb = 1; next }
+    inb && index($0, e) == 1 { inb = 0; next }
+    inb { print }' "$f"
+}
+
 cmd_plan() {
   local sub="${1:-status}"; shift 2>/dev/null || true
   case "$sub" in
+    critique) _plan_critique "$@" ;;
+    help|--help|-h)
+      printf 'aether plan <subcommand>\n\n'
+      printf '  status              The plan the gate sees, and its critique state\n'
+      printf '  critique [--raw]    That plan\047s critique, read from the plan itself\n'
+      printf '  critique --history  Every critique, from .aether/out/CRITIQUE.md\n'
+      printf '  path                Where the recorded plan is\n'
+      printf '  hash [file]         The hash the gate compares against\n'
+      return 0 ;;
     path) aether_plan_file; printf '\n' ;;
     hash)
       local f="${1:-$(aether_plan_file)}"
@@ -2114,7 +2366,7 @@ cmd_plan() {
         printf '      the nudge also fires on the first source write and at git commit\n'
       fi
       return 0 ;;
-    *) printf 'Unknown: aether plan %s\n\nTry: status, path, hash\n' "$sub"; return 1 ;;
+    *) printf 'Unknown: aether plan %s\n\nTry: status, critique, path, hash\n' "$sub"; return 1 ;;
   esac
 }
 
@@ -2551,6 +2803,14 @@ cmd_config() {
       _cfg_unset "$(_cfg_file "$uscope")" "${parsed%% *}" "${parsed#* }"
       printf '  ✓ unset %s\n' "$raw"
       [ "$uscope" = local ] && [ "$(aether_trust_state)" != none ] && _trust_record
+      return 0 ;;
+    help|--help|-h)
+      printf 'aether config <subcommand>\n\n'
+      printf '  show [section] [--values|--raw]   Resolved values, and where each came from\n'
+      printf '  explain <section>.<key>          One key in full\n'
+      printf '  doctor                           Unknown keys, dead paths, trust state\n'
+      printf '  get|set|unset <section>.<key>    Read or change one\n'
+      printf '  path|edit [global]               The file itself\n'
       return 0 ;;
     *) printf 'Unknown: aether config %s\n\nTry: show, explain, doctor, path, edit, get, set, unset\n' "$sub"; return 1 ;;
   esac

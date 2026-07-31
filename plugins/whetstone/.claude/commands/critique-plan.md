@@ -240,6 +240,10 @@ Two reasons this goes in the plan rather than beside it:
 - **It is per plan.** One `CRITIQUE.md` for a whole project meant critiquing plan A
   satisfied the gate for plan B.
 
+Read it back with `aether plan critique`, which prints the block for whichever plan
+`aether plan status` reports — and says so when the plan has changed since. Use
+`aether plan critique --history` for the accumulated file.
+
 Then, **if a write outside the plan is possible** — i.e. not in plan mode — also append
 the same report to `.aether/out/CRITIQUE.md` (or `~/.aether/out/CRITIQUE.md` if the
 project has no `.aether/`), under a header of

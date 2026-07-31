@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # enforce-temper.sh — PreToolUse command hook (matcher: Bash)
 #
-# Blocks high-risk git operations and nudges the agent to run /critique-diff first.
+# Calls out high-risk git operations and nudges the agent to run /critique-diff first.
 # This is Tier 2 (reactive). The proactive Tier 1 rules live in templates/CLAUDE.md.
 #
 # Triggers:
@@ -11,9 +11,16 @@
 #   git rebase -i *   — if rebase range exceeds 5 commits
 #   git stash pop *   — if stash diff exceeds size threshold
 #
-# Bypass: append  # temper:skip  (or  # suite:skip  to silence all suite hooks) to any command.
-# Exit 1 = block the command and show the message.
-# Exit 0 = allow silently.
+# Bypass: append  # temper:skip  (or  # suite:skip) as a trailing comment. The marker is
+# only honoured there — see BYPASS.md.
+#
+# Exit 1 = show the message. Exit 0 = stay silent. Neither stops the command: only exit 2
+# does that in Claude Code, and no aether hook ever exits 2, because one corrupt gate file
+# would then lock the user out of every command. `tests/acceptance.sh` asserts it.
+#
+# Internally the gate returns 2 for its two high-risk verdicts (unreviewed push,
+# critical-path commit) so enforce-suite.sh's nudge budget can tell them from advice and
+# never suppress them. The standalone entrypoint clamps that back to 1.
 #
 # Dual mode. Standalone, the entrypoint at the bottom reads stdin and exits.
 # Under the aether suite, enforce-suite.sh sources this file with SUITE_MODE=1

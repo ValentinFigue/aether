@@ -227,41 +227,67 @@ Cairn also warns before generating if it detects common secret patterns in your 
 
 ## Configuration
 
-Cairn resolves settings in three layers, lowest to highest priority:
+One sectioned file per scope — `~/.aether/config` globally, `.aether/config` in a
+project — resolved **per key**, with per-run flags on top. `/draft-config` writes it.
 
-**1. Global config** (`~/.claude/cairn.config`) — your personal defaults across all projects
-**2. Local config** (`./cairn.config`) — project-level overrides
-**3. Per-run flags** (`$ARGUMENTS`) — always win, override both config files
-
-### Config key reference
+### `[cairn]` — how the commands behave
 
 | Key | Default | Description |
 |---|---|---|
-| `enabled` | `true` | Enable/disable `/draft-commit` at runtime |
-| `style` | `conventional` | Default style for `/draft-commit` |
-| `pr.base` | auto | Default base branch for `/draft-pr` |
-| `pr.style` | `conventional` | Default PR title style |
-| `pr.template_file` | — | Path to PR description template (e.g. `.github/pull_request_template.md`) |
-| `pr.rules_file` | — | Path to prose generation rules (e.g. `.cairn/pr-rules.md`) |
-| `changelog.style` | `conventional` | Default changelog grouping style |
-| `changelog.extra_types` | — | Comma-separated extra conventional types (e.g. `hotfix,release`) |
-| `changelog.exclude_paths` | — | Comma-separated path prefixes to exclude |
-| `summary.format` | `standup` | Default output format for `/draft-summary` |
-| `summary.window` | `1 day ago` | Default time window for `/draft-summary` |
+| `enabled` | `true` | Whether cairn's gate and commands run at all |
+| `style` | `conventional` | Commit message format for `/draft-commit` |
+| `pr.base` | `auto` | Base branch to diff against; `auto` detects origin/main or origin/master |
+| `pr.style` | `conventional` | PR title format |
+| `pr.template_file` | — | Structure to fill in for the PR body (superseded by `.aether/templates/pr.md`) |
+| `pr.rules_file` | — | Prose rules for PR generation (superseded by the `[draft-pr]` section of `rules.md`) |
+| `changelog.style` | `conventional` | Group entries by Conventional Commits type, or emit a flat list |
+| `changelog.extra_types` | — | Additional commit types to group under |
+| `changelog.exclude_paths` | — | Paths whose commits never appear in a changelog entry |
+| `summary.format` | `standup` | Default shape of a generated summary |
+| `summary.window` | `1 day ago` | How far back to look when no `--from` is given |
 
-### Example `cairn.config`
+### `[git]` — how this project writes commits and PRs
+
+House rules rather than cairn settings, which is why they live in their own section:
+nothing here is executed, and `/critique-pr` checks against the same values.
+
+| Key | Example | Effect |
+|---|---|---|
+| `scopes` · `types` | `api, web` | `/draft-commit` picks from your real ones instead of inventing |
+| `ticket` | `TK-[0-9]+` | pulled from the branch into the subject; `/critique-pr` flags a PR without one |
+| `trailers` | `Signed-off-by` | always emitted |
+| `base` | `main` | `/draft-pr` stops auto-detecting |
+
+### Example
 
 ```
-enabled: true
-style: conventional
-pr.base: develop
-pr.rules_file: .cairn/pr-rules.md
+[cairn]
+style:          conventional
+pr.base:        develop
 summary.format: slack
+
+[git]
+scopes: api, web, infra
+ticket: TK-[0-9]+
 ```
+
+```bash
+aether config show cairn              # resolved values, and where each came from
+aether config explain cairn.pr.base   # one key in full
+aether config set cairn.style plain
+aether config set cairn.style plain global
+```
+
+> Before v1.1 this was `cairn.config` and `~/.claude/cairn.config`. Both are still read
+> when the new file has no value for a key; `aether migrate` folds them in.
 
 ### PR rules file
 
-The `pr.rules_file` is freeform prose that shapes how `/draft-pr` generates descriptions. Example `.cairn/pr-rules.md`:
+Freeform prose shaping how `/draft-pr` writes descriptions. The current home is the
+`[draft-pr]` section of `.aether/rules.md`, which supersedes `pr.rules_file` and
+concatenates global-then-project so a repo adding a line does not drop your house style.
+It is [ignored until you run `aether trust`](../../README.md#trust). Either way the
+content looks like this:
 
 ```markdown
 - Emphasize WHY changes were made, not just what changed
@@ -278,25 +304,29 @@ The `pr.rules_file` is freeform prose that shapes how `/draft-pr` generates desc
 A global install also provides a `cairn` command for managing your setup:
 
 ```bash
-cairn status                                      # install state + config summary
-cairn config show                                 # full effective config with sources
+cairn status                       # install state + resolved config
+cairn config                       # show the resolved [cairn] section, with sources
 
-cairn disable local                               # silence /draft-commit for this project
-cairn disable global                              # silence everywhere
-cairn enable local                                # restore
+cairn disable local                # silence /draft-commit for this project
+cairn disable global               # silence everywhere
+cairn enable local                 # restore
 
-cairn config set --style=plain                    # plain style for this project
-cairn config set --style=conventional --global    # conventional everywhere
-cairn config set --pr-base=develop                # default PR base branch
-cairn config set --pr-rules=.cairn/pr-rules.md    # set rules file
-cairn config set "--summary-window=1 week ago"    # widen summary window
-cairn config reset local                          # wipe project overrides
-
-cairn update                                      # pull latest command files
-cairn uninstall global --claude-md                # full removal
+cairn update                       # reinstall cairn from the clone
+cairn uninstall global --claude-md # full removal
 ```
 
-Run `cairn help` for the full reference.
+`cairn` is a shim that execs `aether cairn …`. **Changing a value is `aether config set
+<section>.<key> <value>`** — namespaced, space-separated, no `=`. The plugin shim's
+`config` only shows:
+
+```bash
+aether config set cairn.style plain
+aether config set cairn.pr.base develop
+aether config set git.ticket 'TK-[0-9]+'
+aether config unset cairn.summary.window
+```
+
+Run `aether help` for the full reference.
 
 ---
 
@@ -306,7 +336,7 @@ Run `cairn help` for the full reference.
 - [x] `/draft-pr` — generate a full PR title and description from the branch diff vs base
 - [x] `/draft-changelog` — generate a CHANGELOG entry from a commit range
 - [x] `/draft-summary` — plain-language standup summary of what changed and why
-- [x] `cairn.config` support for extra conventional types, exclude paths, and per-command settings
+- [x] `[cairn]` config support for extra conventional types, exclude paths, and per-command settings
 - [x] `cairn disable` / `enable` respected by the command file at runtime
 - [ ] MCP server upgrade for richer git integration
 - [ ] Workflow guide: run `/critique-diff` to review the diff → `/draft-commit` to narrate it (temper→cairn handoff)

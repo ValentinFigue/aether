@@ -7,6 +7,40 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
+## [Unreleased]
+
+### Added
+
+- **`aether review show` and `aether review list`** — read the critics back. The reports
+  accumulate in `.aether/out/TEMPER.md`, and one real repository reached 21 reviews in
+  357 lines, at which point seeing the latest meant
+  `awk '/^# Review/{n++} n==21'`.
+
+  `list` answers what `cat` cannot: *have any of my recent reviews had blockers.*
+  `show [N]` prints one; `--raw` gives the markdown alone, for `glow`.
+
+- **`aether plan critique`** — whetstone's critique for the plan `aether plan status`
+  reports, read from **inside the plan**, which is the authoritative copy and the one the
+  gate hashes. It says when the plan has changed since. `--history` reads the accumulated
+  `.aether/out/CRITIQUE.md`.
+
+- **A marker on temper's reports**, matching what whetstone has done since 1.4.0:
+  `<!-- aether:review date=… scope=… blockers=… -->`. It carries a timestamp rather than
+  a date, which is what makes two reviews on the same day distinguishable — not
+  hypothetical, since one real history has two byte-identical `# Review — staged diff —
+  2026-05-07` headings.
+
+  **Reports written before this are still listed and shown**, found by their heading.
+  They carry no scope and no time of day, and the table says so. A reader that only
+  understood the new marker would make every existing report invisible, which would be
+  worse than the awk it replaces.
+
+### Fixed
+
+- **`aether review --help`, `aether plan --help` and `aether config --help` answered
+  `Unknown: …`** — on the commands whose subcommands you are most likely to be looking
+  for.
+
 ## [1.7.0] — 2026-07-31
 
 ### Added

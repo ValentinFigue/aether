@@ -31,7 +31,7 @@ proj() {
 }
 ae() { ( cd "$1" && env HOME="$1/home" AETHER_REPO="$REPO" bash "$CLI" "${@:2}" 2>&1 ); }
 
-# An unmarked entry, the pre-1.7 shape. $4 is the counts line, whose format varies.
+# An unmarked entry, the pre-1.8 shape. $4 is the counts line, whose format varies.
 legacy() {
   cat >> "$1/.aether/out/TEMPER.md" <<EOF
 
@@ -44,7 +44,7 @@ EOF
 }
 
 # ── unmarked entries: everything already on disk ─────────────────────────────
-suite "pre-1.7 reports are still readable"
+suite "pre-1.8 reports are still readable"
 D=$(proj)
 legacy "$D" "first"  "2026-05-07" '**Blockers:** 0
 **Significant:** 1

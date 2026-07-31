@@ -93,6 +93,20 @@ out=$(pc temper config set); e=$?
 assert_exit 1 "$e" "set with no key exits 1"
 assert_contains "$out" "Usage" "…with a usage line"
 
+# The shim's section lookup pipes _schema_all into awk, which is the shape that
+# produced `printf: write error: Broken pipe` once before: an `exit` in the awk closes
+# the pipe mid-write and bash on Linux reports the EPIPE into whatever the caller
+# captured. macOS dies from SIGPIPE silently, so this must be asserted directly rather
+# than left for a value comparison to notice — it passed locally and failed in CI.
+for c in "temper config set auto_nudge_lines 300" "temper config get auto_nudge_lines" \
+         "temper config unset auto_nudge_lines" "cairn config set trailers Signed-off-by" \
+         "cairn config explain pr.base" "temper config"; do
+  # shellcheck disable=SC2086
+  err=$( cd "$PC_DIR" && env HOME="$PC_HOME" AETHER_REPO="$REPO" bash "$CLI" $c 2>&1 >/dev/null )
+  if [ -z "$err" ]; then pass "no stderr from: $c"
+  else fail "no stderr from: $c" "${err%%$'\n'*}"; fi
+done
+
 # ── status against a real install ────────────────────────────────────────────
 suite "status"
 H=$(new_home)

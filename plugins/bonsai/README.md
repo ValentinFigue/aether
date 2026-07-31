@@ -60,7 +60,7 @@ cd aether/plugins/bonsai
 bash scripts/setup.sh
 ```
 
-`setup.sh` installs Python deps via uv (into `py/.venv`), builds the TypeScript server, and registers the enforcement hook at user scope in `~/.claude.json`. `sed`, `awk`, `grep`, and `find` on `.py`/`.ts`/`.tsx` files will be blocked everywhere and redirected to the appropriate bonsai tool. Restart Claude Code to pick up the hook.
+`setup.sh` installs Python deps via uv (into `py/.venv`), builds the TypeScript server, and registers the enforcement hook at user scope in `~/.claude.json`. `sed`, `awk`, `grep` and `find` on `.py`/`.ts`/`.tsx` files then get a nudge pointing at the bonsai tool that handles re-exports and aliased imports. It is a nudge, not a block: the hook prints and your command still runs. Restart Claude Code to pick up the hook.
 
 ### 2. Connect Claude Code to your local build
 

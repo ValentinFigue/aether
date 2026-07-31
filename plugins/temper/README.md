@@ -101,7 +101,7 @@ No Python, npm, or build step required. Just bash and Claude Code.
 
 ## When the hook fires
 
-The `enforce-temper.sh` PreToolUse hook blocks the following operations and asks you to run `/critique-diff` first:
+The `enforce-temper.sh` PreToolUse hook speaks up on the following operations and asks you to run `/critique-diff` first:
 
 | Operation | Condition |
 |-----------|-----------|
@@ -111,11 +111,22 @@ The `enforce-temper.sh` PreToolUse hook blocks the following operations and asks
 | `git rebase -i` | Range touches > 5 commits |
 | `git stash pop` | Stash diff > 200 lines |
 
-**Bypass:** append `# temper:skip` to silence the temper hook, or `# suite:skip` to silence all suite hooks (temper, cairn, whetstone) at once.
+None of these stops the command. A `PreToolUse` hook can only do that by exiting 2, and
+no aether hook ever does — one corrupt gate file would otherwise lock you out of every
+command you type, so the chain is built to fail open and `tests/acceptance.sh` asserts
+it. The `git push` and critical-path verdicts are the two the suite never budgets away:
+they print in full, alone, and suppress every other plugin's nudge. See
+[BYPASS.md](../../BYPASS.md) for the threat model, and the roadmap for the opt-in strict
+mode that would let those two exit 2 for real.
+
+**Bypass:** append `# temper:skip`, or `# suite:skip` for every suite hook at once. The
+marker is only honoured in a **trailing comment** — after a `#` that starts a word,
+outside quotes:
 
 ```bash
 git push origin main  # temper:skip
 git push origin main  # suite:skip
+git commit -m "docs: mention # temper:skip"   # NOT a bypass — it is inside the message
 ```
 
 ---
@@ -137,41 +148,66 @@ them, so the two can never drift. Requires `gh`, authenticated.
 
 ## Configuration
 
-Create `temper.config` in your project root (local) or `~/.claude/temper.config` (global):
+One sectioned file per scope — `~/.aether/config` globally, `.aether/config` in a
+project — resolved **per key**, so a repo that sets one threshold keeps the global value
+of every other. `/draft-config` writes it for you.
 
 ```
-enabled: true
-critics: correctness, design, risk, coverage
-skip:
-severity: red, yellow
-diff: staged
+[temper]
+critics:          correctness, design, risk, coverage
+severity:         red, yellow
+diff:             staged
 auto_nudge_lines: 200
 auto_nudge_files: 10
-critical_paths: *auth*, *permission*, *token*, migrations/, *alembic*, *.sql, *schema*, *secret*, *credential*, *.env
+critical_paths:   *auth*|*permission*|*token*|migrations/|*alembic*|\.sql|*schema*|*secret*|*credential*|\.env
 ```
+
+`critical_paths` is **pipe-separated**. A space- or comma-separated list is read as one
+pattern and silently matches nothing.
+
+What makes the critics measure rather than guess is the `[project]` section — your real
+test, lint and typecheck commands — and it is [ignored until you run `aether
+trust`](../../README.md#trust), because a critic executes it.
+
+Prose for the critics goes in `.aether/rules.md`, under `[critique-diff]` or
+`[critique-pr]`.
+
+```bash
+aether config show temper                    # resolved values, and where each came from
+aether config explain temper.critical_paths  # one key in full
+aether config set temper.auto_nudge_lines 300
+aether config set temper.auto_nudge_lines 300 global
+```
+
+> Before v1.1 this was `temper.config` and `~/.claude/temper.config`. Those are still
+> read when the new file has no value for a key; `aether migrate` folds them in.
 
 ### CLI
 
 ```
-temper status                          Show install state and effective config
-temper enable  [local|global]          Enable temper
-temper disable [local|global]          Disable temper
-temper config set auto_nudge_lines=300
-temper config set critics=correctness,risk --global
-temper config reset local
-temper update                          Re-download latest critique-diff.md
+temper status                     Install state and resolved config
+temper enable  [local|global]     Enable temper
+temper disable [local|global]     Disable temper
+temper config                     Show the resolved [temper] section
+temper update                     Reinstall temper from the clone
 temper uninstall [global] [--claude-md]
 ```
+
+`temper` is a shim that execs `aether temper …`, so `aether temper status` is the same
+command. **Changing a value is `aether config set`**, not `temper config set` — the
+plugin shim's `config` only shows.
 
 ---
 
 ## Two-tier gate model
 
 **Tier 1 — Proactive (CLAUDE.md rules)**
-When installed with `--claude-md`, behavioral guidelines teach Claude Code to suggest `/critique-diff` before you even reach a git command — based on session scope, critical file patterns, and bonsai refactoring activity. These are soft instructions, not hard blocks.
+When installed with `--claude-md`, behavioral guidelines teach Claude Code to suggest `/critique-diff` before you even reach a git command — based on session scope, critical file patterns, and bonsai refactoring activity. They fire before a git command exists to inspect, which is their whole value — and like everything else here, they advise rather than stop.
 
 **Tier 2 — Reactive (enforce-temper.sh hook)**
-The hook is the hard gate. It intercepts high-risk git operations and blocks them until you acknowledge the risk via `/critique-diff` or `# temper:skip`.
+The hook sees the command itself, which is the part a guideline cannot guarantee. It
+recognises high-risk git operations and says so at the moment they happen. It is louder
+than Tier 1, not harder: the command still runs either way.
 
 ---
 
@@ -204,4 +240,4 @@ bash uninstall.sh global --claude-md  # also remove CLAUDE.md section
 | **temper** | Critique diffs | After you build |
 | [cairn](../cairn/) | Git narration | When you ship |
 
-> **Suite install order:** install temper before cairn. Both hooks intercept `git commit` — temper (review gate) should fire first, then cairn (narration). Install order matches hook execution order in `settings.json`.
+> **Order does not depend on install order.** There is one `PreToolUse` hook for the whole suite, and `enforce-suite.sh` runs the gates in lifecycle order — whetstone, bonsai, temper, cairn — whatever sequence you installed them in.

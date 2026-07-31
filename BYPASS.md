@@ -80,10 +80,19 @@ for the same string. They used to spell the whitespace three different ways.
 
 ## Threat model
 
-**Every nudge is advisory by construction.** The agent writes the commands the hook
-inspects, so the agent can write the marker. Nothing here is a permission boundary,
-and it is not trying to be — the suite exists to make the right thing the default when
-nobody is paying attention, not to stop someone who has decided otherwise.
+**Everything here is advisory, and not only because of the marker.** Two separate
+reasons, and the second is the stronger one:
+
+1. The agent writes the commands the hook inspects, so the agent can write the marker.
+2. **Nothing exits 2, so nothing is stopped.** A `PreToolUse` hook can only stop a tool
+   call by exiting 2. Every path in `enforce-suite.sh` exits 0 or 1, and
+   `tests/acceptance.sh` fails the build if any payload makes it exit 2 — because a
+   corrupt or half-written gate file would otherwise lock you out of every command you
+   type. Failing open is a deliberate trade, not an oversight.
+
+Nothing here is a permission boundary, and it is not trying to be — the suite exists to
+make the right thing the default when nobody is paying attention, not to stop someone
+who has decided otherwise.
 
 What that buys, and what it does not:
 
@@ -98,13 +107,19 @@ Two consequences worth stating plainly:
 - **The marker has to be hard to trip over by accident, not hard to type.** That is why
   it must be a trailing comment. A marker that fires on any substring is not more
   secure, only more surprising — it silences commits that merely mention it.
-- **Blocks are the one place the distinction bites.** temper's unreviewed-push and
-  critical-path-commit messages are not held back by the nudge budget and never share
-  the output with anything else. A nudge you miss costs you a better commit message; a
-  block you miss is unreviewed code on a shared branch.
+- **Two verdicts are exempt from the nudge budget, which is not the same as blocking.**
+  temper's unreviewed-push and critical-path-commit messages print in full, alone, and
+  suppress every other nudge — the strongest signal the hook has. The command still
+  runs. A nudge you miss costs you a better commit message; one of these you miss is
+  unreviewed code on a shared branch, which is why they get the whole output and no
+  bypass marker is needed to explain them away.
 
-If you need an actual gate, use one that runs where the agent cannot edit it: a
-pre-receive hook on the server, or a required CI check.
+An opt-in `strict` mode that lets those two exit 2 for real is on the roadmap. Even then
+it would raise the cost of a bypass rather than remove it — the agent could edit the
+config, deregister the hook, or route around the matcher.
+
+**If you need an actual gate, run it where the agent cannot edit it:** a pre-receive
+hook on the server, or a required CI check. That is the boundary; this file is not.
 
 ## One nudge at a time
 
@@ -123,10 +138,10 @@ One `git commit` used to print fifteen lines from three plugins. Nudge fatigue i
 guardrails die: the fastest way to stop the noise becomes `# aether:skip` on
 everything, which is worse than any single nudge.
 
-A **block** is exempt. It prints in full and alone, and the nudges beside it are
-dropped rather than appended — being told you cannot push is the only thing that
-matters at that moment. Nothing announces the drop, so `aether status --notes` shows
-what was held back either way. Notes live in `.aether/out/.notes` in the project, and
+temper's two high-risk verdicts are exempt. Each prints in full and alone, and the
+nudges beside it are dropped rather than appended — being told your push had no review
+is the only thing worth reading at that moment. Nothing announces the drop, so
+`aether status --notes` shows what was held back either way. Notes live in `.aether/out/.notes` in the project, and
 are overwritten on every tool call.
 
 ## Notes

@@ -80,9 +80,10 @@ critic run automatically after every plan — no manual invocation needed. Pass
 aether block instead (`bash install.sh --global --claude-md` from the repo root), which
 covers all four plugins at once.
 
-With this in place, Claude Code runs `/critique-plan` after presenting any plan and blocks
-implementation if blockers are found. Use `/critique-plan --off` to skip a specific run
-without disabling it globally.
+With this in place, Claude Code runs `/critique-plan` after presenting any plan and is
+instructed to stop before implementing if 🔴 blockers are found. That is an instruction
+to the model, not an enforced gate — nothing in aether can stop a tool call, by design.
+Use `/critique-plan --off` to skip a specific run without disabling it globally.
 
 ---
 
@@ -163,33 +164,41 @@ Severity ratings:
 
 ## Configuration
 
-Whetstone resolves settings in three layers, lowest to highest priority:
-
-**1. Global config** (`~/.claude/whetstone.config`) — your personal defaults across all projects  
-**2. Local config** (`./whetstone.config`) — project-level overrides  
-**3. Per-run flags** (`$ARGUMENTS`) — always win, override both config files
-
-Config file format (key-value, one per line):
+One sectioned file per scope — `~/.aether/config` globally, `.aether/config` in a
+project — resolved **per key**, with per-run flags on top. `/draft-config` writes it.
 
 ```
-enabled: true
-critics: impl, risk
-skip: arch
+[whetstone]
+critics:  impl, risk
+skip:     arch
 severity: red, yellow
 ```
 
-**Project-specific critic instructions** — create `whetstone.config.md` in your project root to give the critics prose context:
+```bash
+aether config show whetstone            # resolved values, and where each came from
+aether config set whetstone.critics "impl, risk"
+aether config set whetstone.severity red global
+```
+
+**Prose for the critics** goes in `.aether/rules.md`, under a `[critique-plan]` section.
+Global and project prose **concatenate** rather than override, so a repo adding one line
+does not lose your house style:
 
 ```markdown
-# whetstone config
-
+[critique-plan]
 This project uses event sourcing. Flag any plan that bypasses the event log.
 All writes must go through the `EventStore` service — direct DB writes are a blocker.
 
 Treat all observability gaps as 🔴 blockers (this team is on-call).
 ```
 
-Whetstone reads this before every critique and applies it across all passes.
+`.aether/rules.md` is [ignored until you run `aether trust`](../../README.md#trust) —
+prose reaching a critic's context is an injection vector with no log, so it waits for
+you. When it is skipped, the critique says so rather than reviewing with less context
+than the file implies.
+
+> Before v1.1 this was `whetstone.config` and `whetstone.config.md`. Both are still read
+> when the new files have no value; `aether migrate` folds them in.
 
 ---
 
@@ -198,22 +207,21 @@ Whetstone reads this before every critique and applies it across all passes.
 A global install also provides a `whetstone` command for managing your setup:
 
 ```bash
-whetstone status                              # install state + effective config
+whetstone status                          # install state + resolved config
+whetstone config                          # show the resolved [whetstone] section
 
-whetstone disable local                       # silence for this project
-whetstone disable global                      # silence everywhere
-whetstone enable local                        # restore
+whetstone disable local                   # silence for this project
+whetstone disable global                  # silence everywhere
+whetstone enable local                    # restore
 
-whetstone config set --only=risk              # risk-only for this project
-whetstone config set --skip=arch              # drop arch critic locally
-whetstone config set --severity=red --global  # blockers-only everywhere
-whetstone config reset local                  # wipe project overrides
-
-whetstone update                              # pull latest critique-plan.md
-whetstone uninstall global --claude-md        # full removal
+whetstone update                          # reinstall whetstone from the clone
+whetstone uninstall global --claude-md    # full removal
 ```
 
-Run `whetstone help` for the full reference.
+`whetstone` is a shim that execs `aether whetstone …`. **Changing a value is `aether
+config set <key> <value>`** — the plugin shim's `config` only shows.
+
+Run `aether help` for the full reference.
 
 ---
 

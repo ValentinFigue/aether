@@ -1,12 +1,13 @@
 # aether
 
-Checkpoints for Claude Code. aether makes a coding agent stop at the four moments a careful colleague would — before implementing, while editing, before committing, before pushing — and gives each one a command that does the checking.
+Checkpoints for coding agents. aether makes an agent stop at the four moments a careful colleague would — before implementing, while editing, before committing, before pushing — and gives each one a command that does the checking.
 
 
 | | |
 |---|---|
-| [The problem](#the-problem) · [Quick start](#quick-start) | why, and getting it running |
+| [The problem](#the-problem) · [Does it hold up](#does-it-hold-up) · [Quick start](#quick-start) | why, whether to believe it, and getting it running |
 | [How it works](#how-it-works) · [Configuration](#configuration) · [Trust](#trust) | the part you touch daily |
+| [Monorepos](#monorepos--projectpath) · [`aether check`](#monorepos--projectpath) | one declarative place a repo says how to test itself |
 | [Commands](#commands) · [The development workflow](#the-development-workflow) | what to run, and when |
 | [CLI reference](#cli-reference) · [Bypass](#bypass) · [Roadmap](#roadmap) | reference |
 
@@ -25,27 +26,37 @@ You ask for rate limiting on an API. Same request, both columns:
 | **plan** | — | `/critique-plan` → 🔴 an in-process counter does nothing behind a load balancer |
 | **edit** | `sed -i s/RateLimit/Limiter/ *.py` — misses the re-export in `api/__init__.py` | bonsai: *use `pyrename`, sed misses re-exports* |
 | **commit** | `"add rate limiting"` | `/critique-diff` → 🔴 the limit is never released when the handler raises |
-| **push** | pushed, unreviewed | blocked until it has been reviewed |
+| **push** | pushed, unreviewed | the review you skipped, named — in full, and on its own |
 | **PR body** | `"add rate limiting"` | `/draft-pr` writes it from the diff, so it names the Redis dependency you added |
 
 Left column: you find out in review, three days later, or in production. Right
 column: at the point where fixing it is a sentence, not a revert.
 
 Each checkpoint is a slash command you can run yourself, plus a hook that reminds
-you when you forget. Nothing blocks except pushing unreviewed code and committing
-to a path you marked critical — everything else is a nudge, and
-`# aether:skip` silences any of it for one command.
+you when you forget.
 
-### Why one suite rather than four plugins
+**Everything the hook does is advice.** It prints; the command then runs. Pushing
+unreviewed code and committing to a path you marked critical are the two verdicts that
+print in full and alone — nothing else shares the output with them — but they do not
+stop the command, and `# aether:skip` silences the rest for one call. A `PreToolUse`
+hook can only stop a tool call by exiting 2, and aether never does: one corrupt gate
+file would otherwise lock you out of every command you type. See
+[Bypass](#bypass) for the threat model, and the roadmap for the opt-in strict mode
+that would trade that safety for real teeth.
 
-The four started as separate Claude Code plugins, and each installed its
-own hook, its own bypass syntax, and edited `settings.json` on its own. Install all
-four and you get four competing hook registrations, four redundant checks on the
-same `git commit`, and no way to turn them all off at once.
+### Does it hold up
 
-aether is the wiring: one `PreToolUse` hook that knows the order of things, one
-`settings.json` pass, one config file, one bypass convention, one CLAUDE.md block.
-The plugins still install and run standalone — this is coordination, not a rewrite.
+A tool that tells you to check your work should be checkable. **710 assertions across
+10 files, plus an acceptance layer** that covers what a unit test cannot: nine hostile
+hook payloads where none may exit 2 or write to stderr, `--dry-run` leaving `$HOME`
+byte-identical, four consecutive installs producing identical state, and an upgrade from
+the previous release with no dangling hooks. The hook's cost is measured against that
+release rather than an absolute budget, so a loaded machine cannot raise a false alarm.
+
+It runs on itself. [This repo's own `.aether/config`](.aether/config) extends
+`critical_paths` with `hooks/|bin/aether`, because a two-line change there has a blast
+radius unrelated to its size — which is the argument the tool makes, applied to the tool.
+[Tests](#tests) has the detail.
 
 ---
 
@@ -55,9 +66,15 @@ The plugins still install and run standalone — this is coordination, not a rew
 |---|---|---|
 | [whetstone](plugins/whetstone/) | Plan | Gates commits when a plan exists but hasn't been critiqued with `/critique-plan` |
 | [bonsai](plugins/bonsai/) | Build | Nudges toward AST tools (pyrename, tsmove, pyfindrefs) instead of sed/grep/mv on source files |
-| [temper](plugins/temper/) | Review | Blocks large/critical commits and pushes until `/critique-diff` has been run; `/critique-pr` reviews a whole PR before merge |
+| [temper](plugins/temper/) | Review | Calls out large or critical-path commits and unreviewed pushes, unbudgeted and on their own; `/critique-pr` reviews a whole PR before merge |
 | [cairn](plugins/cairn/) | Ship | Nudges toward `/draft-commit`, `/draft-pr`, and `/draft-changelog` at every git boundary; `/draft-pr --apply` pushes the description to the PR |
 | [trellis](plugins/trellis/) | Setup | `/draft-config` surveys the repo and writes the config the other four read. No hook, no gate — it runs when you ask |
+
+And underneath all five, the part that is useful with no gates installed at all:
+**[one declarative place where a repo says how to test, lint, typecheck and build
+itself](#configuration)** — per toolchain in a monorepo, with per-key provenance, behind
+a direnv-style content-hash [trust boundary](#trust). `aether check` is the single point
+that runs any of it, which is what lets the critics *measure* instead of guess.
 
 ---
 
@@ -187,7 +204,8 @@ shape — `~/.aether/` globally, `.aether/` in a project.
 ```
 
 In `.claude/`, which belongs to Claude Code: one `PreToolUse` entry in
-`settings.json` (matcher `Bash\|Write\|Edit\|MultiEdit`), the permissions each
+`settings.json` (matcher `Bash\|Write\|Edit\|MultiEdit\|ExitPlanMode`, the union of
+every `suite_owned` matcher the manifests declare), the permissions each
 installed plugin declares, the slash commands, and the CLAUDE.md block with
 `--claude-md`. bonsai's MCP servers go in `~/.claude.json`. The `aether` binary
 goes in `~/.local/bin/`. `$AETHER_HOME` overrides the global root.
@@ -227,7 +245,7 @@ ticket: TK-[0-9]+
 
 [temper]
 auto_nudge_lines: 200
-critical_paths:   *auth* *token* migrations/ *.sql
+critical_paths:   *auth*|*token*|migrations/|*.sql     # pipe-separated
 
 [cairn]
 style: conventional
@@ -248,7 +266,7 @@ is things to run, `[git]` is things to write.**
 |---|---|---|
 | `scopes` · `types` | `api, web` | `/draft-commit` picks from your real ones instead of inventing |
 | `ticket` | `TK-[0-9]+` | pulled from the branch into the subject; `/critique-pr` flags a PR without one |
-| `trailers` | `Co-Authored-By` | always emitted |
+| `trailers` | `Signed-off-by` | always emitted |
 | `base` | `main` | `/draft-pr` stops auto-detecting |
 
 ### How the layers override
@@ -320,8 +338,9 @@ $ aether plan status
 ```
 
 whetstone nudges when you present the plan, on the first source write, and at
-`git commit` — once per uncritiqued plan, not once per project. It never blocks;
-leaving plan mode in particular always proceeds.
+`git commit` — once per uncritiqued plan, not once per project. Leaving plan mode is
+the one place it is structurally incapable of interfering: that branch prints and
+returns 0 unconditionally.
 
 ### Monorepos — `[project:<path>]`
 
@@ -431,9 +450,11 @@ takes flags that override config for that run.
 Four more critics are opt-in because they are not always relevant: `testing`,
 `complexity`, `api`, `cost`. Ask for them by name — `/critique-plan --only=impl,api`.
 
-Findings are appended to `.aether/out/CRITIQUE.md` with a date header, so the
-file accumulates a history rather than being overwritten. A 🔴 means don't start
-implementing yet.
+The findings are written **into the plan**, behind an `aether:critique` marker — the
+only file plan mode lets anything write, and the record the gate reads
+([Plans and their critiques](#plans-and-their-critiques)). The same report is also
+appended to `.aether/out/CRITIQUE.md` with a date header, which accumulates a history
+across plans. A 🔴 means don't start implementing yet.
 
 ### Build — bonsai
 
@@ -557,9 +578,10 @@ git add -p
 /critique-diff           # Coverage runs your test command; Correctness runs lint and typecheck
 ```
 
-Fix the 🔴s. 🟡 either gets fixed or written down. temper's gate blocks a `git push`
-that has had no review, and blocks a commit touching a critical path — auth,
-migrations, secrets, schemas — regardless of size.
+Fix the 🔴s. 🟡 either gets fixed or written down. temper's gate speaks up on a
+`git push` that has had no review, and on a commit touching a critical path — auth,
+migrations, secrets, schemas — regardless of size. Those two are the only messages that
+never share the output with another plugin. They do not stop the command.
 
 ### 5. Ship
 
@@ -599,7 +621,7 @@ grep -r TODO ./src            # bonsai:skip
 ### How the gates actually run
 
 ```
-git commit / git push / Write source file
+git commit / git push / Write source file / leaving plan mode
          │
          ▼
   enforce-suite.sh          ← dispatcher only; no rules of its own
@@ -609,13 +631,15 @@ git commit / git push / Write source file
          ├── sources gates/enforce-temper.sh     → gate_temper
          └── sources gates/enforce-cairn.sh      → gate_cairn
          │
-    ┌────┴────────────────────────────────────────┐
-    │                                             │
-    ▼                                             ▼
- Bash tool                              Write / Edit / MultiEdit
-    │                                             │
-    ├─ gate_whetstone                             └─ gate_whetstone
-    │  (plan exists, no critique?)                   (first source write, no critique?)
+    ┌────┴──────────────────┬──────────────────────┐
+    │                       │                      │
+    ▼                       ▼                      ▼
+ Bash tool        Write / Edit / MultiEdit    ExitPlanMode
+    │                       │                      │
+    ├─ gate_whetstone       └─ gate_whetstone      └─ gate_whetstone
+    │  (plan exists,           (first source          (presenting an
+    │   no critique?)           write, no              uncritiqued plan?
+    │                           critique?)             prints, never gates)
     │
     ├─ gate_bonsai
     │  (text tools on source files?)
@@ -629,7 +653,14 @@ git commit / git push / Write source file
 
 Each gate is defined once, in its own plugin's `hooks/enforce-<plugin>.sh`, and runs either standalone or sourced by the suite.
 
-`enforce-suite.sh` skips any plugin whose config says `enabled: false`, and any gate that is not installed. All gates are non-blocking nudges, except temper which blocks high-risk operations (push without review, critical-path commit).
+`enforce-suite.sh` skips any plugin whose config says `enabled: false`, and any gate that is not installed.
+
+Every gate is advisory: the hook exits 0 or 1 and the tool call proceeds either way. Only
+exit 2 stops a call in Claude Code, and nothing here uses it — a gate that is corrupt or
+half-written would then lock you out of every command, so the whole chain is built to
+fail open and `tests/acceptance.sh` asserts no payload can make it exit 2. temper's two
+high-risk verdicts (push without review, critical-path commit) are *unbudgeted* rather
+than blocking: they print in full, alone, and suppress everything else.
 
 **One nudge per tool call.** Gates run top to bottom, but their output does not
 accumulate: the hook prints the earliest stage with something to say and names the rest
@@ -645,8 +676,10 @@ Whetstone: a plan exists but has not been critiqued yet.
   + temper and cairn also had notes — `aether status --notes` to see them.
 ```
 
-A **block** is exempt: it prints in full and alone, and the nudges beside it are
-dropped. Whatever was held back goes to `.aether/out/.notes`, overwritten each call.
+temper's two high-risk verdicts are exempt from the budget: each prints in full and
+alone, and the nudges beside it are dropped rather than appended. Being told your push
+had no review is the only thing worth reading at that moment. Whatever was held back
+goes to `.aether/out/.notes`, overwritten each call.
 
 **One interpreter per tool call.** The hook used to start three python3 processes on a
 `git commit` — its own stdin parse plus temper's and cairn's rules — at roughly 18ms
@@ -764,11 +797,19 @@ git commit -m "wip"           # temper:skip cairn:skip
 grep -r "TODO" ./src          # bonsai:skip
 ```
 
+A marker only counts in a **trailing comment** — after a `#` that starts a word, outside
+quotes, with nothing but further markers behind it. Until v1.5.0 each gate grepped for
+its own marker anywhere in the command, so a commit *documenting* one silenced the suite:
+
+```bash
+git commit -m "docs: explain the # aether:skip marker"    # ran every gate; used to run none
+```
+
 ---
 
 ## Installing plugins individually
 
-Standalone installs remain fully supported — aether is optional coordination, not a requirement for any single plugin. Each plugin's installer lives beside it:
+You can install one plugin instead of all five. Each plugin's installer lives beside it:
 
 ```bash
 aether install cairn global --claude-md
@@ -776,11 +817,16 @@ aether install temper whetstone global
 bash plugins/cairn/install.sh global              # equivalent; a wrapper
 ```
 
-Installing any plugin also installs the `aether` engine, the way an MCP server
-needs a host. "Standalone" means only that plugin's assets, not a machine
-without aether.
+**"Standalone" means one plugin's assets, not a machine without aether.** Every install
+goes through the same engine, so it also lays down the `aether` CLI, `enforce-suite.sh`
+and the shared `aether-config.sh` — the way an MCP server needs a host. The suite hook
+is always the one registered; a plugin never registers a `PreToolUse` hook of its own,
+because its manifest marks that hook `suite_owned` and the engine installs in suite mode
+on every path. `--claude-md` is what controls whether the CLAUDE.md block is written.
 
-Run without `--suite` (as above) and a plugin registers its own `PreToolUse` hook and its own CLAUDE.md block. The suite installer passes `--suite` to suppress both.
+What *is* standalone is the gate. Each one is a `gate_<plugin>` function in its own
+file, so the same rule runs whether `enforce-suite.sh` sources it or the file is
+executed directly — which is what the dual-mode equivalence tests assert.
 
 ---
 
@@ -790,7 +836,7 @@ Two layers. The unit suite asserts behaviour; the acceptance script exercises th
 things that only appear in a real install.
 
 ```bash
-bash tests/run.sh                  # 473 assertions, ~4 min
+bash tests/run.sh                  # 710 assertions across 10 files, ~3 min
 bash tests/run.sh doctor           # one file
 bash tests/run.sh config           # the config, trust and migration tests
 bash tests/run.sh hookcost         # interpreter count, bypass precision, the budget
@@ -819,28 +865,41 @@ migration, install idempotence, and uninstall.
 
 ## Roadmap
 
-Deliberately short. Everything here is a gap someone has actually hit, not a
-feature idea.
+Deliberately short, and ordered by what is actually in the way. Everything here is a gap
+someone has hit, not a feature idea.
 
-**Close the loop between review and fix.** A critic finds something and a human
-retypes it. `/critique-diff --fix` applying only the mechanical findings — the
-ones with a file, a line and one obvious edit — would remove the retyping without
-removing the judgement.
+**Five people, one week.** Nobody outside this repo has run the suite on a repository
+they care about. Every item below is a guess until they have, and their week would
+reorder this list more reliably than any amount of reasoning about which command to
+build next. It is first because it is the cheapest way to find out that the rest is
+wrong.
 
-**Dependencies.** Nothing in the suite looks at what a change pulls in.
-`/critique-deps` for a new or bumped dependency: is it maintained, does it need
-network at runtime, does the licence fit.
+**A distribution story.** Today it is `git clone` plus a script, and the clone has to
+stay put forever because bonsai's MCP servers reference it by absolute path — move it
+and they break. A published package fixes that. A plugin marketplace entry was
+previously written off as premature, which is backwards: at zero stars the constraint is
+not that the tool is unready, it is that nobody can find it, and the marketplace is where
+Claude Code users look.
 
-**Decisions.** `/draft-adr` from a critiqued plan. The plan already contains the
-alternatives and why they were rejected, which is the expensive half of an ADR,
-and it is currently thrown away once the code lands.
+**Strict mode.** Nothing here stops a command today, because a `PreToolUse` hook can only
+do that by exiting 2 and one corrupt gate file would then lock you out of everything. An
+opt-in `strict: true` would let temper's two high-risk verdicts exit 2 for real, and stop
+honouring a bypass marker on them. Worth being precise about what that buys: the agent
+could still edit the config, deregister the hook, or route around the matcher. It raises
+the cost of a bypass from *appending a comment* — invisible and deniable — to *editing a
+tracked file*, which shows up in a diff. It is not a boundary. A pre-receive hook or a
+required CI check is a boundary, and [BYPASS.md](BYPASS.md) says so.
 
-**A verify command.** `aether check` running everything in `[project]` in one
-pass, so the same commands a critic uses are one keystroke for a human too.
+**One trigger surface.** whetstone, temper and cairn all fire on the same event, and
+v1.5.0 needed a lifecycle-ordered budget to stop them talking over each other. That
+budget is the evidence: three plugins expressing one idea — *stop before git* — through
+three CLAUDE.md sentinels, three config sections and three gate files. Not a decision to
+merge them; the budget is the experiment, and once it has been lived with either the
+separation earns its keep or it collapses into one gate with three critics.
 
-**Merge discipline.** `aether merge` gating on the things worth blocking a merge
-for — critique run, description accurate, CI green on the actual head — rather
-than leaving them to whoever remembers.
+**Close the loop between review and fix.** A critic finds something and a human retypes
+it. `/critique-diff --fix` applying only the mechanical findings — the ones with a file,
+a line and one obvious edit — would remove the retyping without removing the judgement.
 
 **Work with any agent, not just Claude Code.** The checking is already portable:
 bonsai's tools are plain MCP, the config and prose are plain text, the CLI is bash,
@@ -850,10 +909,17 @@ payload. Each rule already lives in one file behind a `gate_<plugin>` function, 
 another host is payload translation rather than a rewrite. The intent is to support
 Cursor, Windsurf, Zed and anything else that grows an equivalent hook.
 
-**A distribution story.** Today it is `git clone` plus a script, and the clone has
-to stay put because bonsai's MCP servers reference it by absolute path. A
-published package would fix that; a plugin marketplace entry was considered and
-rejected as premature.
+**Merge discipline.** `aether merge` gating on the things worth blocking a merge
+for — critique run, description accurate, CI green on the actual head — rather
+than leaving them to whoever remembers.
+
+**Dependencies.** Nothing in the suite looks at what a change pulls in.
+`/critique-deps` for a new or bumped dependency: is it maintained, does it need
+network at runtime, does the licence fit.
+
+**Decisions.** `/draft-adr` from a critiqued plan. The plan already contains the
+alternatives and why they were rejected, which is the expensive half of an ADR,
+and it is currently thrown away once the code lands.
 
 ---
 

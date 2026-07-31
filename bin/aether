@@ -1948,6 +1948,11 @@ _check_changed_files() {
 # the thing you actually meant to ask about.
 # ═══════════════════════════════════════════════════════════════════════════
 
+# aether_sha lives in hooks/aether-config.sh. bin/aether degrades to defaults when it
+# cannot find that file, so the function may genuinely be absent — guard for it rather
+# than letting `command not found` reach stderr and an empty hash reach the record.
+_review_can_hash() { command -v aether_sha >/dev/null 2>&1 && [ -n "$(printf '' | aether_sha)" ]; }
+
 _review_file() { [ -d .aether ] || return 1; printf '.aether/out/.reviewed'; }
 
 # The diff text for a scope, on stdout.
@@ -1991,13 +1996,13 @@ _review_record() {
     printf '  Reviews are project state; `aether config set` or trellis creates the directory.\n'
     return 0; }
 
-  local h; h=$(_review_diff "$scope" | aether_sha)
-  # aether_sha prints nothing when no sha256 tool exists. A record with an empty hash
-  # would match every other empty one, so record nothing and say why — `review status`
-  # reports `unknown` on the same machine and nothing escalates on unknown.
-  [ -n "$h" ] || {
+  # A record with an empty hash would match every other empty one, so record nothing and
+  # say why — `review status` reports `unknown` on the same machine, and nothing
+  # escalates on unknown.
+  _review_can_hash || {
     printf 'No sha256 tool available (shasum, sha256sum or openssl), so nothing was recorded.\n'
     return 0; }
+  local h; h=$(_review_diff "$scope" | aether_sha)
 
   local empty; empty=$(printf '' | aether_sha)
   [ "$h" = "$empty" ] && { printf 'Nothing in scope `%s` to review.\n' "$scope"; return 0; }
@@ -2018,7 +2023,7 @@ _review_status() {
   _rv() { $raw && printf '%s\n' "$1" || printf '%s\n' "$2"; }
 
   git rev-parse --git-dir >/dev/null 2>&1 || { _rv unknown 'unknown — not a git repository.'; return 0; }
-  [ -n "$(printf '' | aether_sha)" ] || {
+  _review_can_hash || {
     _rv unknown 'unknown — no sha256 tool available, so reviews cannot be hashed.'; return 0; }
 
   local f; f=$(_review_file) || { _rv unknown 'unknown — no .aether/ in this project.'; return 0; }

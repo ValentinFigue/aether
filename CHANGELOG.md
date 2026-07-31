@@ -66,6 +66,55 @@ number. Their individual histories are preserved under
 
 ## [Unreleased]
 
+### Added
+
+- **`aether docs` — the claims your documentation makes, checked against the things
+  that already know the answer.** Every defect in the 1.5.0 documentation audit was
+  found by hand; most were mechanically detectable. Four families, in order of worth:
+
+  - **Prose contradicting `[project]`.** Your config already declares how the repo
+    really runs, so a README saying `pytest` where the config says
+    `uv run --frozen pytest` is drift — and it is what a new joiner follows on day one.
+    Resolved per area, so a monorepo command right for `web/` and wrong for `backend/`
+    is caught. This family is unique to aether: no generic linter knows your real
+    commands.
+  - **Commands that do not exist** — `npm run X` with no such script, `make Y` with no
+    such target, `bash scripts/z.sh` that moved.
+  - **Dead references** — relative links and `](#anchor)` against real headings.
+  - **aether's own claims** — config keys and values against the manifest schema,
+    subcommands and flags against the engine, retired paths outside a migration note.
+
+  It runs in **any** repository, because the schema and the subcommand list travel with
+  the install rather than coming from the working directory. Scope it with a new
+  `[docs]` section (`paths`, `ignore`); wire it into every review with
+  `check.docs: aether docs` under `[project]`, since `aether check` runs any
+  `check.<name>` key and both critique commands call `aether check`. Exits non-zero on
+  problems so CI can use it.
+
+  Deliberately narrow: nothing is inferred. A checker that reports plausible-but-wrong
+  findings gets switched off within a week, so every check compares a documented string
+  against a declared or on-disk fact. `[project]` commands are ignored until
+  `aether trust`, and `aether docs` says when that is why a family did not run.
+
+- **A `sync-docs` skill**, installed globally by temper, so it applies in every
+  repository. It fires while you are editing something a document is likely to state —
+  a flag, a subcommand, a config key or default, an exit code, a matcher, a path — and
+  says to grep for the string you are changing and fix the prose in the same commit. It
+  is a rule to follow, not a generator: it never writes documentation.
+
+- **`config.critical_paths.type: patternlist`**, so the schema records what the doc
+  string only said in prose — which is what lets `aether docs` catch a
+  space- or comma-separated example that silently matches nothing.
+
+### Changed
+
+- **The Documentation critic runs by default.** `[temper] critics` becomes
+  `correctness, design, risk, coverage, docs`. It asks the question no script can: this
+  diff changed a behaviour, so is every sentence describing that behaviour still true?
+  Stale sample output and roadmap items for things you just shipped count. `--skip=docs`
+  opts out, `--only=docs` runs it alone. Anyone who has written their own `critics:`
+  keeps exactly what they set, since resolution is per key.
+
 ### Fixed
 
 - **`<plugin> config set` printed the config and changed nothing.** The plugin shim's

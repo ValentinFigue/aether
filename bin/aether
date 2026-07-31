@@ -31,6 +31,7 @@ Usage:
   aether project for <file...>          Which areas those files belong to
   aether plan [status|path|hash]        The plan the gate sees, and its critique state
   aether doctor [--fix] [--deep]        Check the install, config and trust
+  aether docs                           Check the docs against the code and config
                                         against what the manifests declare
   aether config doctor                  Just the config and trust half
   aether config set <section>.<key> <v> [global]
@@ -2535,6 +2536,444 @@ EOTS
   return 0
 }
 
+# ── DOCS ─────────────────────────────────────────────────────────────────────
+# `aether docs` — the claims a repository's prose makes about itself, checked
+# against the things that already know the answer.
+#
+# It exists because every defect in the 1.5.0 documentation audit was found by
+# hand, and eight of the ten were mechanically detectable. The most valuable
+# family is not generic markdown hygiene: it is that **`[project]` already
+# declares how this repo really runs**, so prose saying otherwise is drift — and
+# it is the drift that hurts most, because it is what a new joiner follows.
+#
+# Deliberately narrow. A doc checker that reports plausible-but-wrong findings
+# gets deleted from the config within a week, so nothing here is inferred: every
+# check compares a documented string against a declared or on-disk fact. Anything
+# needing judgement belongs to the Docs critic in /critique-diff.
+
+# Files to scan: [docs] paths, minus [docs] ignore. Defaults to the markdown a
+# reader actually lands on rather than every .md in the tree.
+_docs_files() {
+  local paths ignore p f
+  paths=$(_cfg_get docs paths);   paths="${paths:-*.md docs}"
+  ignore=$(_cfg_get docs ignore); ignore="${ignore:-CHANGELOG.md}"
+  for p in $paths; do
+    if [ -d "$p" ]; then
+      find "$p" -type f -name '*.md' 2>/dev/null
+    else
+      # Unquoted on purpose: `*.md` is a glob the caller wants expanded.
+      for f in $p; do [ -f "$f" ] && printf '%s\n' "$f"; done
+    fi
+  done | sed 's|^\./||' | sort -u | while IFS= read -r f; do
+    local skip=0 ig
+    for ig in $ignore; do
+      case "$f" in $ig|$ig/*|*/$ig) skip=1; break ;; esac
+    done
+    [ "$skip" = 0 ] && printf '%s\n' "$f"
+  done
+}
+
+# The schema as the scanner needs it, plus the facts only the engine knows:
+# which subcommands exist, which flags help documents, what [project] declares.
+_docs_context() {
+  local areas a k v subs psubs plugins help scripts targets
+  # [A-Za-z] and not just [a-z]: the label is `version|--version|-V)`, and a
+  # lowercase-only class silently dropped the whole line, so `aether version` was
+  # reported as not a subcommand.
+  subs=$(sed -n '/^case "$COMMAND" in/,/^esac/p' "$0" \
+         | grep -oE '^  [A-Za-z|_-]+\)' | tr -d ' )' | tr '|' '\n' \
+         | grep -v '^-' | grep -v '^$' | sort -u)
+  psubs="status enable disable install uninstall update hook config help"
+  plugins=$(_plugins_available)
+  help=$(usage 2>/dev/null | grep -oE '\-\-[a-z][a-z-]*' | sort -u)
+  scripts=$([ -f package.json ] && python3 -c 'import json,sys
+try: print("\n".join(json.load(open("package.json")).get("scripts", {})))
+except Exception: pass' 2>/dev/null)
+  targets=$([ -f Makefile ] && sed -n 's/^\([A-Za-z0-9_.-]*\):.*/\1/p' Makefile 2>/dev/null)
+  areas=$(_project_areas); areas="${areas:-project}"
+
+  {
+    printf 'root\t%s\n' "$PWD"
+    _docs_files      | sed 's/^/file\t/'
+    printf '%s\n' "$subs"    | sed '/^$/d;s/^/sub\t/'
+    printf '%s\n' "$psubs"   | tr ' ' '\n' | sed '/^$/d;s/^/psub\t/'
+    printf '%s\n' "$plugins" | sed '/^$/d;s/^/plugin\t/'
+    printf '%s\n' "$help"    | sed '/^$/d;s/^/flag\t/'
+    printf '%s\n' "$scripts" | sed '/^$/d;s/^/script\t/'
+    printf '%s\n' "$targets" | sed '/^$/d;s/^/target\t/'
+    printf 'legacy\t%s\n' whetstone.config.md
+    for p in $plugins; do printf 'legacy\t%s.config\n' "$p"; done
+    _schema_all | while IFS='|' read -r sec key plug; do
+      [ -n "$key" ] || continue
+      printf 'schema\t%s\t%s\t%s\n' "$sec" "$key" "$(_mf "$plug" "config.$key.type")"
+    done
+    while IFS= read -r a; do
+      [ -n "$a" ] || continue
+      for k in test lint format typecheck build coverage; do
+        v=$(_cfg_area "$a" "$k")
+        [ -n "$v" ] && printf 'area\t%s\t%s\t%s\n' "$a" "$k" "$v"
+      done
+    done <<EOAREAS
+$areas
+EOAREAS
+  }
+}
+
+cmd_docs() {
+  local a raw=false
+  for a in "$@"; do
+    case "$a" in
+      --raw) raw=true ;;
+      *) printf 'Unknown option: %s\n' "$a"; return 1 ;;
+    esac
+  done
+
+  command -v python3 >/dev/null 2>&1 || {
+    printf 'aether docs needs python3 to read markdown.\n'; return 0; }
+
+  # An empty `[docs] paths` is how you turn this off — one concept rather than a
+  # separate `enabled` key that could disagree with it.
+  local n; n=$(_docs_files | grep -c . || true)
+  if [ "${n:-0}" -eq 0 ]; then
+    printf 'No documentation to check. Set [docs] paths, or add a README.\n'
+    return 0
+  fi
+
+  local findings
+  findings=$(_docs_context | python3 -c 'import os, re, sys
+
+# Context arrives on stdin as tab-separated records, because the program itself
+# comes in via -c. (`python3 - <<EOF` would claim stdin for the program and leave
+# none for the data — the bug that stopped the engine registering MCP servers for
+# six commits.) TSV rather than JSON so the bash side needs no encoder.
+ROOT, FILES, LEGACY = ".", [], []
+AREAS, SCHEMA, SECTIONS = {}, {}, set()
+SUBS, PSUBS, PLUGINS, HELP, SCRIPTS, TARGETS = set(), set(), set(), set(), set(), set()
+
+for rec in sys.stdin.read().split("\n"):
+    if not rec:
+        continue
+    f = rec.split("\t")
+    kind = f[0]
+    if   kind == "root"   and len(f) > 1: ROOT = f[1]
+    elif kind == "file"   and len(f) > 1: FILES.append(f[1])
+    elif kind == "sub"    and len(f) > 1: SUBS.add(f[1])
+    elif kind == "psub"   and len(f) > 1: PSUBS.add(f[1])
+    elif kind == "plugin" and len(f) > 1: PLUGINS.add(f[1])
+    elif kind == "flag"   and len(f) > 1: HELP.add(f[1])
+    elif kind == "script" and len(f) > 1: SCRIPTS.add(f[1])
+    elif kind == "target" and len(f) > 1: TARGETS.add(f[1])
+    elif kind == "legacy" and len(f) > 1: LEGACY.append(f[1])
+    elif kind == "schema" and len(f) > 3:
+        SECTIONS.add(f[1]); SCHEMA[f[1] + "." + f[2]] = {"type": f[3]}
+    elif kind == "area"   and len(f) > 3:
+        AREAS.setdefault(f[1], {})[f[2]] = f[3]
+
+# Keys exactly one section declares, so a section-less example can still be
+# attributed without guessing.
+_by_key = {}
+for full_key in SCHEMA:
+    sec, _, k = full_key.partition(".")
+    _by_key.setdefault(k, set()).add(sec)
+UNIQUE = {k: list(v)[0] for k, v in _by_key.items() if len(v) == 1}
+
+seen, out = set(), []
+def add(sev, path, line, msg, fix=None, note=None):
+    k = (path, line, msg)
+    if k in seen:      # one line can carry the same broken link twice
+        return
+    seen.add(k)
+    out.append((sev, path, line, msg, fix or "", note or ""))
+
+FENCE   = re.compile(r"^\s*(```+|~~~+)\s*([A-Za-z0-9_+-]*)")
+HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+LINK    = re.compile(r"\[[^\]]*\]\(\s*([^)\s]+)")
+SECTION = re.compile(r"^\s*\[([A-Za-z0-9_:./-]+)\]\s*$")
+KEYVAL  = re.compile(r"^\s*([A-Za-z0-9_][A-Za-z0-9_.-]*)\s*:\s*(.*?)\s*$")
+RUNNERS = ("npm", "yarn", "pnpm", "bun")
+# Prose that means "we are describing the old world on purpose".
+MIGRATION = re.compile(r"migrat|legacy|pre-1\.|before v1|superseded|retired|used to", re.I)
+
+def slug(text):
+    """GitHub'\''s heading slug. Each space becomes one hyphen — runs are NOT
+    collapsed, which is why `Monorepos — [project]` is monorepos--project."""
+    t = re.sub(r"`([^`]*)`", r"\1", text)
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    t = t.strip().lower()
+    t = re.sub(r"[^\w\s-]", "", t, flags=re.UNICODE)
+    return t.replace(" ", "-")
+
+def strip_comment(s):
+    in_s = in_d = False
+    for i, c in enumerate(s):
+        if c == "\\":
+            continue
+        if c == "'\''" and not in_d:
+            in_s = not in_s
+        elif c == '\''"'\'' and not in_s:
+            in_d = not in_d
+        elif c == "#" and not in_s and not in_d and (i == 0 or s[i - 1].isspace()):
+            return s[:i]
+    return s
+
+def segments(line):
+    s = strip_comment(line).strip()
+    if not s:
+        return []
+    return [p.strip() for p in re.split(r"&&|\|\||[;|]", s) if p.strip()]
+
+def resolves(rel, full, cwd):
+    """Does this relative path exist from any base a reader could plausibly be at?
+
+    A fenced block often opens with `git clone … && cd aether/plugins/bonsai`, so
+    `bash scripts/setup.sh` is correct from there and nonsense from the repo root.
+    Reporting it would be exactly the false alarm that gets a doc check switched
+    off, so try every base the block makes plausible and only complain if none
+    of them has the file."""
+    bases = [ROOT, os.path.dirname(full) or ROOT]
+    if cwd:
+        bases += [os.path.join(ROOT, cwd), os.path.join(os.path.dirname(full) or ROOT, cwd)]
+        # `cd aether/plugins/bonsai` right after a clone: the first segment is the
+        # clone directory, which is this repo.
+        tail = cwd.split("/", 1)
+        if len(tail) == 2:
+            bases.append(os.path.join(ROOT, tail[1]))
+    return any(os.path.exists(os.path.normpath(os.path.join(b, rel))) for b in bases)
+
+def toks(seg):
+    try:
+        import shlex
+        return shlex.split(seg)
+    except Exception:
+        return seg.split()
+
+for path in FILES:
+    full = os.path.join(ROOT, path)
+    try:
+        lines = open(full, encoding="utf-8", errors="replace").read().split("\n")
+    except OSError:
+        continue
+
+    # Pass 1: fence extents, and whether a fence shows a prompt. A block with
+    # `$ cmd` lines is a transcript: everything else in it is *output*, not a
+    # command. Treating output as commands reported `aether v1.5.0` as an
+    # unknown subcommand — noise that would get this whole check switched off.
+    blocks, open_at, lang = [], None, ""
+    for i, ln in enumerate(lines):
+        m = FENCE.match(ln)
+        if not m:
+            continue
+        if open_at is None:
+            open_at, lang = i, (m.group(2) or "").lower()
+        else:
+            body = lines[open_at + 1:i]
+            blocks.append((open_at, i, lang,
+                           any(re.match(r"^\s*\$ ", b) for b in body)))
+            open_at = None
+    fenced = {}
+    for a, b, lg, prompted in blocks:
+        for i in range(a, b + 1):
+            fenced[i] = (lg, prompted, i == a or i == b)
+
+    slugs = set()
+    for i, ln in enumerate(lines):
+        if i in fenced:
+            continue
+        h = HEADING.match(ln)
+        if h:
+            slugs.add(slug(h.group(2)))
+
+    cfg_section, cwd = None, ""
+    for i, raw in enumerate(lines):
+        n = i + 1
+        info = fenced.get(i)
+
+        if info is None:
+            cfg_section = None
+            for target in LINK.findall(raw):
+                t = target.strip().strip("<>")
+                if t.startswith(("http://", "https://", "mailto:", "tel:", "data:", "ftp:")):
+                    continue
+                if t.startswith("#"):
+                    if slug(t[1:]) not in slugs:
+                        add("bad", path, n, "link to %s — no heading with that anchor" % t)
+                    continue
+                filepart = t.split("#", 1)[0]
+                if not filepart:
+                    continue
+                cand = os.path.normpath(os.path.join(os.path.dirname(full), filepart))
+                if not os.path.exists(cand):
+                    add("bad", path, n, "link to %s — no such file" % filepart)
+            continue
+
+        lang, prompted, is_delim = info
+        if is_delim:
+            cfg_section = None
+            if raw.strip().startswith(("```", "~~~")) and i in fenced and fenced[i][2]:
+                cwd = ""          # a new block starts wherever the reader is
+            continue
+
+        sm = SECTION.match(raw)
+        if sm:
+            cfg_section = sm.group(1)
+            continue
+        if lang in ("", "ini", "toml", "conf", "text"):
+            kv = KEYVAL.match(raw)
+            if kv and not raw.lstrip().startswith("#"):
+                key, val = kv.group(1), strip_comment(kv.group(2)).strip()
+                base = None
+                if cfg_section:
+                    base = "project" if cfg_section.startswith("project:") else cfg_section
+                elif key in UNIQUE:
+                    # A section-less block — the pre-1.1 config format, and still how
+                    # a lot of prose shows settings. Only keys that exactly one section
+                    # declares are safe to attribute: `critical_paths` is temper'\''s alone,
+                    # while `enabled` belongs to all five and could be anything.
+                    base = UNIQUE[key]
+                if base and base in SECTIONS and not key.startswith("check."):
+                    spec = SCHEMA.get(base + "." + key)
+                    if spec is None:
+                        add("bad", path, n, "[%s] %s — no plugin declares this key" % (base, key),
+                            fix="aether config show %s" % base)
+                    elif val:
+                        t = spec.get("type", "")
+                        if t == "patternlist" and "|" not in val and re.search(r"[, ]", val):
+                            add("bad", path, n,
+                                "[%s] %s is pipe-separated; this example is %s-separated and matches nothing"
+                                % (base, key, "comma" if "," in val else "space"),
+                                fix="join the patterns with |")
+                        elif t == "bool" and val not in ("true", "false"):
+                            add("bad", path, n, "[%s] %s must be true or false, not %r" % (base, key, val))
+                        elif t.startswith("enum:") and val not in [x.strip() for x in t[5:].split(",")]:
+                            add("bad", path, n, "[%s] %s must be one of %s, not %r"
+                                % (base, key, t[5:], val))
+            continue
+
+        if lang not in ("", "bash", "sh", "shell", "console", "zsh"):
+            continue
+        cmdline = raw
+        if prompted:
+            m = re.match(r"^\s*\$ (.*)$", raw)
+            if not m:
+                continue          # output, not a command
+            cmdline = m.group(1)
+
+        for seg in segments(cmdline):
+            tk = toks(seg)
+            if not tk:
+                continue
+            head = tk[0]
+
+            if head == "cd" and len(tk) > 1:
+                cwd = tk[1] if not cwd else os.path.normpath(os.path.join(cwd, tk[1]))
+                continue
+
+            if head == "aether" and len(tk) > 1 and not tk[1].startswith("-"):
+                if tk[1] in PLUGINS:
+                    if len(tk) > 2 and not tk[2].startswith("-") and tk[2] not in PSUBS:
+                        add("bad", path, n, "aether %s %s — not a plugin subcommand" % (tk[1], tk[2]))
+                elif tk[1] not in SUBS:
+                    add("bad", path, n, "aether %s — not a subcommand" % tk[1], fix="aether help")
+            elif head in PLUGINS and len(tk) > 1 and not tk[1].startswith("-") and tk[1] not in PSUBS:
+                add("bad", path, n, "%s %s — not a plugin subcommand" % (head, tk[1]))
+
+            if (head == "aether" or head in PLUGINS) and HELP:
+                for t in tk[1:]:
+                    if t.startswith("--") and len(t) > 2:
+                        flag = t.split("=", 1)[0]
+                        if flag not in HELP:
+                            add("bad", path, n, "%s is not a flag %s accepts" % (flag, head), fix="aether help")
+
+            if head in RUNNERS:
+                name = None
+                if len(tk) > 2 and tk[1] == "run":
+                    name = tk[2]
+                elif head in ("yarn", "pnpm") and len(tk) > 1 and tk[1] not in ("run", "install", "add", "why", "dlx"):
+                    name = tk[1]
+                if name and SCRIPTS and name not in SCRIPTS:
+                    add("bad", path, n, "%s run %s — package.json has no %r script" % (head, name, name))
+            elif head == "make" and len(tk) > 1 and not tk[1].startswith("-"):
+                if TARGETS and tk[1] not in TARGETS:
+                    add("bad", path, n, "make %s — no such target in the Makefile" % tk[1])
+            elif head in ("bash", "sh") and len(tk) > 1 and not tk[1].startswith("-"):
+                if "/" in tk[1] and not resolves(tk[1], full, cwd):
+                    add("bad", path, n, "%s %s — no such file" % (head, tk[1]))
+            elif head.startswith("./") and not resolves(head, full, cwd):
+                add("bad", path, n, "%s — no such file" % head)
+
+            for area, keys in AREAS.items():
+                for key, declared in keys.items():
+                    if not declared:
+                        continue
+                    dtk = toks(declared)
+                    if not dtk or tk == dtk:
+                        continue
+                    where = "[%s] %s" % (area, key)
+                    if len(tk) < len(dtk) and dtk[-len(tk):] == tk:
+                        add("warn", path, n, "%s runs this as `%s`" % (where, declared),
+                            note="the doc omits the wrapper, so following it skips what the wrapper does")
+                    elif head in RUNNERS and dtk[0] in RUNNERS and head != dtk[0]:
+                        add("warn", path, n, "%s uses %s, this says %s" % (where, dtk[0], head),
+                            fix="aether config explain %s.%s" % (area, key))
+
+    # Legacy paths. A migration note is the one place they belong, so look at the
+    # surrounding lines and the enclosing heading before reporting.
+    heading_ctx = ""
+    for i, raw in enumerate(lines):
+        h = HEADING.match(raw)
+        if h and i not in fenced:
+            heading_ctx = h.group(2)
+        window = "\n".join(lines[max(0, i - 3):i + 2])
+        if MIGRATION.search(window) or MIGRATION.search(heading_ctx) or MIGRATION.search(raw):
+            continue
+        for legacy in LEGACY:
+            if legacy in raw:
+                add("warn", path, i + 1, "%s was replaced by .aether/config in 1.1" % legacy,
+                    fix="aether migrate")
+                break
+
+# \x1f, not tab: tab is an IFS whitespace character, so bash `read` collapses a run
+# of them and an empty field silently shifts every later one left. That put the note
+# where the fix belonged and printed it as "fix:".
+for sev, path, line, msg, fix, note in sorted(out, key=lambda r: (r[1], r[2])):
+    print("\x1f".join((sev, path, str(line), msg, fix, note)))
+') || {
+    printf 'aether docs: could not scan (see above).\n'; return 0; }
+
+  # The repo's own rule: a check that ran with less context than the config implies
+  # has to say so. [project] commands are ignored until `aether trust`, so without it
+  # the family that compares prose against the declared commands cannot run at all.
+  if [ -f .aether/config ] && grep -q '^\[project' .aether/config 2>/dev/null \
+     && [ "$(aether_trust_state)" != ok ]; then
+    printf 'Note: this project is not trusted, so [project] commands are not read.\n'
+    printf '      Prose contradicting your real test/lint/build commands is not checked.\n'
+    printf '      fix: aether trust\n\n'
+  fi
+
+  local bad=0 warn=0 cur="" sev fpath fline msg fix note
+  # $'\x1f' rather than a tab: tab is IFS whitespace, so `read` collapses runs of
+  # them and an empty field shifts every later one left.
+  while IFS=$'\x1f' read -r sev fpath fline msg fix note; do
+    [ -n "$sev" ] || continue
+    [ "$fpath" = "$cur" ] || { cur="$fpath"; printf '%s\n' "$cur"; }
+    if [ "$sev" = bad ]; then bad=$((bad + 1)); printf '  ✗ %s:%s  %s\n' "$fpath" "$fline" "$msg"
+    else                      warn=$((warn + 1)); printf '  ! %s:%s  %s\n' "$fpath" "$fline" "$msg"; fi
+    [ -n "$note" ] && printf '      %s\n' "$note"
+    [ -n "$fix" ]  && printf '      fix: %s\n' "$fix"
+  done <<EOF
+$findings
+EOF
+
+  printf '\n'
+  if [ "$bad" -eq 0 ] && [ "$warn" -eq 0 ]; then
+    printf '%s file(s) checked, nothing to report.\n' "$n"
+    return 0
+  fi
+  printf '%s problem(s), %s warning(s) across %s file(s).\n' "$bad" "$warn" "$n"
+  [ "$bad" -gt 0 ] && return 1
+  return 0
+}
+
 cmd_trust() {
   local sub="${1:-set}"
   case "$sub" in
@@ -2968,6 +3407,7 @@ case "$COMMAND" in
   disable)   cmd_disable "$@" ;;
   config)    cmd_config "$@" ;;
   doctor)    cmd_doctor "$@" ;;
+  docs)      cmd_docs "$@" ;;
   check)     cmd_check "$@" ;;
   plan)      cmd_plan "$@" ;;
   project)   cmd_project "$@" ;;

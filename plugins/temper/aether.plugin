@@ -1,10 +1,13 @@
 # temper — plugin manifest.  See plugins/cairn/aether.plugin for the format.
 
 name: temper
-description: Critiques diffs and PRs before they land — four critics, severity-rated
+description: Critiques diffs and PRs before they land — five critics, severity-rated
 stage: review
 scopes: local global
 config_section: temper
+
+# ── Skills ───────────────────────────────────────────────────────────────────
+skills: sync-docs
 
 commands: critique-diff.md critique-pr.md
 legacy_commands: temper.md
@@ -30,8 +33,8 @@ config.enabled.type: bool
 config.enabled.doc: Whether temper's gate and commands run at all
 config.enabled.used_by: /critique-diff /critique-pr
 
-config.critics.default: correctness, design, risk, coverage
-config.critics.doc: Which critics run by default
+config.critics.default: correctness, design, risk, coverage, docs
+config.critics.doc: Which critics run by default — correctness, design, risk, coverage, docs
 config.critics.used_by: /critique-diff /critique-pr
 
 config.skip.default:
@@ -58,6 +61,7 @@ config.auto_nudge_files.doc: Same, for number of files changed
 config.auto_nudge_files.used_by: enforce-temper.sh
 
 config.critical_paths.default: *auth*|*permission*|*token*|migrations/|*alembic*|\.sql|*schema*|*secret*|*credential*|\.env
+config.critical_paths.type: patternlist
 config.critical_paths.doc: Pipe-separated patterns that always trigger a review nudge, whatever the diff size
 config.critical_paths.used_by: enforce-temper.sh
 
@@ -118,3 +122,27 @@ config.coverage_min.default:
 config.coverage_min.type: int
 config.coverage_min.doc: Fail Coverage below this percentage, instead of leaving it to judgement
 config.coverage_min.used_by: /critique-diff /critique-pr
+
+# ── [docs] — what `aether docs` reads ────────────────────────────────────────
+# Its own section rather than keys under [temper], the same way cairn declares
+# [git]: these describe the repository's documentation, not temper's behaviour,
+# and `aether docs` is an engine command that runs with or without temper's gate.
+
+# No `enabled` key here: the manifest format identifies a key by name alone, so a
+# second `config.enabled.*` would collide with temper's own and win at random.
+# Setting `paths:` to nothing is how you turn the check off, which is one concept
+# rather than two that can disagree.
+
+config.paths.section: docs
+config.paths.default: *.md docs
+config.paths.type: pathlist
+config.paths.doc: Space-separated files, globs and directories to check — directories are searched for *.md
+config.paths.used_by: aether docs
+
+config.ignore.section: docs
+config.ignore.default: CHANGELOG.md
+config.ignore.type: pathlist
+config.ignore.doc: Paths to skip — a changelog is supposed to describe old behaviour, so it is excluded by default
+config.ignore.used_by: aether docs
+
+# ── Critics ──────────────────────────────────────────────────────────────────

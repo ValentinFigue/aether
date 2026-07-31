@@ -49,7 +49,7 @@ someone is about to merge. Run it once the PR is open and before merging when:
   likely thing in the PR to be wrong
 - CI is green and the PR *looks* ready, which is exactly when nobody re-reads it
 
-It runs temper's same four critics over the whole PR diff, plus a fifth that only makes
+It runs temper's same five critics over the whole PR diff, plus a sixth that only makes
 sense for a PR: whether the description still matches the code. An omitted change is
 more dangerous than an inaccurate one — a reviewer who trusts the description will not
 go looking for what it does not name.

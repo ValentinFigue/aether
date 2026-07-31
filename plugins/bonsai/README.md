@@ -163,8 +163,9 @@ bonsai status
 bonsai install      [--claude-md]   Install (or re-install after a repo update)
 bonsai uninstall    [--claude-md]   Remove everything bonsai installed
 bonsai status                       Show what's installed / what's missing
-bonsai enable-hook                  Enable the Bash nudge hook
-bonsai disable-hook                 Disable the Bash nudge hook
+bonsai hook enable                  Load the Bash nudge gate again
+bonsai hook disable                 Stop the gate loading at all
+bonsai enable | disable [local|global]   Soft mute: the gate loads and stays quiet
 bonsai update                       Rebuild servers and reinstall
 ```
 

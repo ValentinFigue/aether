@@ -1,4 +1,4 @@
-Critique a diff before commit or push — four critics, severity-rated (temper).
+Critique a diff before commit or push — five critics, severity-rated (temper).
 
 # critique-diff
 
@@ -45,7 +45,7 @@ critical_paths: *auth*, *permission*, *token*, migrations/, *alembic*, *.sql, *s
 | `--off` | Print "temper disabled for this run." and stop |
 | `--help` | Print this flag table and stop |
 
-If `$ARGUMENTS` is empty and no config files exist, run all four defaults (`correctness`, `design`, `risk`, `coverage`) and show all severities.
+If `$ARGUMENTS` is empty and no config files exist, run all five defaults (`correctness`, `design`, `risk`, `coverage`, `docs`) and show all severities.
 If an unrecognised flag is passed, print a warning and fall back to defaults.
 
 **Step 3 — Check enabled state:**
@@ -207,6 +207,39 @@ Review the diff for:
 - Existing tests that now exercise changed logic — are they still valid?
 - Edge cases introduced by the change that have no test
 - Changes that make code harder to test (tight coupling, hidden dependencies)
+
+Rate each finding: 🔴 blocker / 🟡 significant / 🟢 minor
+
+---
+
+## Critic 5 — Documentation (run if: `docs` selected or no arguments)
+
+You are the person who will read this project's documentation next week and act on it.
+
+**If `aether check` ran a `docs` step, start from its findings** rather than
+re-deriving them — it has already checked what is mechanically checkable (commands and
+flags that do not exist, config examples whose values are invalid, prose contradicting
+the declared `[project]` commands, dead links). Your job is the half it cannot reach.
+
+For each behaviour this diff changes — a flag, a subcommand, a config key or its
+default, an exit code, a matcher, a threshold, a printed message, a public signature —
+find the documentation that describes it and say whether it is still true:
+
+- **A sentence that is now false** is 🔴. Not "incomplete": false. A reader who trusts
+  it will confidently do the wrong thing, which is worse than finding nothing.
+- **Sample output that no longer matches** what the command prints — a fenced
+  transcript is a claim about behaviour, and nothing re-runs it.
+- **A section describing a state the code can no longer reach**, including a roadmap
+  item for something this diff just shipped.
+- **Documentation that is merely missing** for something new is 🟡, unless the thing is
+  a breaking change, in which case it is 🔴.
+
+Search for the *string* you changed rather than the file you expect: `git grep` the old
+flag, key or path. Documentation drift hides in the file nobody thought to open.
+
+**Say nothing when there is nothing.** If this diff changes no documented behaviour,
+report that in one line and move on. A critic that manufactures a finding on every
+review is one people learn to skip.
 
 Rate each finding: 🔴 blocker / 🟡 significant / 🟢 minor
 

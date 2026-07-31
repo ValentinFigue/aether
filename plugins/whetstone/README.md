@@ -209,6 +209,8 @@ A global install also provides a `whetstone` command for managing your setup:
 ```bash
 whetstone status                          # install state + resolved config
 whetstone config                          # show the resolved [whetstone] section
+whetstone config set severity red         # set a key, section resolved for you
+whetstone config get|unset severity       # read or remove one
 
 whetstone disable local                   # silence for this project
 whetstone disable global                  # silence everywhere
@@ -218,8 +220,9 @@ whetstone update                          # reinstall whetstone from the clone
 whetstone uninstall global --claude-md    # full removal
 ```
 
-`whetstone` is a shim that execs `aether whetstone …`. **Changing a value is `aether
-config set <key> <value>`** — the plugin shim's `config` only shows.
+`whetstone` is a shim that execs `aether whetstone …`. `whetstone config set` resolves
+the section from the schema; `aether config set whetstone.<key> <value>` is the explicit
+form and always works. Append `global` to either to write `~/.aether/config`.
 
 Run `aether help` for the full reference.
 

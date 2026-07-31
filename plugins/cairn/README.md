@@ -306,6 +306,8 @@ A global install also provides a `cairn` command for managing your setup:
 ```bash
 cairn status                       # install state + resolved config
 cairn config                       # show the resolved [cairn] section, with sources
+cairn config set style plain       # set a key, section resolved for you
+cairn config get|unset style       # read or remove one
 
 cairn disable local                # silence /draft-commit for this project
 cairn disable global               # silence everywhere
@@ -315,15 +317,18 @@ cairn update                       # reinstall cairn from the clone
 cairn uninstall global --claude-md # full removal
 ```
 
-`cairn` is a shim that execs `aether cairn …`. **Changing a value is `aether config set
-<section>.<key> <value>`** — namespaced, space-separated, no `=`. The plugin shim's
-`config` only shows:
+`cairn` is a shim that execs `aether cairn …`. Values are space-separated, never `=`.
+`cairn config set` resolves the section from the schema — including the `[git]` keys,
+which are cairn's to declare but do not live in `[cairn]`:
 
 ```bash
-aether config set cairn.style plain
-aether config set cairn.pr.base develop
+cairn config set style plain            # → [cairn] style
+cairn config set trailers Signed-off-by # → [git] trailers  (resolved from the schema)
+cairn config set pr.base develop        # → [cairn] pr.base
+cairn config unset summary.window
+
+aether config set cairn.style plain     # the explicit form, always available
 aether config set git.ticket 'TK-[0-9]+'
-aether config unset cairn.summary.window
 ```
 
 Run `aether help` for the full reference.

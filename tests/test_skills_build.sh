@@ -70,6 +70,9 @@ plan_skill=$(cat "$OUT/skills/critique-plan/SKILL.md")
 assert_contains "$plan_skill" \
   "aether plan status 2>/dev/null || true" \
   "critique-plan plan discovery tolerates a missing aether CLI"
+assert_contains "$plan_skill" \
+  "aether plan path 2>/dev/null || true" \
+  "critique-plan plan pointer tolerates a missing aether CLI"
 
 # The critic definitions live in ~/.claude/commands on Claude Code; on any
 # other agent that path does not exist, so the sibling skill is checked first.

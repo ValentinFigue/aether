@@ -56,6 +56,7 @@ PATCH_PR='
 '
 PATCH_PLAN='
   s/```bash\naether plan status\n```/```bash\naether plan status 2>\/dev\/null || true\n```/;
+  s/`aether plan path`/`aether plan path 2>\/dev\/null || true`/;
 '
 
 # command_skill <name> <src> [patch...] — frontmatter + ported body.

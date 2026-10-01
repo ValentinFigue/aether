@@ -38,6 +38,19 @@ fi
 out=$(unentry 2>&1); rc=$?
 assert_exit 1 "$rc" "uninstall with no agent flag refuses to run"
 
+# --dry-run promises that nothing is written; composed with a skills target it
+# would install for real, so the combination is refused before anything runs.
+out=$(entry --vibe --global --dry-run 2>&1); rc=$?
+assert_exit 1 "$rc" "--dry-run with --vibe refuses to run"
+if [ -e "$H/.vibe" ]; then
+  fail "the --dry-run refusal writes nothing"
+else
+  pass "the --dry-run refusal writes nothing"
+fi
+
+out=$(entry --claude --vibe --dry-run 2>&1); rc=$?
+assert_exit 1 "$rc" "--dry-run with --claude --vibe refuses to run"
+
 # ── one agent at a time ─────────────────────────────────────────────────────
 
 entry --vibe >/dev/null
@@ -67,7 +80,9 @@ fi
 
 # ── composition ──────────────────────────────────────────────────────────────
 
-entry --claude --vibe --codex --global --dry-run >/dev/null 2>&1
+# A real compose: --dry-run is refused with --vibe/--codex, so the engine
+# install runs for real here (throwaway HOME, bonsai skipped).
+entry --claude --vibe --codex --global --no-bonsai >/dev/null 2>&1
 vibe_n=$(find "$H/.vibe/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
 codex_n=$(find "$H/.codex/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
 assert_eq "10" "$vibe_n" "all three agents compose: vibe installs"
@@ -83,5 +98,10 @@ fi
 # Engine-only options with no --claude are not silently ignored.
 out=$(entry --vibe --global 2>&1)
 assert_contains "$out" "add --claude" "engine-only options without --claude are flagged"
+
+# The uninstall path flags them too, rather than letting a --global look like
+# it removed the global install.
+out=$(unentry --vibe --global --claude-md 2>&1)
+assert_contains "$out" "add --claude" "uninstall flags engine options without --claude"
 
 summary

@@ -54,6 +54,18 @@ assert_eq "$lines_before" "$lines_after" "re-install does not grow AGENTS.md"
 blocks=$(grep -c '<!-- aether:start -->' "$HOME_FIX/.vibe/AGENTS.md" | tr -d ' ')
 assert_eq "1" "$blocks" "re-install leaves exactly one block"
 
+# The splice backs up a non-empty AGENTS.md before its first write — the same
+# .bak contract install.sh offers for settings.json and CLAUDE.md.
+[ -f "$HOME_FIX/.vibe/AGENTS.md.bak" ] \
+  && pass "the splice backs up AGENTS.md before writing" \
+  || fail "the splice backs up AGENTS.md before writing"
+
+# ── unknown agents are refused, not guessed ─────────────────────────────────
+
+out=$(run install slack 2>&1); rc=$?
+assert_exit 1 "$rc" "an unknown agent is refused"
+assert_contains "$out" "Unknown agent: slack" "the refusal names the agent"
+
 # ── user prose survives both directions ─────────────────────────────────────
 
 mkdir -p "$HOME_FIX/.codex"

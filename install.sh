@@ -31,7 +31,9 @@ aether — install the whetstone → bonsai → temper → cairn suite
   --global        Install for every project (default: this project only)
   --claude-md     Write the unified rules block into CLAUDE.md
   --no-bonsai     Skip bonsai, the only plugin needing uv, node and npm
-  --dry-run       Print every step, change nothing
+  --dry-run       Print every step, change nothing — Claude Code only; it
+                  cannot compose with --vibe/--codex, whose install has no
+                  dry-run mode
   plugin...       Install only the named plugins
 
 The agents compose:
@@ -46,6 +48,7 @@ case " $* " in *" -h "*|*" --help "*) usage; exit 0 ;; esac
 
 # Split the agent targets from the engine's own arguments.
 CLAUDE=0
+DRY_RUN=0
 SKILL_AGENTS=()
 ENGINE_ARGS=()
 for arg in "$@"; do
@@ -53,6 +56,7 @@ for arg in "$@"; do
     --claude) CLAUDE=1 ;;
     --vibe)  SKILL_AGENTS+=(vibe) ;;
     --codex) SKILL_AGENTS+=(codex) ;;
+    --dry-run) DRY_RUN=1; ENGINE_ARGS+=("$arg") ;;
     *)       ENGINE_ARGS+=("$arg") ;;
   esac
 done
@@ -62,6 +66,14 @@ done
 if [ "$CLAUDE" -eq 0 ] && [ "${#SKILL_AGENTS[@]}" -eq 0 ]; then
   printf 'Pick at least one agent: --claude, --vibe or --codex.\n\n' >&2
   usage >&2
+  exit 1
+fi
+
+# --dry-run promises that nothing is written, and the skills install has no
+# dry-run mode — composed, the skills would land for real under a flag that
+# promised otherwise. Refuse before anything runs.
+if [ "$DRY_RUN" -eq 1 ] && [ "${#SKILL_AGENTS[@]}" -gt 0 ]; then
+  printf 'Pick one: --dry-run previews the Claude Code install only. Re-run with --claude and without --vibe/--codex, or drop --dry-run to install the skills for real.\n' >&2
   exit 1
 fi
 

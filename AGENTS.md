@@ -16,9 +16,10 @@ critique-plan → bonsai-first → critique-diff / critique-pr → draft-commit 
 `draft-config` (trellis) sits outside the lifecycle: it writes the
 `.aether/config` the others read.
 
-Every skill degrades gracefully without the `aether` CLI — config steps fall
+Every skill degrades gracefully without the `aether` CLI — config reads fall
 back to documented defaults — so these rules work on a machine where aether was
-never installed.
+never installed. The one write path, `draft-config`'s `aether config set`, needs
+the CLI and says so.
 
 ---
 

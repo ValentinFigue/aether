@@ -64,3 +64,11 @@ fi
 if [ "$CLAUDE" -eq 1 ]; then
   exec bash "$SCRIPT_DIR/bin/aether" uninstall "${ARGS[@]}"
 fi
+
+# Engine-scope options without a --claude to apply them to would be silently
+# ignored — say so, exactly as install.sh does, rather than let a --global
+# look like it removed the global install.
+if [ "${#ARGS[@]}" -gt 0 ]; then
+  printf 'Note: %s apply to the Claude Code uninstall — add --claude to run it.\n' \
+    "${ARGS[*]}" >&2
+fi

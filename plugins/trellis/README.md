@@ -59,4 +59,3 @@ aether uninstall trellis
 ```
 
 MIT.
-

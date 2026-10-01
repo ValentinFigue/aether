@@ -258,4 +258,3 @@ bash uninstall.sh global --claude-md  # also remove CLAUDE.md section
 | [cairn](../cairn/) | Git narration | When you ship |
 
 > **Order does not depend on install order.** There is one `PreToolUse` hook for the whole suite, and `enforce-suite.sh` runs the gates in lifecycle order — whetstone, bonsai, temper, cairn — whatever sequence you installed them in.
-

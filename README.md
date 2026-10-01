@@ -161,9 +161,10 @@ output, so `.agents/skills/` is gitignored exactly like `.claude/commands/`:
 the committed truth is `plugins/`, and `install.sh --vibe` / `--codex`
 (through [`scripts/install-skills.sh`](scripts/install-skills.sh)) rebuild on
 every install rather than copying a possibly-stale checkout. Bodies are
-unchanged in substance: every `aether` call degrades to its documented
-defaults when the CLI is absent, so the skills work on a machine where
-aether's Claude Code half was never installed.
+unchanged in substance: every config read degrades to its documented defaults
+when the CLI is absent — the one write path, `draft-config`'s
+`aether config set`, needs the CLI and says so — so the skills work on a
+machine where aether's Claude Code half was never installed.
 
 Both new targets honour `$VIBE_HOME` / `$CODEX_HOME`. The AGENTS.md block is
 spliced with the same `aether` sentinels the CLAUDE.md block uses, so a

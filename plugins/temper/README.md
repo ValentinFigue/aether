@@ -6,6 +6,12 @@ It is the symmetric counterpart to [whetstone](../whetstone/): where whetstone c
 
 > Tempering is the hardening process applied *after* forging. The metal has been shaped — now we make sure it holds.
 
+> **Same commands on Vibe Code and Codex.** `bash install.sh --vibe` / `--codex`
+> from the repo root install temper's commands as portable skills with the
+> AGENTS.md discipline block, in every project. The gate and hook half of this
+> README is Claude Code–only for now — see the
+> [suite README's Agents section](../../README.md#agents--what-works-where).
+
 ---
 
 ## What it does
@@ -252,3 +258,4 @@ bash uninstall.sh global --claude-md  # also remove CLAUDE.md section
 | [cairn](../cairn/) | Git narration | When you ship |
 
 > **Order does not depend on install order.** There is one `PreToolUse` hook for the whole suite, and `enforce-suite.sh` runs the gates in lifecycle order — whetstone, bonsai, temper, cairn — whatever sequence you installed them in.
+

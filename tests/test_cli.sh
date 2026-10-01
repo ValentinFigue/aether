@@ -110,7 +110,7 @@ done
 # ── status against a real install ────────────────────────────────────────────
 suite "status"
 H=$(new_home)
-env HOME="$H" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+env HOME="$H" bash "$REPO/install.sh" --claude --global --no-bonsai >/dev/null 2>&1
 out=$(env HOME="$H" bash "$CLI" status 2>&1); e=$?
 assert_exit 0 "$e" "status exits 0"
 assert_contains "$out" "enforce-suite.sh registered" "status sees the registered hook"
@@ -172,7 +172,7 @@ suite "plugin update respects scope"
 HU=$(new_home)
 PROJ_U=$(mktemp -d)
 cd "$PROJ_U" || exit 1
-env HOME="$HU" bash "$REPO/install.sh" --no-bonsai >/dev/null 2>&1   # LOCAL install
+env HOME="$HU" bash "$REPO/install.sh" --claude --no-bonsai >/dev/null 2>&1   # LOCAL install
 [ -f .claude/commands/draft-commit.md ] && pass "local install put commands in the project" \
                                         || fail "local install put commands in the project"
 before=$(ls "$HU/.claude/commands" 2>/dev/null | wc -l | tr -d ' ')
@@ -191,12 +191,12 @@ rm -rf "$PROJ_U"
 # ── uninstall ────────────────────────────────────────────────────────────────
 suite "uninstall"
 H3=$(new_home)
-env HOME="$H3" bash "$REPO/install.sh" --global --claude-md --no-bonsai >/dev/null 2>&1
+env HOME="$H3" bash "$REPO/install.sh" --claude --global --claude-md --no-bonsai >/dev/null 2>&1
 S="$H3/.claude/settings.json"
 [ -f "$H3/.aether/hooks/gates/enforce-cairn.sh" ] \
   && pass "gates present before uninstall" || fail "gates present before uninstall"
 
-env HOME="$H3" bash "$REPO/uninstall.sh" --global --claude-md >"$H3/un.log" 2>&1; e=$?
+env HOME="$H3" bash "$REPO/uninstall.sh" --claude --global --claude-md >"$H3/un.log" 2>&1; e=$?
 assert_exit 0 "$e" "uninstall.sh wrapper exits 0"
 
 [ -e "$H3/.aether/hooks/enforce-suite.sh" ] \
@@ -242,7 +242,7 @@ suite "local uninstall"
 H4=$(new_home)
 PROJ=$(mktemp -d)
 cd "$PROJ" || exit 1
-env HOME="$H4" bash "$REPO/install.sh" --no-bonsai --claude-md >/dev/null 2>&1
+env HOME="$H4" bash "$REPO/install.sh" --claude --no-bonsai --claude-md >/dev/null 2>&1
 
 for p in .aether/hooks/enforce-suite.sh .aether/hooks/gates .bin/aether .aether/manifest; do
   [ -e "$p" ] && pass "local install created $p" || fail "local install created $p"
@@ -253,7 +253,7 @@ mkdir -p "$H4/.claude"
 mkdir -p "$H4/.aether"
 printf 'version=1.0.0\nscope=global\nrepo=/elsewhere/aether\n' > "$H4/.aether/manifest"
 
-env HOME="$H4" bash "$REPO/uninstall.sh" --claude-md >/dev/null 2>&1
+env HOME="$H4" bash "$REPO/uninstall.sh" --claude --claude-md >/dev/null 2>&1
 e=$?
 assert_exit 0 "$e" "local uninstall exits 0"
 
@@ -298,9 +298,9 @@ suite "global uninstall does not reach into a project"
 H5=$(new_home)
 PROJ2=$(mktemp -d)
 cd "$PROJ2" || exit 1
-env HOME="$H5" bash "$REPO/install.sh" --no-bonsai >/dev/null 2>&1          # local
-env HOME="$H5" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1 # and global
-env HOME="$H5" bash "$REPO/uninstall.sh" --global >/dev/null 2>&1
+env HOME="$H5" bash "$REPO/install.sh" --claude --no-bonsai >/dev/null 2>&1          # local
+env HOME="$H5" bash "$REPO/install.sh" --claude --global --no-bonsai >/dev/null 2>&1 # and global
+env HOME="$H5" bash "$REPO/uninstall.sh" --claude --global >/dev/null 2>&1
 [ -f .aether/hooks/enforce-suite.sh ] \
   && pass "global uninstall leaves the project's local hook alone" \
   || fail "global uninstall leaves the project's local hook alone"

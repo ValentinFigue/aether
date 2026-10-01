@@ -4,6 +4,12 @@
 
 No dependencies. No MCP server. No build step.
 
+> **Same commands on Vibe Code and Codex.** `bash install.sh --vibe` / `--codex`
+> from the repo root install cairn's commands as portable skills with the
+> AGENTS.md discipline block, in every project. The gate and hook half of this
+> README is Claude Code–only for now — see the
+> [suite README's Agents section](../../README.md#agents--what-works-where).
+
 ---
 
 ## Why
@@ -366,3 +372,4 @@ The highest-value handoff in the suite: after temper finds no blockers, run `/dr
 ## License
 
 MIT — see [LICENSE](LICENSE).
+

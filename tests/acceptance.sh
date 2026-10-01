@@ -76,7 +76,7 @@ fi
 # Unquoted expansions survive every test whose paths have no spaces in them.
 grp "paths containing spaces"
 H="$(mk)/home dir with spaces"; mkdir -p "$H"
-if env HOME="$H" bash install.sh --global --no-bonsai >/dev/null 2>&1; then
+if env HOME="$H" bash install.sh --claude --global --no-bonsai >/dev/null 2>&1; then
   ok "install exits 0"
 else
   bad "install exits 0"
@@ -101,7 +101,7 @@ out=$( cd "$sp" && printf '%s' '{"tool_name":"Bash","tool_input":{"command":"git
       | env HOME="$H" bash "$hp" 2>&1 )
 case "$out" in *Cairn*) ok "a gate fires from a spaced path" ;;
                *) bad "a gate fires from a spaced path" "${out:0:70}" ;; esac
-env HOME="$H" bash uninstall.sh --global >/dev/null 2>&1
+env HOME="$H" bash uninstall.sh --claude --global >/dev/null 2>&1
 [ -e "$H/.aether/hooks/enforce-suite.sh" ] && bad "uninstall removed the hook" \
                                           || ok "uninstall removed the hook"
 
@@ -109,7 +109,7 @@ env HOME="$H" bash uninstall.sh --global >/dev/null 2>&1
 # The value that matters is exit 2: Claude Code reads it as "block this tool
 # call", so a gate that dies on bad input would lock the user out of everything.
 grp "hostile hook input"
-HG=$(mk); env HOME="$HG" bash install.sh --global --no-bonsai >/dev/null 2>&1
+HG=$(mk); env HOME="$HG" bash install.sh --claude --global --no-bonsai >/dev/null 2>&1
 HOOK="$HG/.aether/hooks/enforce-suite.sh"
 big=$(python3 -c 'print("{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git commit -m \\\"" + "x"*200000 + "\\\"\"}}")')
 i=0
@@ -141,7 +141,7 @@ HD=$(mk); mkdir -p "$HD/.claude"
 printf 'auto_nudge_lines: 999\n' > "$HD/.claude/temper.config"   # something to migrate
 snap() { ( cd "$HD" && find . | sort ); }
 before=$(snap)
-out=$(env HOME="$HD" bash install.sh --global --claude-md --dry-run 2>&1)
+out=$(env HOME="$HD" bash install.sh --claude --global --claude-md --dry-run 2>&1)
 [ "$before" = "$(snap)" ] && ok "creates no file and no directory, bonsai included" \
                           || bad "creates no file and no directory" "$(diff <(printf '%s\n' "$before") <(snap) | head -4)"
 case "$out" in *"✓"*) bad "prints no ✓ (it did nothing to tick)" ;; *) ok "prints no ✓ (it did nothing to tick)" ;; esac
@@ -153,9 +153,9 @@ HI=$(mk); mkdir -p "$HI/.claude"
 printf '# my own notes\n\nBe careful.\n' > "$HI/.claude/CLAUDE.md"
 hashall() { ( cd "$HI" && find . -type f | sort | while IFS= read -r f; do
     printf '%s %s\n' "$( (md5 -q "$f" 2>/dev/null || md5sum "$f" | cut -d' ' -f1) )" "$f"; done ); }
-for _ in 1 2 3; do env HOME="$HI" bash install.sh --global --claude-md --no-bonsai >/dev/null 2>&1; done
+for _ in 1 2 3; do env HOME="$HI" bash install.sh --claude --global --claude-md --no-bonsai >/dev/null 2>&1; done
 a=$(hashall)
-env HOME="$HI" bash install.sh --global --claude-md --no-bonsai >/dev/null 2>&1
+env HOME="$HI" bash install.sh --claude --global --claude-md --no-bonsai >/dev/null 2>&1
 [ "$a" = "$(hashall)" ] && ok "a fourth install changes nothing" \
                         || bad "a fourth install changes nothing" "$(diff <(printf '%s\n' "$a") <(hashall) | head -4)"
 n=$(grep -c 'aether:start' "$HI/.claude/CLAUDE.md" 2>/dev/null || true)
@@ -180,7 +180,7 @@ PY
 # is wrong.
 grp "aether doctor after a fresh install"
 HDR=$(mk); NEUTRAL_D=$(mk)
-env HOME="$HDR" bash install.sh --global --no-bonsai >/dev/null 2>&1
+env HOME="$HDR" bash install.sh --claude --global --no-bonsai >/dev/null 2>&1
 out=$( cd "$NEUTRAL_D" && env HOME="$HDR" bash "$REPO/bin/aether" doctor 2>&1 ); rc=$?
 if [ "$rc" -eq 0 ] && [ -z "$(printf '%s' "$out" | grep -E '^  (✗|!)')" ]; then
   ok "reports nothing on a fresh install"
@@ -199,7 +199,7 @@ b4=$(snapd)
 # through an actual install rather than by calling the gate directly.
 grp "the plan flow after a real install"
 HPL=$(mk); PPL=$(mk)
-env HOME="$HPL" bash install.sh --global --no-bonsai >/dev/null 2>&1
+env HOME="$HPL" bash install.sh --claude --global --no-bonsai >/dev/null 2>&1
 mkdir -p "$HPL/.claude/plans" "$PPL/src"
 ( cd "$PPL" && git init -q . && git config user.email t@t && git config user.name t )
 PLAN="$HPL/.claude/plans/acceptance.md"
@@ -263,7 +263,7 @@ else
     HU=$(mk)
     ( cd "$OLD" && env HOME="$HU" bash install.sh --global --no-bonsai >/dev/null 2>&1 )
     printf 'auto_nudge_lines: 777\nseverity: red\n' > "$HU/.claude/temper.config"
-    env HOME="$HU" bash install.sh --global --no-bonsai >/dev/null 2>&1
+    env HOME="$HU" bash install.sh --claude --global --no-bonsai >/dev/null 2>&1
     [ -f "$HU/.aether/config" ] && ok "the old config migrated into .aether/config" \
                                 || bad "the old config migrated into .aether/config"
     v=$(env HOME="$HU" bash bin/aether config get temper.auto_nudge_lines 2>/dev/null)
@@ -298,7 +298,7 @@ fi   # MODE != perf
 # pay all day. Measured against the last release as a reference rather than an
 # absolute budget, because the number depends on the machine.
 grp "hook cost"
-HP=$(mk); env HOME="$HP" bash install.sh --global --no-bonsai >/dev/null 2>&1
+HP=$(mk); env HOME="$HP" bash install.sh --claude --global --no-bonsai >/dev/null 2>&1
 bench() {
   local s e; s=$(now_ms)
   for _ in $(seq 1 20); do printf '%s' "$PAYLOAD" | env HOME="$2" bash "$1" >/dev/null 2>&1; done
@@ -331,7 +331,7 @@ n=$(printf '%s' "$PAYLOAD" | env HOME="$HP" bash -x "$HP/.aether/hooks/enforce-s
 if [ "$MODE" = full ]; then
 grp "bonsai (--full)"
 HB=$(mk)
-if env HOME="$HB" bash install.sh --global >/dev/null 2>&1; then
+if env HOME="$HB" bash install.sh --claude --global >/dev/null 2>&1; then
   ok "install with bonsai exits 0"
 else
   bad "install with bonsai exits 0" "needs uv, node and npm"

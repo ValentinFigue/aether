@@ -31,6 +31,12 @@
 /.claude/aether.manifest
 /.bin/
 
+# The same for the other agents: .agents/skills/ is what scripts/build-skills.sh
+# generates from plugins/ — exactly what .claude/commands/ is for the engine —
+# so it is never committed. scripts/install-skills.sh rebuilds it on every
+# install rather than copying a possibly-stale checkout.
+/.agents/
+
 # Backups written before install.sh and uninstall.sh mutate settings.json or
 # CLAUDE.md in place.
 *.bak

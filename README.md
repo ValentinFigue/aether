@@ -6,6 +6,7 @@ Checkpoints for coding agents. aether makes an agent stop at the four moments a 
 | | |
 |---|---|
 | [The problem](#the-problem) · [Does it hold up](#does-it-hold-up) · [Quick start](#quick-start) | why, whether to believe it, and getting it running |
+| [Agents](#agents--what-works-where) | Claude Code, Vibe Code, Codex — what is identical, what differs |
 | [How it works](#how-it-works) · [Configuration](#configuration) · [Trust](#trust) | the part you touch daily |
 | [Monorepos](#monorepos--projectpath) · [`aether check`](#monorepos--projectpath) | one declarative place a repo says how to test itself |
 | [Commands](#commands) · [The development workflow](#the-development-workflow) | what to run, and when |
@@ -15,9 +16,10 @@ Checkpoints for coding agents. aether makes an agent stop at the four moments a 
 
 ## The problem
 
-Claude Code will write code, commit it, and open a PR without stopping to check
-anything — and it is very good at making that look finished. The failure mode is
-not bad code. It is that **nothing interrupts at the points where a human would.**
+A coding agent — Claude Code, Vibe Code, Codex — will write code, commit it,
+and open a PR without stopping to check anything, and it is very good at making
+that look finished. The failure mode is not bad code. It is that **nothing
+interrupts at the points where a human would.**
 
 You ask for rate limiting on an API. Same request, both columns:
 
@@ -32,8 +34,10 @@ You ask for rate limiting on an API. Same request, both columns:
 Left column: you find out in review, three days later, or in production. Right
 column: at the point where fixing it is a sentence, not a revert.
 
-Each checkpoint is a slash command you can run yourself, plus a hook that reminds
-you when you forget.
+Each checkpoint is a slash command you can run yourself on any agent, plus — on
+Claude Code, the one of the three with a hook surface — a hook that reminds you
+when you forget. [Agents](#agents--what-works-where) covers exactly what that
+difference means on each one.
 
 **Everything the hook does is advice.** It prints; the command then runs. Pushing
 unreviewed code and committing to a path you marked critical are the two verdicts that
@@ -84,8 +88,14 @@ that runs any of it, which is what lets the critics *measure* instead of guess.
 
 ```bash
 git clone https://github.com/ValentinFigue/aether && cd aether
-bash install.sh --global --claude-md
+bash install.sh --claude --global --claude-md --vibe --codex
 ```
+
+Agents are named, never defaulted — at least one of `--claude`, `--vibe` or
+`--codex` is required, so no agent is silently the assumed one. Pick any
+subset. `--claude` installs the hooks, gates and slash commands; `--claude-md`
+adds the rules block; `--vibe` and `--codex` add the skills and the AGENTS.md
+block for those agents, in every project on the machine.
 
 Then once per repository — trellis reads your CI workflows and git history and
 writes the config the critics use:
@@ -96,14 +106,15 @@ cd ~/your-project
 aether trust      # review what it found, then let the critics run it
 ```
 
-That is the whole setup. The hooks now nudge at each checkpoint, and the commands
-are there when you want them: `/critique-plan`, `/critique-diff`, `/draft-commit`,
-`/draft-pr`.
+That is the whole setup. The commands are there when you want them, in any
+agent's picker: `/critique-plan`, `/critique-diff`, `/draft-commit`, `/draft-pr`.
+On Claude Code the hooks nudge at each checkpoint as well.
 
 ```bash
-bash install.sh                       # this project only
-bash install.sh --global --no-bonsai  # skip the one plugin needing uv/node/npm
-bash install.sh --global --dry-run    # print every step, change nothing
+bash install.sh --claude                        # Claude Code, this project only
+bash install.sh --claude --global --no-bonsai   # skip the one plugin needing uv/node/npm
+bash install.sh --vibe --codex                  # just Vibe Code and Codex
+bash install.sh --claude --global --dry-run     # print every step, change nothing
 ```
 
 **Keep the clone.** bonsai registers its MCP servers by absolute path into it, so
@@ -113,6 +124,80 @@ Needs `bash` and one of `python3`/`node`/`jq`; bonsai also needs `uv`, `node` an
 `npm`, and is skipped with an explanation if they are missing. There is no
 `curl | bash` — the installer copies files out of the clone, so piping it could
 never have worked.
+
+---
+
+## Agents — what works where
+
+Claude Code, Vibe Code and Codex get the same discipline: the same commands,
+the same critics inside them, the same config, the same `aether trust`. What
+differs is the surface each agent gives an installer — and therefore what can
+be automatic.
+
+| | Claude Code | Vibe Code | Codex |
+|---|---|---|---|
+| Install | `bash install.sh --claude --global --claude-md` | `bash install.sh --vibe` | `bash install.sh --codex` |
+| Commands arrive as | slash commands, `~/.claude/commands/` | user-invocable skills, `~/.vibe/skills/` | skills, `~/.codex/skills/` |
+| Discipline block | `CLAUDE.md` | `~/.vibe/AGENTS.md` | `~/.codex/AGENTS.md` |
+| bonsai's MCP tools | registered by the installer | register in `config.toml` yourself | register in `config.toml` yourself |
+| Gates — the automatic nudges | yes | not yet | not yet |
+| Strict mode | yes | — | — |
+| Bypass markers | enforced | inert | inert |
+
+The ten portable skills:
+
+- **critics** — `critique-plan` (whetstone), `critique-diff`, `critique-pr` (temper)
+- **drafts** — `draft-commit`, `draft-pr`, `draft-changelog`, `draft-summary` (cairn)
+- **setup** — `draft-config` (trellis)
+- **rules** — `sync-docs` (temper), `bonsai-first` (bonsai)
+
+The eight critics and drafts are `user-invocable`, so they surface as slash
+commands in every agent's picker; the two rules are picked by the model when
+the situation matches. They are the open
+[Agent Skills](https://agentskills.io) format, built by
+[`scripts/build-skills.sh`](scripts/build-skills.sh) from the command files
+under `plugins/` — the same one-source-of-truth model as every other install
+output, so `.agents/skills/` is gitignored exactly like `.claude/commands/`:
+the committed truth is `plugins/`, and `install.sh --vibe` / `--codex`
+(through [`scripts/install-skills.sh`](scripts/install-skills.sh)) rebuild on
+every install rather than copying a possibly-stale checkout. Bodies are
+unchanged in substance: every `aether` call degrades to its documented
+defaults when the CLI is absent, so the skills work on a machine where
+aether's Claude Code half was never installed.
+
+Both new targets honour `$VIBE_HOME` / `$CODEX_HOME`. The AGENTS.md block is
+spliced with the same `aether` sentinels the CLAUDE.md block uses, so a
+re-install replaces it and `uninstall.sh --vibe` / `--codex` strips exactly
+what was written, leaving any prose of your own in AGENTS.md untouched.
+[`AGENTS.md`](AGENTS.md) at this repo's root is the same discipline block,
+read by Vibe Code and Codex when working in the aether repo itself.
+
+### What behaves differently
+
+**Nothing interrupts on Vibe Code or Codex.** The gates are a `PreToolUse`
+surface, and today that surface belongs to Claude Code. On the other agents
+the discipline is the AGENTS.md block: the agent runs `critique-plan` before
+implementing or `critique-diff` before committing because its instructions say
+to, not because a hook made it. The difference is who remembers — the hook,
+or the agent reading its AGENTS.md.
+
+**Bypass markers do nothing outside Claude Code.** There is no hook to
+silence; not invoking the critic is the same decision, made directly. See
+[Bypass](#bypass).
+
+**Plan mode is a Claude Code concept**, so whetstone's "a plan exists but has
+not been critiqued" gate has nothing to read elsewhere. `critique-plan` runs
+on whatever plan you present, wherever it lives, and its findings still land
+in the plan and in `.aether/out/CRITIQUE.md`.
+
+**bonsai's MCP tools need registering once** on the other agents: add the two
+servers from [plugins/bonsai/.mcp.json](plugins/bonsai/.mcp.json) to the
+agent's `config.toml` under `mcp_servers`. Without them, `bonsai-first` says
+so and falls back to text tools, stating the risk.
+
+**`aether check`, config and trust are agent-neutral.** The CLI is bash and
+the skills call it the same way everywhere, so the measurement pass — real
+test, lint and typecheck results inside the critics — works on all three.
 
 ---
 
@@ -554,7 +639,8 @@ your colleagues get the same thresholds and the same test command. `out/` and
 
 ### 2. Plan, before writing anything
 
-Describe the change; Claude proposes a plan in `.claude/plans/<name>.md`. Then:
+Describe the change; the agent proposes a plan (Claude Code writes it to
+`.claude/plans/`, the other agents wherever the plan is written). Then:
 
 ```bash
 /critique-plan
@@ -562,8 +648,9 @@ Describe the change; Claude proposes a plan in `.claude/plans/<name>.md`. Then:
 
 🔴 findings mean the plan is wrong, not the code. Fixing a plan costs a
 conversation; fixing the same problem after implementation costs a refactor.
-whetstone's gate enforces this at `git commit`: a plan on disk with no critique
-newer than it produces a nudge.
+On Claude Code, whetstone's gate enforces this at `git commit`: a plan on
+disk with no critique newer than it produces a nudge. Elsewhere the AGENTS.md
+block carries the same rule.
 
 ### 3. Build
 
@@ -720,6 +807,13 @@ aether hook enable|disable <plugin>       Stop a gate loading at all
 aether update                             git pull the clone, re-run the installer
 aether version · aether help
 ```
+
+`aether install` lays down the Claude Code surfaces. One level up,
+`install.sh` requires at least one agent flag: `--claude` runs the engine
+install, and `--vibe` / `--codex` are handled by
+[`scripts/install-skills.sh`](scripts/install-skills.sh) — portable skills
+plus the AGENTS.md block for those agents, composing with any engine install:
+`bash install.sh --claude --global --claude-md --vibe --codex` does all three.
 
 Every plugin answers to its own name — `aether cairn status` — and the `cairn`,
 `temper`, `whetstone` and `bonsai` binaries are 24-line shims that exec exactly
@@ -927,6 +1021,11 @@ Three deliberate limits:
 
 Full specification: [BYPASS.md](BYPASS.md)
 
+Markers silence hooks, and hooks run on Claude Code — the one agent of the
+three with a gate surface today. On Vibe Code and Codex there is nothing to
+silence: not invoking the critic is the same decision, made directly. See
+[Agents](#agents--what-works-where).
+
 | Marker | Effect |
 |---|---|
 | `# aether:skip` | Silence all gates |
@@ -1046,13 +1145,15 @@ separation earns its keep or it collapses into one gate with three critics.
 it. `/critique-diff --fix` applying only the mechanical findings — the ones with a file,
 a line and one obvious edit — would remove the retyping without removing the judgement.
 
-**Work with any agent, not just Claude Code.** The checking is already portable:
-bonsai's tools are plain MCP, the config and prose are plain text, the CLI is bash,
-and the commands are markdown prompts. What is Claude Code specific is the automatic
-interruption — the gates register in its `settings.json` and parse its PreToolUse
-payload. Each rule already lives in one file behind a `gate_<plugin>` function, so
-another host is payload translation rather than a rewrite. The intent is to support
-Cursor, Windsurf, Zed and anything else that grows an equivalent hook.
+**Work with any agent — the commands are there; the interruption is next.**
+Vibe Code and Codex now install the same commands, the same AGENTS.md
+discipline and the same config and trust model (`install.sh --vibe` /
+`--codex`). What is still Claude Code specific is the automatic interruption —
+the gates register in its `settings.json` and parse its PreToolUse payload.
+Each rule already lives in one file behind a `gate_<plugin>` function, so
+another host is payload translation rather than a rewrite: Vibe Code's
+`hooks.toml` and Codex's `hooks.json` are the next two to translate for. Beyond
+them, Cursor, Windsurf, Zed and anything else that grows an equivalent hook.
 
 **Merge discipline.** `aether merge` gating on the things worth blocking a merge
 for — critique run, description accurate, CI green on the actual head — rather
@@ -1071,11 +1172,14 @@ and it is currently thrown away once the code lands.
 ## Uninstall
 
 ```bash
-# Remove suite hook, gates and CLI (plugins remain installed)
-bash uninstall.sh --global
+# Remove the Claude Code suite: hook, gates and CLI (plugins remain installed)
+bash uninstall.sh --claude --global
 
 # Also remove the CLAUDE.md block
-bash uninstall.sh --global --claude-md
+bash uninstall.sh --claude --global --claude-md
+
+# Remove the Vibe Code and Codex skills + AGENTS.md blocks
+bash uninstall.sh --vibe --codex
 ```
 
 Or via the CLI: `aether uninstall global --claude-md`

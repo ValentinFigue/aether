@@ -171,7 +171,7 @@ suite "the suite matcher comes from the manifests"
 m=$( AETHER_REPO="$REPO" bash -c ". '$LIB'; eval \"\$(sed '/^COMMAND=/,\$d' '$CLI')\"; _suite_matcher" )
 assert_eq "Bash|Write|Edit|MultiEdit|ExitPlanMode" "$m" "the union of every suite_owned matcher"
 HM=$(mk)
-env HOME="$HM" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+env HOME="$HM" bash "$REPO/install.sh" --claude --global --no-bonsai >/dev/null 2>&1
 got=$(python3 - "$HM" <<'PYEOF'
 import json, sys
 d = json.load(open(sys.argv[1] + "/.claude/settings.json"))

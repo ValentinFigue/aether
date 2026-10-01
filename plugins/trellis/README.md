@@ -2,6 +2,12 @@
 
 Surveys a repository and writes the config the rest of the suite reads.
 
+> **Same commands on Vibe Code and Codex.** `bash install.sh --vibe` / `--codex`
+> from the repo root install `/draft-config` as a portable skill with the
+> AGENTS.md discipline block, in every project. trellis has no gate or hook on
+> any agent — see the
+> [suite README's Agents section](../../README.md#agents--what-works-where).
+
 ```bash
 /draft-config          # detect, ask about the gaps, write .aether/config
 /draft-config --global # write ~/.aether/config instead

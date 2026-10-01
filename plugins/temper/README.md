@@ -6,6 +6,12 @@ It is the symmetric counterpart to [whetstone](../whetstone/): where whetstone c
 
 > Tempering is the hardening process applied *after* forging. The metal has been shaped — now we make sure it holds.
 
+> **Same commands on Vibe Code and Codex.** `bash install.sh --vibe` / `--codex`
+> from the repo root install temper's commands as portable skills with the
+> AGENTS.md discipline block, in every project. The gate and hook half of this
+> README is Claude Code–only for now — see the
+> [suite README's Agents section](../../README.md#agents--what-works-where).
+
 ---
 
 ## What it does

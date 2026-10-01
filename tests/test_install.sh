@@ -28,7 +28,7 @@ jsonq() { python3 -c "$2" "$1" 2>/dev/null; }
 # ── a clean global install ───────────────────────────────────────────────────
 suite "global install"
 H=$(new_home)
-if env HOME="$H" bash "$REPO/install.sh" --global --claude-md --no-bonsai >"$H/out.log" 2>&1; then
+if env HOME="$H" bash "$REPO/install.sh" --claude --global --claude-md --no-bonsai >"$H/out.log" 2>&1; then
   pass "install exits 0"
 else
   fail "install exits 0" "$(tail -5 "$H/out.log")"
@@ -121,7 +121,7 @@ suite "backups"
 
 # ── idempotence ──────────────────────────────────────────────────────────────
 suite "idempotence"
-env HOME="$H" bash "$REPO/install.sh" --global --claude-md --no-bonsai >"$H/out2.log" 2>&1
+env HOME="$H" bash "$REPO/install.sh" --claude --global --claude-md --no-bonsai >"$H/out2.log" 2>&1
 e=$?
 assert_exit 0 "$e" "second install exits 0"
 pre=$(jsonq "$S" '
@@ -159,7 +159,7 @@ cat > "$H2/.claude/settings.json" <<'JSON'
   "permissions": {"allow": ["Bash", "mcp__bonsai_py__*"]}
 }
 JSON
-env HOME="$H2" bash "$REPO/install.sh" --global --no-bonsai >"$H2/out.log" 2>&1
+env HOME="$H2" bash "$REPO/install.sh" --claude --global --no-bonsai >"$H2/out.log" 2>&1
 S2="$H2/.claude/settings.json"
 pre=$(jsonq "$S2" '
 import json,sys
@@ -189,7 +189,7 @@ esac
 suite "failure reporting"
 H3=$(new_home)
 mv "$REPO/plugins/cairn/bin/cairn" "$REPO/plugins/cairn/bin/cairn.bak"
-env HOME="$H3" bash "$REPO/install.sh" --global --no-bonsai >"$H3/out.log" 2>&1
+env HOME="$H3" bash "$REPO/install.sh" --claude --global --no-bonsai >"$H3/out.log" 2>&1
 e=$?
 mv "$REPO/plugins/cairn/bin/cairn.bak" "$REPO/plugins/cairn/bin/cairn"
 assert_exit 1 "$e" "install exits non-zero when a plugin fails"
@@ -199,7 +199,7 @@ assert_contains "$(cat "$H3/out.log")" "✗ cairn" "the failing plugin is named"
 suite "bonsai prerequisites"
 H4=$(new_home)
 # A PATH without uv/node/npm must skip bonsai with instructions, not fail.
-env HOME="$H4" PATH="/usr/bin:/bin" bash "$REPO/install.sh" --global >"$H4/out.log" 2>&1
+env HOME="$H4" PATH="/usr/bin:/bin" bash "$REPO/install.sh" --claude --global >"$H4/out.log" 2>&1
 e=$?
 assert_exit 0 "$e" "missing uv/node/npm skips bonsai without failing the suite"
 assert_contains "$(cat "$H4/out.log")" "bonsai: skipped" "the skip is reported"
@@ -230,7 +230,7 @@ printf 'old\n' > "$HG/.claude/commands/cairn-commit.md"
 chmod 000 "$HG/.claude/commands/cairn-commit.md"
 mkdir -p "$HG/.aether"
 printf 'version=0.1.0\nscope=global\n' > "$HG/.aether/manifest"
-env HOME="$HG" bash "$REPO/install.sh" --global --no-bonsai >"$HG/out.log" 2>&1
+env HOME="$HG" bash "$REPO/install.sh" --claude --global --no-bonsai >"$HG/out.log" 2>&1
 e=$?
 chmod 644 "$HG/.claude/commands/cairn-commit.md" 2>/dev/null || true
 assert_exit 0 "$e" "an unremovable superseded command does not fail the install"
@@ -329,7 +329,7 @@ fi
 
 HR=$(new_home)
 mkdir -p "$HR/.claude/commands"
-env HOME="$HR" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+env HOME="$HR" bash "$REPO/install.sh" --claude --global --no-bonsai >/dev/null 2>&1
 for c in autocritic.md temper.md cairn-commit.md; do
   printf 'resurrected\n' > "$HR/.claude/commands/$c"
 done
@@ -449,7 +449,7 @@ fi
 # keeps this stable on a loaded CI machine.
 suite "the PreToolUse hook does not spawn a process per key"
 HK=$(new_home)
-env HOME="$HK" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+env HOME="$HK" bash "$REPO/install.sh" --claude --global --no-bonsai >/dev/null 2>&1
 n=$(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"ls"}}' \
     | env HOME="$HK" bash -x "$HK/.aether/hooks/enforce-suite.sh" 2>&1 >/dev/null \
     | grep -c '+ awk' || true)
@@ -466,10 +466,10 @@ HB=$(new_home)
 mkdir -p "$HB/.claude"
 printf '# My own rules\n\nDo the thing.\n' > "$HB/.claude/CLAUDE.md"
 for _ in 1 2 3; do
-  env HOME="$HB" bash "$REPO/install.sh" --global --claude-md --no-bonsai >/dev/null 2>&1
+  env HOME="$HB" bash "$REPO/install.sh" --claude --global --claude-md --no-bonsai >/dev/null 2>&1
 done
 first=$(env HOME="$HB" bash -c 'wc -l < "$HOME/.claude/CLAUDE.md"' | tr -d ' ')
-env HOME="$HB" bash "$REPO/install.sh" --global --claude-md --no-bonsai >/dev/null 2>&1
+env HOME="$HB" bash "$REPO/install.sh" --claude --global --claude-md --no-bonsai >/dev/null 2>&1
 again=$(env HOME="$HB" bash -c 'wc -l < "$HOME/.claude/CLAUDE.md"' | tr -d ' ')
 assert_eq "$first" "$again" "a fourth install does not grow CLAUDE.md"
 n=$(grep -c 'aether:start' "$HB/.claude/CLAUDE.md" || true)
@@ -538,7 +538,7 @@ json.dump({"hooks": {"PostToolUse": [{"matcher": "Bash|Write|Edit", "hooks": [
     {"type": "command", "command": h + "/.local/share/cairn/post-cairn.sh"}]}]}},
     open(h + "/.claude/settings.json", "w"), indent=2)
 PYEOF
-env HOME="$HR" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+env HOME="$HR" bash "$REPO/install.sh" --claude --global --no-bonsai >/dev/null 2>&1
 n=$(python3 - "$HR/.claude/settings.json" <<'PYEOF'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -550,7 +550,7 @@ PYEOF
 assert_eq "1" "$n" "post-cairn.sh is registered exactly once after a relocation"
 
 # Installing twice must not add a second copy either.
-env HOME="$HR" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+env HOME="$HR" bash "$REPO/install.sh" --claude --global --no-bonsai >/dev/null 2>&1
 n=$(python3 - "$HR/.claude/settings.json" <<'PYEOF'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -606,7 +606,7 @@ mkdir -p "$HD/.claude"
 printf 'auto_nudge_lines: 999\n' > "$HD/.claude/temper.config"   # something to migrate
 snapshot() { ( cd "$HD" && find . | sort ); }
 before=$(snapshot)
-out=$(env HOME="$HD" bash "$REPO/install.sh" --global --claude-md --dry-run 2>&1); e=$?
+out=$(env HOME="$HD" bash "$REPO/install.sh" --claude --global --claude-md --dry-run 2>&1); e=$?
 assert_exit 0 "$e" "--dry-run exits 0"
 assert_contains "$out" "dry-run" "--dry-run says so"
 assert_eq "$before" "$(snapshot)" "--dry-run creates no files and no directories"
@@ -645,7 +645,7 @@ json.dump({"hooks": {
                      "hooks": [{"type": "command", "command": old + "/plugin-hooks/post-cairn.sh"}]}],
 }}, open(h + "/.claude/settings.json", "w"), indent=2)
 PYEOF
-  env HOME="$HL" AETHER_JSON_BACKEND="$backend" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+  env HOME="$HL" AETHER_JSON_BACKEND="$backend" bash "$REPO/install.sh" --claude --global --no-bonsai >/dev/null 2>&1
   dangling=$(python3 - "$HL" <<'PYEOF'
 import json, os, sys
 h = sys.argv[1]
@@ -706,7 +706,7 @@ for c in $OLD_NAMES; do printf 'stale copy of %s\n' "$c" > "$HU/.claude/commands
 mkdir -p "$HU/.aether"
 printf 'version=0.1.0\nscope=global\n' > "$HU/.aether/manifest"
 
-env HOME="$HU" bash "$REPO/install.sh" --global --no-bonsai >"$HU/out.log" 2>&1
+env HOME="$HU" bash "$REPO/install.sh" --claude --global --no-bonsai >"$HU/out.log" 2>&1
 e=$?
 assert_exit 0 "$e" "upgrade over a 0.1.0 install exits 0"
 for c in $OLD_NAMES; do
@@ -726,7 +726,7 @@ printf 'MY OWN HEAVILY EDITED VERSION\n' > "$HE/.claude/commands/cairn-commit.md
 cp "$REPO/plugins/cairn/.claude/commands/draft-pr.md" "$HE/.claude/commands/cairn-pr.md" 2>/dev/null || true
 mkdir -p "$HE/.aether"
 printf 'version=0.1.0\nscope=global\n' > "$HE/.aether/manifest"
-env HOME="$HE" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+env HOME="$HE" bash "$REPO/install.sh" --claude --global --no-bonsai >/dev/null 2>&1
 [ -f "$HE/.claude/commands/cairn-commit.md.bak" ] \
   && pass "an edited command is backed up before removal" \
   || fail "an edited command is backed up before removal"
@@ -743,7 +743,7 @@ PROJ_S=$(mktemp -d)
 mkdir -p "$PROJ_S/.claude/commands"
 printf 'a project-local command\n' > "$PROJ_S/.claude/commands/cairn-commit.md"
 cd "$PROJ_S" || exit 1
-env HOME="$HS" bash "$REPO/install.sh" --global --no-bonsai >/dev/null 2>&1
+env HOME="$HS" bash "$REPO/install.sh" --claude --global --no-bonsai >/dev/null 2>&1
 [ -f "$PROJ_S/.claude/commands/cairn-commit.md" ] \
   && pass "a --global install leaves the project's commands alone" \
   || fail "a --global install leaves the project's commands alone"
@@ -758,7 +758,7 @@ HC=$(new_home)
 mkdir -p "$HC/.claude"
 printf 'my own notes\n\n<!-- aether:start -->\nRun /autocritic and /cairn-commit.\n<!-- aether:end -->\n' \
   > "$HC/.claude/CLAUDE.md"
-env HOME="$HC" bash "$REPO/install.sh" --global --claude-md --no-bonsai >/dev/null 2>&1
+env HOME="$HC" bash "$REPO/install.sh" --claude --global --claude-md --no-bonsai >/dev/null 2>&1
 C="$HC/.claude/CLAUDE.md"
 assert_contains "$(cat "$C")" "/critique-plan" "the block is refreshed to the new names"
 case "$(cat "$C")" in
@@ -800,7 +800,7 @@ for backend in python3 node jq; do
   mkdir -p "$HB/.claude"
   printf '%s\n' "$SEED" > "$HB/.claude/settings.json"
   env HOME="$HB" AETHER_JSON_BACKEND="$backend" \
-    bash "$REPO/install.sh" --global --no-bonsai >"$HB/out.log" 2>&1
+    bash "$REPO/install.sh" --claude --global --no-bonsai >"$HB/out.log" 2>&1
   e=$?
   assert_exit 0 "$e" "install succeeds with the $backend backend"
   # Normalise: hook paths embed the throwaway HOME.

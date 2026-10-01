@@ -3,9 +3,17 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/ValentinFigue/aether/actions/workflows/bonsai-ci.yml/badge.svg)](https://github.com/ValentinFigue/aether/actions/workflows/bonsai-ci.yml)
 
-Static-analysis refactoring tools for Claude Code — Python (AST) and TypeScript (compiler API).
+Static-analysis refactoring tools for coding agents — Python (AST) and TypeScript (compiler API). MCP tools work with any MCP host: Claude Code, Vibe Code, Codex.
 
 > **Status: early alpha.** The tools work but the project is new — expect rough edges. Feedback and bug reports welcome.
+
+> **Same commands on Vibe Code and Codex.** `bash install.sh --vibe` / `--codex`
+> from the repo root install the `bonsai-first` rule as a portable skill with
+> the AGENTS.md discipline block, in every project. The MCP servers are
+> registered automatically on Claude Code; on the other agents add them once
+> to the agent's `config.toml` from [.mcp.json](.mcp.json). The gate and hook
+> half of this README is Claude Code–only for now — see the
+> [suite README's Agents section](../../README.md#agents--what-works-where).
 
 ## What's inside
 

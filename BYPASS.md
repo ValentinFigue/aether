@@ -2,6 +2,8 @@
 
 All suite hooks respect the following bypass markers. Append them as bash comments — bash ignores them at runtime so the command still executes.
 
+Hooks run on Claude Code — the one agent of the three (Claude Code, Vibe Code, Codex) with a gate surface today, so that is where a marker has something to silence. On the other agents the commands are skills with no hook behind them: not running the critic is the same decision, made directly. See the suite README's *Agents* section for the full comparison.
+
 ## Suite-wide bypass (silence all hooks)
 
 ```bash

@@ -6,8 +6,8 @@ build-backend = "hatchling.build"
 name = "bonsai-py"
 version = "1.0.0"
 description = "AST-based Python refactoring tools as a Claude Code MCP plugin"
-readme = "../README.md"
-license = { file = "../LICENSE" }
+readme = { text = "AST-based Python refactoring tools as an MCP server for coding agents. Full documentation: plugins/bonsai/README.md in the aether repository.", content-type = "text/markdown" }
+license = "MIT"
 requires-python = ">=3.10"
 authors = [
     { name = "Valentin Figué", email = "valentin.figue@orange.fr" }
@@ -19,7 +19,6 @@ keywords = [
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",

@@ -155,6 +155,27 @@ critic that only makes sense for a PR: whether the description still matches the
 It reuses the five critic definitions from `critique-diff.md` rather than restating
 them, so the two can never drift. Requires `gh`, authenticated.
 
+### Interviewing a complex PR
+
+Some PRs are too complex for a one-shot review: the control flow is hard to follow and
+the review collapses into "5K changes: LGTM". `/interview-pr` replaces the verdict
+with an interview — it walks you through the PR area by area (data model, new data
+flows, component APIs, core logic), explains each important decision, and asks your
+opinion one question at a time. Anything that warrants attention gets flagged, and
+every change you decide to request is drafted as a PR comment with context, shown to
+you as it is written — and nothing reaches the PR until the end of the interview,
+when you are asked which drafts to post: all, some, or none.
+
+```bash
+/interview-pr                 # the PR for the current branch
+/interview-pr --pr=42         # a specific PR
+/interview-pr --post          # post each agreed change as it is agreed
+/interview-pr --comment       # agreed changes as plain comments, not a review verdict
+/interview-pr --no-post       # drafts only; no posting, no asking at the end
+```
+
+Requires `gh`, authenticated.
+
 ## Configuration
 
 One sectioned file per scope — `~/.aether/config` globally, `.aether/config` in a

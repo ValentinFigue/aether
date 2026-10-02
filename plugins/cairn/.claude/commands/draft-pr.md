@@ -7,6 +7,8 @@ Parse $ARGUMENTS for flags. Supported flags:
 - `--apply` — push the generated description to the PR instead of only printing it
 - `--title` — with `--apply`, also set the PR title (opt-in; titles are often hand-edited after opening)
 - `--pr=<n>` — target a specific PR instead of the one for the current branch
+- `--walkthrough` — always include the Walkthrough section, whatever the diff size
+- `--no-walkthrough` — never include it, whatever the diff size
 
 ---
 
@@ -28,6 +30,7 @@ Resolve settings:
 - `pr.style` — default style if `--style` not in $ARGUMENTS; fallback to `style:` key; fallback to `conventional`
 - `pr.template_file` — legacy path to a PR body template; superseded by `.aether/templates/pr.md`
 - `pr.rules_file` — legacy path to prose rules; superseded by the `[draft-pr]` section of `.aether/rules.md`
+- `pr.walkthrough` — whether complex PRs get a Walkthrough section: `auto` (default), `on`, `off`
 
 **Step 2 — Detect base branch**
 
@@ -141,6 +144,41 @@ Rules:
 - Test plan: reference actual test files found in the diff by name; add at least one manual verification step
 - If the diff is large (>300 lines), summarise by file area rather than line-by-line
 - Apply any additional instructions from `pr.rules_file` if loaded in Step 5
+
+**Walkthrough section** — resolve whether to include it:
+1. `--walkthrough` in $ARGUMENTS → include; `--no-walkthrough` → omit
+2. `pr.walkthrough` from config: `on` → include, `off` → omit, `auto` → include when the diff is complex (>300 changed lines or >10 files)
+3. Default: `auto`
+
+A walkthrough exists for complex PRs, where a file list is not enough to grasp the
+change: the description stops being an inventory and becomes a guided tour. When
+included, add it between Summary and Changes:
+
+```
+## Walkthrough
+
+Read in this order — it follows the change, not the file list.
+
+1. `src/db/schema.sql:14` — **core** — the new `sessions` table this PR is built
+   on; everything else writes to or reads from it
+2. `src/auth/session.ts:32` — **core** — issues the session token; note the
+   30-day expiry chosen over the app-wide 7-day default
+3. `src/routes/login.ts:18` — wires the form into the issuer; nothing surprising
+4. `src/migrations/007.sql` — mechanical; the schema change as a migration
+```
+
+Rules for the walkthrough:
+- Order is **reading order** — the dependency order a reviewer should read the PR
+  in, typically data model first, then what flows through it, then the logic that
+  consumes it — never alphabetical file order
+- Every stop carries `path:line`, a one-line account of what changed there and
+  why it matters, and one of two tags:
+  - **core** — the decisions and logic a reviewer must actually read
+  - untagged — context or mechanical changes a reviewer can skim
+- Two to eight stops; the point is judgement about what matters, not completeness
+- Reference real files and real line numbers from the diff — a stop pointing at a
+  line that does not exist costs more trust than the section buys
+- No attribution footers anywhere in the description, the walkthrough included
 
 **Step 7 — Output**
 

@@ -68,7 +68,7 @@ Always dry-run a mutating bonsai tool and review the diff before applying.
 
 ---
 
-## Reviewing — `critique-diff` and `critique-pr`
+## Reviewing — `critique-diff`, `critique-pr` and `interview-pr`
 
 `critique-diff` reviews what you are about to commit. Run it before any
 `git commit` or `git push` when:
@@ -83,6 +83,14 @@ Always dry-run a mutating bonsai tool and review the diff before applying.
 open and before merging when the PR spans more than one subsystem, when commits
 landed after the description was written, or when CI is green and the PR
 *looks* ready — exactly when nobody re-reads it.
+
+`interview-pr` is for the PRs a one-shot review fails on: too complex to follow,
+heading for "5K changes: LGTM". It walks the reviewer through the PR area by
+area, asks their opinion one question at a time, and drafts every agreed change
+request as a PR comment with context — nothing reaches the PR during the
+interview; at the end the reviewer is asked which drafts to post. Run it
+deliberately when asked to be walked through a PR; it is interactive and never
+advances before the reviewer answers.
 
 Severity contract:
 

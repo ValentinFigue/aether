@@ -72,6 +72,11 @@ config.pr.rules_file.type: path
 config.pr.rules_file.doc: Prose rules for PR generation (superseded by the [draft-pr] section of rules.md)
 config.pr.rules_file.used_by: /draft-pr
 
+config.pr.walkthrough.default: auto
+config.pr.walkthrough.type: enum:auto,on,off
+config.pr.walkthrough.doc: Whether complex PRs (>300 lines or >10 files) get a Walkthrough section — a guided tour in reading order, core stops tagged
+config.pr.walkthrough.used_by: /draft-pr
+
 config.changelog.style.default: conventional
 config.changelog.style.type: enum:conventional,plain
 config.changelog.style.doc: Group entries by Conventional Commits type, or emit a flat list

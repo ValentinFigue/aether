@@ -53,4 +53,15 @@ It runs temper's same five critics over the whole PR diff, plus a sixth that onl
 sense for a PR: whether the description still matches the code. An omitted change is
 more dangerous than an inaccurate one — a reviewer who trusts the description will not
 go looking for what it does not name.
+
+### When to run /interview-pr
+
+When a PR is too complex for that one-shot review — the control flow is hard to follow
+and the review is heading for "5K changes: LGTM" — run `/interview-pr` instead. It walks
+you through the PR area by area (data model, new data flows, component APIs, core
+logic), explains each important decision, asks your opinion one question at a time,
+and drafts every change you agree to request as a PR comment with context, shown to
+you as it is written. Nothing reaches the PR during the interview; at the end you are
+asked which drafts to post — all, some, or none. One area per turn; it never advances
+before you answer.
 <!-- temper:end -->

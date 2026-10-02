@@ -144,7 +144,7 @@ assert_contains "$out" "Try: status, show, list, record" "…and names the real 
 # A slash command told to write a file *format* would drift; told to run a command, it
 # cannot. Assert the contract exists in the command files.
 suite "the critique commands record"
-for f in critique-diff critique-pr; do
+for f in critique-diff critique-pr interview-pr; do
   assert_contains "$(cat "$REPO/plugins/temper/.claude/commands/$f.md")" "aether review record" \
     "/$f records the review"
 done

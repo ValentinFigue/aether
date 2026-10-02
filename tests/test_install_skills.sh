@@ -30,8 +30,8 @@ run() { HOME="$HOME_FIX" bash "$REPO/scripts/install-skills.sh" "$@"; }
 run install vibe codex >/dev/null
 vibe_n=$(find "$HOME_FIX/.vibe/skills" -name SKILL.md | wc -l | tr -d ' ')
 codex_n=$(find "$HOME_FIX/.codex/skills" -name SKILL.md | wc -l | tr -d ' ')
-assert_eq "10" "$vibe_n" "vibe: all ten skills land in ~/.vibe/skills"
-assert_eq "10" "$codex_n" "codex: all ten skills land in ~/.codex/skills"
+assert_eq "11" "$vibe_n" "vibe: all eleven skills land in ~/.vibe/skills"
+assert_eq "11" "$codex_n" "codex: all eleven skills land in ~/.codex/skills"
 
 vibe_fm=$(cat "$HOME_FIX/.vibe/skills/draft-commit/SKILL.md")
 assert_contains "$vibe_fm" "user-invocable: true" "vibe: skills keep their frontmatter"
@@ -89,7 +89,7 @@ grep -q 'aether:start' "$HOME_FIX/.codex/AGENTS.md" \
 # ── status ───────────────────────────────────────────────────────────────────
 
 status_out=$(run status 2>&1)
-assert_contains "$status_out" "10 skill(s)" "status reports the installed count"
+assert_contains "$status_out" "11 skill(s)" "status reports the installed count"
 run uninstall vibe >/dev/null
 status_out=$(run status vibe 2>&1)
 assert_contains "$status_out" "0 skill(s)" "status reports zero after uninstall"

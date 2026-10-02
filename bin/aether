@@ -2341,8 +2341,8 @@ cmd_plan() {
       f=$(aether_plan_file)
       if [ -z "$f" ]; then
         printf '  no plan recorded for this project\n'
-        printf '      one is recorded when a plan file is written under .claude/plans/\n'
-        printf '      or ~/.claude/plans/ while working here\n'
+        printf '      one is recorded when a plan file is written under .aether/plans/\n'
+        printf '      (aether\047s own, agent-agnostic) or .claude/plans/, project or home\n'
       else
         state=$(aether_plan_state "$f")
         printf '  plan:   %s\n' "${f/#$HOME/~}"

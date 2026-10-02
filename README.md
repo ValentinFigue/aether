@@ -186,10 +186,14 @@ or the agent reading its AGENTS.md.
 silence; not invoking the critic is the same decision, made directly. See
 [Bypass](#bypass).
 
-**Plan mode is a Claude Code concept**, so whetstone's "a plan exists but has
-not been critiqued" gate has nothing to read elsewhere. `critique-plan` runs
-on whatever plan you present, wherever it lives, and its findings still land
-in the plan and in `.aether/out/CRITIQUE.md`.
+**Plan mode is a Claude Code concept**, but plan *discovery* is agent-neutral:
+`.aether/plans/` in a project is aether's own plans directory, so a plan
+written there under Vibe Code or Codex is found by `critique-plan` and
+`aether plan status` the same as one Claude Code's plan mode puts in
+`.claude/plans/`. What stays Claude-Code-only is the *gate* — nothing
+interrupts a tool call on the other agents, so the discipline there is the
+AGENTS.md block. `critique-plan` runs on whatever plan you present, and its
+findings still land in the plan and in `.aether/out/CRITIQUE.md`.
 
 **bonsai's MCP tools need registering once** on the other agents: add the two
 servers from [plugins/bonsai/.mcp.json](plugins/bonsai/.mcp.json) to the
@@ -404,7 +408,10 @@ deliberately *unset* with a note on why the obvious value would be wrong.
 
 ### Plans and their critiques
 
-`/critique-plan` records its findings **inside the plan**, behind a marker holding a
+Plans live in a plans directory — `.aether/plans/` in a project, aether's own
+and the agent-agnostic default, or `.claude/plans/` / `~/.claude/plans/`, where
+Claude Code's plan mode puts them. `/critique-plan` records its findings
+**inside the plan**, behind a marker holding a
 hash of the plan with that block removed:
 
 ```markdown
@@ -421,7 +428,7 @@ section does not.
 
 ```
 $ aether plan status
-  plan:   ~/.claude/plans/rate-limiting.md
+  plan:   .aether/plans/rate-limiting.md
   ! the plan changed after its last critique   fix: /critique-plan
 ```
 
@@ -656,7 +663,7 @@ your colleagues get the same thresholds and the same test command. `out/` and
 ### 2. Plan, before writing anything
 
 Describe the change; the agent proposes a plan (Claude Code writes it to
-`.claude/plans/`, the other agents wherever the plan is written). Then:
+`.claude/plans/`, the other agents to `.aether/plans/`). Then:
 
 ```bash
 /critique-plan

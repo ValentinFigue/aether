@@ -42,14 +42,17 @@ print(inp.get("file_path") or inp.get("path") or "")
 ' 2>/dev/null) || exit 0
 [ -n "$path" ] || exit 0
 
-# A plan is any .md under a plans directory, project-local or the global one plan mode
-# uses. CRITIQUE.md and TEMPER.md are generated output that happens to live nearby.
+# A plan is any .md under a plans directory — .aether/plans/, aether's own and the
+# agent-agnostic default, or .claude/plans/, which is where Claude Code's plan mode
+# writes. The */…/* forms cover absolute paths, so the global ~/.aether/plans/ and
+# ~/.claude/plans/ are recorded too. CRITIQUE.md and TEMPER.md are generated output
+# that happens to live nearby.
 case "$path" in
   *.md) ;;
   *) exit 0 ;;
 esac
 case "$path" in
-  */.claude/plans/*|.claude/plans/*) ;;
+  */.aether/plans/*|.aether/plans/*|*/.claude/plans/*|.claude/plans/*) ;;
   *) exit 0 ;;
 esac
 case "$(basename "$path")" in

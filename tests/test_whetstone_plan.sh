@@ -235,7 +235,8 @@ record "$H" "$P" "$H/.claude/plans/g.md"
 rm -f "$P/.aether/out/.plan"
 record "$H" "$P" ".claude/plans/l.md"
 [ -f "$P/.aether/out/.plan" ] && pass "a project plan is recorded" || fail "a project plan is recorded"
-for path in "README.md" "src/x.py" ".claude/plans/CRITIQUE.md" ".claude/plans/TEMPER.md"; do
+for path in "README.md" "src/x.py" ".claude/plans/CRITIQUE.md" ".claude/plans/TEMPER.md" \
+            ".aether/plans/CRITIQUE.md" ".aether/plans/TEMPER.md"; do
   rm -f "$P/.aether/out/.plan"; record "$H" "$P" "$path"
   [ -f "$P/.aether/out/.plan" ] && fail "$path is not recorded as a plan" \
                                || pass "$path is not recorded as a plan"
@@ -243,5 +244,63 @@ done
 # It is project-relative, never global — the .nudged bug of v1.1.0.
 [ -f "$H/.aether/out/.plan" ] && fail "the pointer never lands in HOME" \
                              || pass "the pointer never lands in HOME"
+rm -f "$P/.aether/out/.plan"
+record "$H" "$P" ".aether/plans/v.md"
+[ -f "$P/.aether/out/.plan" ] && pass "an .aether/plans/ project plan is recorded" \
+  || fail "an .aether/plans/ project plan is recorded"
+rm -f "$P/.aether/out/.plan"
+record "$H" "$P" "$H/.aether/plans/g.md"
+[ -f "$P/.aether/out/.plan" ] && pass "a global ~/.aether/plans/ plan is recorded" \
+  || fail "a global ~/.aether/plans/ plan is recorded"
+
+# ── 12. .aether/plans/ — agent-agnostic, no plan mode required ───────────────
+# Vibe Code and Codex have no plan mode, so nothing ever writes .claude/plans/ under
+# them — the whole machinery silently saw nothing. .aether/plans/ is aether's own
+# directory: the recorder records it, discovery finds it with and without the pointer,
+# and the gate reads it the same as a plan-mode plan.
+suite "plans in .aether/plans/ work without plan mode"
+H=$(mk); P=$(newproj); mkdir -p "$P/.aether/plans"
+# discovery returns pwd -P-resolved paths, like the pointer does; mktemp hands back
+# the unresolved /var symlink on macOS, so compare against the resolved project root.
+RP=$(cd "$P" && pwd -P)
+V="$P/.aether/plans/vibe.md"; printf '# V\nbody\n' > "$V"
+record "$H" "$P" "$V"
+assert_eq "$V" "$( cd "$P" && env HOME="$H" bash "$CLI" plan path )" \
+  "a plan written under .aether/plans/ is the recorded plan"
+r=$(fire "$H" "$P" "$PUSH")
+assert_eq "1" "${r%%	*}" "an uncritiqued .aether/plans/ plan nudges at commit"
+critique "$V"
+r=$(fire "$H" "$P" "$PUSH")
+assert_eq "0" "${r%%	*}" "a critique inside it satisfies the gate"
+
+# Without the pointer at all — the fallback scan, which is how a Vibe or Codex
+# session sees a plan nobody recorded.
+rm -f "$P/.aether/out/.plan"
+assert_eq "$RP/.aether/plans/vibe.md" "$( cd "$P" && env HOME="$H" bash "$CLI" plan path )" \
+  "discovery falls back to .aether/plans/ with no pointer"
+
+# The scan reads both directories and the newest plan wins — explicit timestamps,
+# because mtimes set a second apart are not distinguishable on every filesystem.
+mkdir -p "$P/.claude/plans"
+printf '# C\nbody\n' > "$P/.claude/plans/c.md"
+touch -t 202001010000 "$V" "$P/.claude/plans/c.md"
+printf '# D\nbody\n' > "$P/.claude/plans/d.md"
+assert_eq "$RP/.claude/plans/d.md" "$( cd "$P" && env HOME="$H" bash "$CLI" plan path )" \
+  "the newest plan across both directories wins"
+printf '# E\nbody\n' > "$P/.aether/plans/e.md"
+assert_eq "$RP/.aether/plans/e.md" "$( cd "$P" && env HOME="$H" bash "$CLI" plan path )" \
+  "…wherever that directory is"
+
+# A project with only a legacy .claude/plans/ keeps behaving as it always did.
+H2=$(mk); P2=$(newproj); mkdir -p "$P2/.claude/plans"
+printf '# old\nbody\n' > "$P2/.claude/plans/old.md"
+assert_eq "$(cd "$P2" && pwd -P)/.claude/plans/old.md" \
+  "$( cd "$P2" && env HOME="$H2" bash "$CLI" plan path )" \
+  "a .claude/plans/ plan is still found"
+
+# The no-plan hint names the agent-agnostic directory first.
+H3=$(mk); P3=$(newproj)
+out=$( cd "$P3" && env HOME="$H3" bash "$CLI" plan status )
+assert_contains "$out" ".aether/plans/" "the no-plan hint names .aether/plans/"
 
 summary

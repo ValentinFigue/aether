@@ -108,9 +108,10 @@ plan file as known risks to revisit during temper review.
 
 ### Plan file conventions
 
-Plans live wherever they are written — `.claude/plans/` in a project, or
-`~/.claude/plans/`, which is where Claude Code's plan mode puts them. The critique
-lives **inside the plan it critiques**:
+Plans live in a plans directory — `.aether/plans/` in a project, aether's own
+and the agent-agnostic default, or `.claude/plans/` / `~/.claude/plans/`,
+where Claude Code's plan mode puts them. `aether plan status` reports whichever
+plan was written last. The critique lives **inside the plan it critiques**:
 
 ```markdown
 …the plan…

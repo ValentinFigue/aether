@@ -358,20 +358,35 @@ AETHER_PLAN_MARKER_END='<!-- /aether:critique -->'
 aether_plan_pointer() { printf '.aether/out/.plan'; }
 
 # The plan this project is working on: whatever was last written to a plans directory
-# while in it, recorded by post-whetstone.sh. Falling back to the pre-1.4 rule — newest
-# .md in ./.claude/plans/ — so a project that has not written a plan through the hook
-# yet behaves as it always did rather than suddenly going quiet or loud.
+# while in it, recorded by post-whetstone.sh. Falling back to the pre-1.4 rule — the
+# newest .md in a plans directory — so a project that has not written a plan through
+# the hook yet behaves as it always did rather than suddenly going quiet or loud.
+#
+# Two plans directories, both first-class: .aether/plans/ is aether's own, agent-agnostic
+# — Vibe Code and Codex have no plan mode, so .claude/plans/ never gets written under
+# them and the machinery would silently see nothing. .claude/plans/ is Claude Code plan
+# mode's directory and stays for the same reason.
+#
+# The scan is a glob loop, not `ls -t | while`: callers run under `set -o pipefail`,
+# and a missing directory leaves its glob literal — ls would exit non-zero on it and
+# take the plan it did find down with the pipeline. An unmatched glob here is just a
+# non-file the -f test skips. -nt is a bash builtin, so the fallback costs no forks.
 aether_plan_file() {
-  local ptr f
+  local ptr f best=""
   ptr=$(aether_plan_pointer)
   if [ -f "$ptr" ]; then
     f=$(head -1 "$ptr" 2>/dev/null)
     [ -n "$f" ] && [ -f "$f" ] && { printf '%s' "$f"; return 0; }
   fi
-  ls -t .claude/plans/*.md 2>/dev/null | while IFS= read -r f; do
+  for f in .aether/plans/*.md .claude/plans/*.md; do
+    [ -f "$f" ] || continue
     case "$(basename "$f")" in CRITIQUE.md|TEMPER.md|.*) continue ;; esac
-    printf '%s' "$f"; break
+    if [ -z "$best" ] || [ "$f" -nt "$best" ]; then best="$f"; fi
   done
+  [ -n "$best" ] || return 0
+  # Absolute, like the pointer: the gate may run from a different directory than
+  # the plan was written in, and `aether plan status` prints this path verbatim.
+  case "$best" in /*) printf '%s' "$best" ;; *) printf '%s' "$(pwd -P)/$best" ;; esac
 }
 
 # Hash of the plan with its critique block excised — the whole file, not just the part

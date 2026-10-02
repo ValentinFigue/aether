@@ -125,4 +125,7 @@ pushes, or writes anything unless `--apply` was passed.
   nothing here; they are hook directives. Skipping is a decision you make by
   simply not invoking the skill.
 - There is no plan-mode gate: `critique-plan` is invoked on the plan you
-  present, wherever it lives.
+  present, wherever it lives. Write plans to `.aether/plans/` in the project —
+  aether's own, agent-agnostic plans directory — so `aether plan status` and
+  the critique machinery can see them; Claude Code's plan mode still works
+  from `.claude/plans/`.

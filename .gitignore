@@ -11,7 +11,12 @@
 # sentinel. Per-developer, per-session scratch that means nothing in someone
 # else's checkout. .aether/config and .aether/rules.md are NOT ignored — those
 # are project settings worth committing.
+#
+# .aether/plans/ is the same kind of scratch in the same directory: plan files
+# are per-developer working state (Claude Code plan mode has its own ignored
+# equivalent in /.claude/plans/), not project settings.
 /.aether/out/
+/.aether/plans/
 /.aether/manifest
 /.aether/hooks/
 

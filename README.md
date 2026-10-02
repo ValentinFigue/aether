@@ -144,14 +144,14 @@ be automatic.
 | Strict mode | yes | — | — |
 | Bypass markers | enforced | inert | inert |
 
-The ten portable skills:
+The eleven portable skills:
 
-- **critics** — `critique-plan` (whetstone), `critique-diff`, `critique-pr` (temper)
+- **critics** — `critique-plan` (whetstone), `critique-diff`, `critique-pr`, `interview-pr` (temper)
 - **drafts** — `draft-commit`, `draft-pr`, `draft-changelog`, `draft-summary` (cairn)
 - **setup** — `draft-config` (trellis)
 - **rules** — `sync-docs` (temper), `bonsai-first` (bonsai)
 
-The eight critics and drafts are `user-invocable`, so they surface as slash
+The nine critics and drafts are `user-invocable`, so they surface as slash
 commands in every agent's picker; the two rules are picked by the model when
 the situation matches. They are the open
 [Agent Skills](https://agentskills.io) format, built by
@@ -571,6 +571,11 @@ imports that a text replace silently misses. Always dry-run a mutating tool firs
 /critique-pr                        # the PR for the current branch
 /critique-pr --pr=42
 /critique-pr --severity=red         # blockers only, before merging
+
+/interview-pr                       # interactive review: walked through the PR
+/interview-pr --post                # …posting each agreed change as it is agreed
+/interview-pr --comment             # agreed changes as plain comments, not verdicts
+/interview-pr --no-post             # drafts only; no posting, no asking at the end
 ```
 
 The five critics are Correctness, Design, Risk, Coverage and Documentation — the last
@@ -578,6 +583,14 @@ asking whether any sentence describing a behaviour this diff changes is still tr
 `/critique-pr` adds a sixth that only makes sense for a PR: whether the description
 still matches the code. An *omitted* change is weighted above an inaccurate one — a reviewer who
 trusts the description will not go looking for what it does not name.
+
+`/interview-pr` is for the PRs those one-shot reviews fail on: too complex to follow,
+so the review collapses into "5K changes: LGTM". It walks the reviewer through the
+PR area by area — data model, data flows, component APIs, core logic — explains each
+important decision, and asks their opinion one question at a time. Every agreed
+change request is drafted as a PR comment with context, shown to the reviewer as it
+is written, and nothing reaches the PR until the end of the interview, when the
+reviewer is asked which drafts to post — all, some, or none.
 
 With `[project]` set and the repo trusted, Correctness and Coverage run your real
 tooling and quote real failures. Without it they read the diff and say so.
@@ -593,6 +606,8 @@ tooling and quote real failures. Without it they read the diff and say so.
 /draft-pr --apply                   # …and push it to the PR with `gh pr edit`
 /draft-pr --apply --title           # also replace the title (opt-in)
 /draft-pr --base=develop --pr=42
+/draft-pr --walkthrough             # force the guided-tour section on
+/draft-pr --no-walkthrough          # force it off
 
 /draft-changelog --version=1.2.0    # entry from the last tag to HEAD
 /draft-changelog --from=v1.0.0 --to=HEAD

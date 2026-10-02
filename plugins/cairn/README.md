@@ -113,6 +113,13 @@ On your feature branch, run `/draft-pr`:
 /draft-pr --base=develop
 ```
 
+For complex PRs — more than 300 changed lines or 10 files — the description gains a
+**Walkthrough** section: a guided tour in reading order (data model first, then what
+flows through it, then the consuming logic), each stop carrying `path:line` and why
+it matters, with the core stops tagged so a reviewer knows what to actually read.
+Force it on or off with `--walkthrough` / `--no-walkthrough`, or set
+`pr.walkthrough: on|off|auto` in config.
+
 ### `/draft-changelog` — CHANGELOG entries
 
 ```
@@ -143,6 +150,8 @@ On your feature branch, run `/draft-pr`:
 | `/draft-pr --apply` | Generate, then push the description to the PR via `gh pr edit` |
 | `/draft-pr --apply --title` | Also set the PR title (opt-in — titles are often hand-edited) |
 | `/draft-pr --apply --pr=42` | Target a specific PR instead of the current branch's |
+| `/draft-pr --walkthrough` | Force the Walkthrough section on, whatever the diff size |
+| `/draft-pr --no-walkthrough` | Force it off |
 | `/draft-changelog` | CHANGELOG entry from last tag to HEAD |
 | `/draft-changelog --from=v0.1.0 --version=0.2.0` | Specify range and version |
 | `/draft-changelog --style=plain` | Flat bullet list, no type grouping |
@@ -246,6 +255,7 @@ project — resolved **per key**, with per-run flags on top. `/draft-config` wri
 | `pr.style` | `conventional` | PR title format |
 | `pr.template_file` | — | Structure to fill in for the PR body (superseded by `.aether/templates/pr.md`) |
 | `pr.rules_file` | — | Prose rules for PR generation (superseded by the `[draft-pr]` section of `rules.md`) |
+| `pr.walkthrough` | `auto` | Whether complex PRs (>300 lines or >10 files) get a Walkthrough section — a guided tour in reading order, core stops tagged |
 | `changelog.style` | `conventional` | Group entries by Conventional Commits type, or emit a flat list |
 | `changelog.extra_types` | — | Additional commit types to group under |
 | `changelog.exclude_paths` | — | Paths whose commits never appear in a changelog entry |

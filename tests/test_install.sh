@@ -279,6 +279,32 @@ assert_contains "$(cat "$CPR")" "Description accuracy" "it adds the description 
 n=$(grep -c 'You are a senior engineer' "$CPR" || true)
 assert_eq "0" "$n" "the full critic definitions are not copied into critique-pr.md"
 
+# ── draft-pr specifies its walkthrough resolution ───────────────────────────
+# The walkthrough is a spec inside the command file, nothing executable — the
+# contract worth guarding is that the flags and the config key it resolves from
+# are all named, or a reader would have no way to turn the section on or off.
+suite "draft-pr specifies the walkthrough"
+DPR="$REPO/plugins/cairn/.claude/commands/draft-pr.md"
+[ -f "$DPR" ] && pass "draft-pr.md exists" || fail "draft-pr.md exists"
+assert_contains "$(cat "$DPR")" "--walkthrough" "it documents --walkthrough"
+assert_contains "$(cat "$DPR")" "--no-walkthrough" "it documents --no-walkthrough"
+assert_contains "$(cat "$DPR")" "pr.walkthrough" "it resolves from pr.walkthrough"
+assert_contains "$(cat "$REPO/plugins/cairn/aether.plugin")" "config.pr.walkthrough.default: auto" \
+  "the manifest declares the default"
+
+# ── interview-pr drafts during the interview, posts only when asked ────────
+# The default is the contract: comments are collected and the reviewer is asked
+# which to post at the end. If the file starts claiming comments go out as they
+# are agreed, the default has silently flipped.
+suite "interview-pr asks before posting"
+IPR="$REPO/plugins/temper/.claude/commands/interview-pr.md"
+[ -f "$IPR" ] && pass "interview-pr.md exists" || fail "interview-pr.md exists"
+assert_contains "$(cat "$IPR")" "By default, nothing is posted" \
+  "the no-posting default is stated"
+assert_contains "$(cat "$IPR")" "Ask which comments to post" "the end-of-interview ask is specified"
+assert_contains "$(cat "$IPR")" "--post" "it documents --post"
+assert_contains "$(cat "$IPR")" "--no-post" "it documents --no-post"
+
 # ── every command a nudge names must actually exist ──────────────────────────
 # This is the check that would have caught the whole class of drift before it
 # existed: hooks and CLAUDE.md templates naming slash commands that no installer

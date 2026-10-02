@@ -5,7 +5,7 @@
 # The committed truth is plugins/; .agents/skills/ is gitignored output, the
 # same as .claude/commands/. So there is no drift to check against — what needs
 # guarding is the generator's contract: given the plugin sources, it must
-# produce ten skills with portable frontmatter, no Claude-specific placeholders,
+# produce eleven skills with portable frontmatter, no Claude-specific placeholders,
 # and the three targeted patches that keep the skills honest on a machine
 # where aether was never installed.
 #
@@ -24,7 +24,7 @@ AETHER_SKILLS_OUT="$OUT/skills" bash "$REPO/scripts/build-skills.sh" >/dev/null
 # ── Inventory ────────────────────────────────────────────────────────────────
 
 count=$(find "$OUT/skills" -name SKILL.md | wc -l | tr -d ' ')
-assert_eq "10" "$count" "all ten skills are generated"
+assert_eq "11" "$count" "all eleven skills are generated"
 
 missing=""
 for f in "$OUT"/skills/*/SKILL.md; do
@@ -54,11 +54,11 @@ assert_eq "" "$residue" "no \$ARGUMENTS placeholders survive the port"
 # model-selected only.
 invocable=""
 for s in draft-commit draft-pr draft-changelog draft-summary \
-         critique-diff critique-pr critique-plan draft-config; do
+         critique-diff critique-pr critique-plan interview-pr draft-config; do
   grep -q '^user-invocable: true' "$OUT/skills/$s/SKILL.md" \
     || invocable="$invocable $s"
 done
-assert_eq "" "$invocable" "all eight commands stay user-invocable"
+assert_eq "" "$invocable" "all nine commands stay user-invocable"
 
 # On Claude Code the hooks make these calls safe to assume; elsewhere the CLI
 # may be absent, so the generated text must degrade instead of failing.

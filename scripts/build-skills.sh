@@ -165,6 +165,24 @@ argument-hint: "[--pr=<n>] [--only=<critics>] [--skip=<critics>] [--severity=red
 EOF
 }
 
+fm_interview_pr() { cat <<'EOF'
+---
+name: interview-pr
+description: >
+  Walk a reviewer through a PR interactively (temper). For complex PRs where a
+  one-shot review collapses into LGTM: guides the reviewer area by area — data
+  model, data flows, component APIs, core logic — explains each important
+  decision, asks their opinion one question at a time, and drafts agreed change
+  requests as PR comments with context, then asks which to post at the end.
+  Nothing reaches the PR during the interview. Use when the user asks to be
+  walked through or interviewed about a pull request.
+user-invocable: true
+argument-hint: "[--pr=<n>] [--post] [--comment] [--no-post]"
+---
+
+EOF
+}
+
 fm_critique_plan() { cat <<'EOF'
 ---
 name: critique-plan
@@ -222,6 +240,7 @@ command_skill draft-changelog plugins/cairn/.claude/commands/draft-changelog.md
 command_skill draft-summary  plugins/cairn/.claude/commands/draft-summary.md
 command_skill critique-diff  plugins/temper/.claude/commands/critique-diff.md "$PATCH_DIFF_RECORD"
 command_skill critique-pr    plugins/temper/.claude/commands/critique-pr.md "$PATCH_PR"
+command_skill interview-pr   plugins/temper/.claude/commands/interview-pr.md
 command_skill critique-plan  plugins/whetstone/.claude/commands/critique-plan.md "$PATCH_PLAN"
 command_skill draft-config   plugins/trellis/.claude/commands/draft-config.md
 

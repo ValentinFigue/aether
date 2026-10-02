@@ -9,7 +9,7 @@ config_section: temper
 # ── Skills ───────────────────────────────────────────────────────────────────
 skills: sync-docs
 
-commands: critique-diff.md critique-pr.md
+commands: critique-diff.md critique-pr.md interview-pr.md
 legacy_commands: temper.md
 
 # temper has no PostToolUse hook. Its gate is inserted at the front of the

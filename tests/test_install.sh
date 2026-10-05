@@ -352,12 +352,15 @@ SHIPPED_ALL=$(cd "$REPO" && {
 } | tr ' ' '\n' | grep -v '^$' | sort -u)
 missing_agents=""
 missing_claude=""
+missing_readme=""
 for name in $SHIPPED_ALL; do
   grep -q "$name" "$REPO/AGENTS.md" || missing_agents="$missing_agents $name"
   grep -q "$name" "$REPO/templates/CLAUDE.md" || missing_claude="$missing_claude $name"
+  grep -q "$name" "$REPO/README.md" || missing_readme="$missing_readme $name"
 done
 assert_eq "" "$missing_agents" "AGENTS.md names every shipped command and skill"
 assert_eq "" "$missing_claude" "templates/CLAUDE.md names every shipped command and skill"
+assert_eq "" "$missing_readme" "README.md names every shipped command and skill"
 
 # ── per-plugin update must not resurrect old command names ───────────────────
 # cairn/temper/whetstone used to re-download command files by name from the

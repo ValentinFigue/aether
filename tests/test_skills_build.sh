@@ -106,6 +106,14 @@ assert_contains "$pr_skill" \
   "critique-diff/SKILL.md" \
   "critique-pr reads its critic definitions from the sibling skill"
 
+# The fragment prose is pinned in the command file by test_install; the port
+# to the portable skill is perl patches, and nothing else would notice a patch
+# that dropped it. The generic checks (name, frontmatter, $ARGUMENTS) cannot
+# see content, only structure.
+assert_contains "$(cat "$OUT/skills/draft-changelog/SKILL.md")" \
+  "changelog.fragments" \
+  "the fragment model prose survives the port"
+
 # The two rules are not user-invocable: the model picks them when the
 # situation matches, which is the whole difference between a command and a rule.
 for rule in sync-docs bonsai-first; do

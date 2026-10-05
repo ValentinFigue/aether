@@ -5,9 +5,11 @@
 # The committed truth is plugins/; .agents/skills/ is gitignored output, the
 # same as .claude/commands/. So there is no drift to check against — what needs
 # guarding is the generator's contract: given the plugin sources, it must
-# produce eleven skills with portable frontmatter, no Claude-specific placeholders,
-# and the three targeted patches that keep the skills honest on a machine
-# where aether was never installed.
+# produce eleven skills with portable frontmatter, descriptions that route
+# (a positive trigger plus a Do-not-use line, since third-party skills
+# installed alongside aether overlap several of these), no Claude-specific
+# placeholders, and the three targeted patches that keep the skills honest on
+# a machine where aether was never installed.
 #
 # Each assertion has a negative case in the source itself: the un-ported text
 # is what the pattern would match if a step were removed.
@@ -41,6 +43,29 @@ for f in "$OUT"/skills/*/SKILL.md; do
   grep -q "^name: $d\$" "$f" || mismatched="$mismatched $d"
 done
 assert_eq "" "$mismatched" "skill name matches its directory"
+
+# ── Description routing contract ───────────────────────────────────────────
+# A description that says only what a skill is for gives a router half a
+# signal: third-party skills installed alongside aether overlap several of
+# these (code-review vs critique-diff, address-pr-feedback vs draft-pr), so
+# every description must also say what the skill is NOT for, and must stay
+# long enough to carry that signal. Extract the folded block between
+# `description:` and the next frontmatter key.
+
+desc_block() { # <file> — description body on stdout
+  awk '/^description:/{on=1;next} on && (/^[a-z_-]+:/ || /^---/){on=0} on' "$1"
+}
+
+no_negative=""
+too_short=""
+for f in "$OUT"/skills/*/SKILL.md; do
+  d=$(basename "$(dirname "$f")")
+  desc_block "$f" | grep -q 'Do not use' || no_negative="$no_negative $d"
+  n=$(desc_block "$f" | wc -c | tr -d ' ')
+  [ "$n" -ge 120 ] || too_short="$too_short $d:$n"
+done
+assert_eq "" "$no_negative" "every description carries a negative trigger"
+assert_eq "" "$too_short" "every description is at least 120 characters"
 
 # ── The port steps, one assertion each ──────────────────────────────────────
 

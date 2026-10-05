@@ -4,7 +4,8 @@ description: >
   Redirects structural code operations on Python and TypeScript files to the correct
   bonsai AST tool. Use before reaching for sed, grep, awk, or find on .py/.ts/.tsx files.
   Covers renaming, moving, finding references, signature changes, and dead-code detection
-  across both languages.
+  across both languages. Do not use for reading files or one-off text edits that do not
+  change code structure.
 when_to_use: >
   Triggered when about to rename a symbol, move a file or symbol, find all usages,
   change a function signature, detect dead code, or search for a pattern in

@@ -90,6 +90,15 @@ config.changelog.exclude_paths.default:
 config.changelog.exclude_paths.doc: Paths whose commits never appear in a changelog entry
 config.changelog.exclude_paths.used_by: /draft-changelog
 
+config.changelog.fragments.default:
+config.changelog.fragments.type: enum:none,dir,unreleased
+config.changelog.fragments.doc: Changelog model — dir writes one fragment file per change under changelog.fragments_dir; unreleased accumulates entries under an [Unreleased] heading; none or empty builds the entry from a commit range at release time
+config.changelog.fragments.used_by: /draft-changelog
+
+config.changelog.fragments_dir.default:
+config.changelog.fragments_dir.doc: Directory fragment files land in when changelog.fragments is dir
+config.changelog.fragments_dir.used_by: /draft-changelog
+
 config.summary.format.default: standup
 config.summary.format.type: enum:standup,slack,paragraph
 config.summary.format.doc: Default shape of a generated summary

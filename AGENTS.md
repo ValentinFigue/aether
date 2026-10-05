@@ -8,13 +8,19 @@ nudge you if you forget.
 
 The lifecycle: **plan → build → review → ship**
 
-```
-critique-plan → bonsai-first → critique-diff / critique-pr → draft-commit / draft-pr
-   (whetstone)      (bonsai)           (temper)                     (cairn)
-```
+| Stage | Command | Plugin |
+|---|---|---|
+| plan | `critique-plan` | whetstone |
+| build | `bonsai-first` | bonsai |
+| review | `critique-diff` · `critique-pr` · `interview-pr` | temper |
+| ship | `draft-commit` · `draft-pr` · `draft-changelog` · `draft-summary` | cairn |
+| outside the lifecycle | `draft-config` | trellis |
 
 `draft-config` (trellis) sits outside the lifecycle: it writes the
 `.aether/config` the others read.
+
+One rule rides along at every stage: `sync-docs` (temper) — keep documentation
+and docstrings true to the code in the same change that alters it.
 
 Every skill degrades gracefully without the `aether` CLI — config reads fall
 back to documented defaults — so these rules work on a machine where aether was
@@ -109,6 +115,7 @@ Never bypass a 🔴 finding without a written reason in the commit message.
 | About to `git commit` | `draft-commit` |
 | About to open or update a PR | `draft-pr` (`--apply` to publish it) |
 | After a version bump in any manifest | `draft-changelog` |
+| A user-visible change lands, in a project whose config declares a fragment model | `draft-changelog` — it prints the fragment file or `[Unreleased]` bullet to write now |
 | After a sprint, milestone, or release | `draft-summary` |
 
 Prime moments: run `draft-commit` right after a review comes back clean, and

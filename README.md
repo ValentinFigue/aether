@@ -337,6 +337,8 @@ critical_paths:   *auth*|*token*|migrations/|*.sql     # pipe-separated
 
 [cairn]
 style: conventional
+changelog.fragments: dir          # dir | unreleased | none — the changelog model
+changelog.fragments_dir: changelog.d/
 ```
 
 Keys outside a section are suite-wide. Sections named after a plugin hold its
@@ -609,8 +611,9 @@ tooling and quote real failures. Without it they read the diff and say so.
 /draft-pr --walkthrough             # force the guided-tour section on
 /draft-pr --no-walkthrough          # force it off
 
-/draft-changelog --version=1.2.0    # entry from the last tag to HEAD
+/draft-changelog --version=1.2.0    # range model: entry from the last tag to HEAD
 /draft-changelog --from=v1.0.0 --to=HEAD
+/draft-changelog                    # fragment project: the fragment to write now
 
 /draft-summary                      # standup notes from the last day
 /draft-summary --format=slack --from=v1.0.0

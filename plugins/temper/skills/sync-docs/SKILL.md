@@ -3,13 +3,16 @@ name: sync-docs
 description: >
   Keep documentation true to the code, in the same change that alters it. Use before or
   while editing a flag, subcommand, config key, default value, exit code, hook matcher,
-  threshold, environment variable or public function signature. This is a rule to follow
-  while editing — it does not generate or regenerate documentation.
+  threshold, environment variable, public function signature or docstring whose behavior
+  contract changed. This is a rule to follow
+  while editing — it does not generate or regenerate documentation. Do not use for writing
+  documentation from scratch — only for keeping existing docs true to a change.
 when_to_use: >
   Triggered when a change alters something a document is likely to state: renaming or
   removing a CLI flag or subcommand, changing a config key or its default, changing an
   exit code or return contract, widening a matcher, moving or deleting a file that docs
-  link to, or changing what a command prints. Also when deleting a feature, since the
+  link to, changing what a command prints, or changing behavior whose docstring still
+  describes the old behavior. Also when deleting a feature, since the
   prose describing it usually outlives the code.
 ---
 
@@ -48,6 +51,7 @@ sentence says so.
 | A matcher, glob or pattern | Docs quoting the pattern verbatim |
 | A file path | Relative markdown links, and commands in fenced blocks |
 | What a command prints | Sample output in fenced blocks, which nobody re-runs |
+| A function's behavior | Its docstring — a docstring that misstates the behavior is worse than none, because callers trust it |
 
 ## Two traps
 

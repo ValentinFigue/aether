@@ -157,7 +157,9 @@ For a one-off skip without modifying the plan, say `/critique-plan --off`.
 
 When editing `.py`, `.ts`, `.tsx`, `.js`, or `.jsx` files, prefer bonsai MCP
 tools over text tools. Text tools miss re-exports, aliased imports, and type
-references — they silently break code when renaming or moving symbols.
+references — they silently break code when renaming or moving symbols. The
+`bonsai-first` skill carries the full tool-to-intent mapping; the table below
+is the short form.
 
 ### Tool reference
 
@@ -244,6 +246,22 @@ sense for a PR: whether the description still matches the code. An omitted chang
 more dangerous than an inaccurate one — a reviewer who trusts the description will not
 go looking for what it does not name.
 
+### When to run /interview-pr
+
+`/interview-pr` is for the PRs a one-shot review fails on: too complex to follow,
+heading for "5K changes: LGTM". It walks the reviewer through the PR area by area,
+asks their opinion one question at a time, and drafts every agreed change request as a
+PR comment — nothing reaches the PR until the reviewer approves posting at the end.
+Run it when asked to be walked through a PR; it is interactive and never advances
+before the reviewer answers.
+
+### Documentation stays true (sync-docs)
+
+When a change alters anything a document is likely to state — a flag, a config key, a
+default, an exit code, a public signature, a docstring whose behavior contract changed —
+the `sync-docs` rule applies: find the documentation that states the old behavior and
+update it in the same change. A document that lies is worse than no document.
+
 ### Severity contract
 
 🔴 Blocker      — do not push; fix first
@@ -269,6 +287,7 @@ pushing, and after shipping.
 | PR description is stale | `/draft-pr --apply` — regenerate it and push it to the PR |
 | After temper finds no blockers | `/draft-commit` immediately — prime moment |
 | After a version bump in any manifest | `/draft-changelog` |
+| A user-visible change lands, in a fragment-based project | `/draft-changelog` — it prints the fragment or `[Unreleased]` bullet to write now |
 | After a sprint, milestone, or release | `/draft-summary --format=slack` or `--format=paragraph` |
 | Multi-area staged diff | `/draft-commit` — cairn will suggest splitting if needed |
 

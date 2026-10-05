@@ -27,6 +27,8 @@ severity: red, yellow
 
 [cairn]
 style: conventional
+changelog.fragments: dir
+changelog.fragments_dir: changelog.d/
 EOF
 cat > "$P/.aether/config" <<'EOF'
 [temper]
@@ -37,6 +39,8 @@ cfg() { ( cd "$P" && HOME="$H" bash -c ". '$LIB'; aether_cfg_get \"\$1\" \"\$2\"
 assert_eq "400"         "$(cfg temper auto_nudge_lines)" "project overrides the key it names"
 assert_eq "red, yellow" "$(cfg temper severity)"         "a sibling key keeps its global value"
 assert_eq "conventional" "$(cfg cairn style)"            "another section is untouched"
+assert_eq "dir"          "$(cfg cairn changelog.fragments)" "a typed enum key resolves its value"
+assert_eq "changelog.d/" "$(cfg cairn changelog.fragments_dir)" "the fragments directory resolves"
 assert_eq "true"        "$(cfg '' enabled)"              "a key outside any section resolves"
 assert_eq ""            "$(cfg temper nope)"             "an undeclared key resolves empty"
 

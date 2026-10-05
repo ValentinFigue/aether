@@ -146,6 +146,16 @@ harder to read than one with three lines in it.
   and are not already covered by the default: migration directories, IaC paths,
   anything named for auth or secrets.
 - `cairn.style` — `plain` if fewer than 60% of commits are Conventional.
+- `cairn.changelog.fragments` — detect the changelog model before writing anything:
+  ```bash
+  grep -n -A2 'tool.towncrier' pyproject.toml 2>/dev/null
+  ls changelog.d/* changes/* changelogs/* 2>/dev/null
+  grep -n '\[Unreleased\]' CHANGELOG.md 2>/dev/null
+  ```
+  - `dir` — `pyproject.toml` has a `[tool.towncrier]` section, or one of `changelog.d/`, `changes/`, `changelogs/` holds fragment-looking files (`*.md`, `*.rst`) whose names carry a type suffix rather than a version. Write `cairn.changelog.fragments=dir` and `cairn.changelog.fragments_dir=<the directory>`.
+  - `unreleased` — `CHANGELOG.md` has an `[Unreleased]` heading. Write `cairn.changelog.fragments=unreleased`.
+  - Neither signal: leave both keys unset — the release-range model is the default and restating it is noise.
+  Record the source in the report (`from [tool.towncrier]`, `from changes/`, `from CHANGELOG.md [Unreleased]`), and only when a value was written.
 
 ---
 
@@ -240,6 +250,9 @@ Wrote .aether/config
     types       feat, fix, docs, refactor   from 200 commits
   [temper]
     auto_nudge_lines  400                  75th percentile of recent commits
+  [cairn]
+    changelog.fragments  dir               from [tool.towncrier]
+    changelog.fragments_dir  changelog.d/  from [tool.towncrier]
 
   Skipped 2 candidates:
     npm run test:watch   watch mode

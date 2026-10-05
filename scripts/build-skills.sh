@@ -82,7 +82,9 @@ description: >
   Draft a commit message from the staged diff (cairn). Use when the user asks
   to write, suggest, or improve a commit message, or before committing staged
   changes. Reads aether config for style, scans the diff for secrets, and
-  prints the message without committing.
+  prints the message without committing. Do not use for PR descriptions
+  (draft-pr), changelog entries (draft-changelog), or summaries spanning
+  several commits (draft-summary).
 user-invocable: true
 argument-hint: "[--style=conventional|plain] [--off]"
 ---
@@ -97,7 +99,8 @@ description: >
   Draft a PR title and description from the branch diff (cairn). Use when the
   user asks to write a PR description or is about to open a pull request.
   Honours .aether templates and rules, scans for secrets, and with --apply
-  pushes the description to the PR via gh.
+  pushes the description to the PR via gh. Do not use for reviewing a PR
+  (critique-pr, interview-pr) or for commit messages (draft-commit).
 user-invocable: true
 argument-hint: "[--base=<branch>] [--style=conventional|plain] [--apply] [--title] [--pr=<n>]"
 ---
@@ -109,10 +112,13 @@ fm_draft_changelog() { cat <<'EOF'
 ---
 name: draft-changelog
 description: >
-  Draft a CHANGELOG entry from a commit range (cairn). Use when the user asks
-  for release notes or a changelog entry. Groups commits into Keep-a-Changelog
-  sections from conventional subjects and prints the entry ready to paste;
-  writes nothing.
+  Draft a CHANGELOG entry from a commit range, from fragment files, or from
+  the [Unreleased] section — whichever the config declares (cairn). Use when
+  the user asks for release notes or a changelog entry, or, in a
+  fragment-based project, when a user-visible change lands. Groups commits
+  into Keep-a-Changelog sections from conventional subjects and prints the
+  entry ready to paste; writes nothing. Do not use for a single commit
+  message (draft-commit) or a status update (draft-summary).
 user-invocable: true
 argument-hint: "[--from=<ref>] [--to=<ref>] [--version=<semver>] [--style=conventional|plain]"
 ---
@@ -127,7 +133,8 @@ description: >
   Draft a standup, Slack, or prose summary of recent commits (cairn). Use when
   the user asks for a status update, standup notes, or a summary of recent
   work. Formats: standup bullets, a conversational Slack paragraph, or formal
-  prose for reports.
+  prose for reports. Do not use for changelogs or release notes
+  (draft-changelog).
 user-invocable: true
 argument-hint: "[--from=<ref>] [--format=standup|slack|paragraph] [--author=<email>]"
 ---
@@ -143,6 +150,8 @@ description: >
   — correctness, design, risk, coverage, documentation — plus a secrets scan
   and an optional measurement pass via aether check. Use when the user asks to
   review, critique, or sanity-check a diff, staged changes, or the last commit.
+  Do not use for an open PR (critique-pr, interview-pr), for a plan
+  (critique-plan), or for explaining code with no diff involved.
 user-invocable: true
 argument-hint: "[--only=<critics>] [--skip=<critics>] [--severity=red,yellow] [--diff=staged|unstaged|all|<ref>] [--target=<file>]"
 ---
@@ -157,7 +166,9 @@ description: >
   Critique an open PR before merge (temper). Temper's five critics plus a
   description-accuracy critic that checks the PR body against the diff, with
   CI state and an optional aether check measurement pass. Use when the user
-  asks to review a pull request before merging.
+  asks to review a pull request before merging. Do not use for uncommitted
+  local changes (critique-diff), or to walk a reviewer through a PR
+  interactively (interview-pr).
 user-invocable: true
 argument-hint: "[--pr=<n>] [--only=<critics>] [--skip=<critics>] [--severity=red,yellow]"
 ---
@@ -175,7 +186,8 @@ description: >
   decision, asks their opinion one question at a time, and drafts agreed change
   requests as PR comments with context, then asks which to post at the end.
   Nothing reaches the PR during the interview. Use when the user asks to be
-  walked through or interviewed about a pull request.
+  walked through or interviewed about a pull request. Do not use for a
+  one-shot review (critique-pr) — explicit request only.
 user-invocable: true
 argument-hint: "[--pr=<n>] [--post] [--comment] [--no-post]"
 ---
@@ -191,7 +203,9 @@ description: >
   implementation, architecture, and risk critics — optionally testing,
   complexity, API contract, and cost/ops — to surface blockers while they are
   still cheap. Use when the user asks to review or critique a plan before
-  implementing it.
+  implementing it. Do not use for reviewing code, diffs, or PRs
+  (critique-diff, critique-pr) — its subject is a plan that has not been
+  implemented yet.
 user-invocable: true
 argument-hint: "[--only=<critics>] [--skip=<critics>] [--severity=red,yellow]"
 ---
@@ -207,7 +221,8 @@ description: >
   Detects test, lint, typecheck and build commands from CI and manifests, git
   conventions, and per-plugin defaults, then writes them with aether config set
   and asks about the gaps. Use when the user asks to set up or bootstrap aether
-  for a project.
+  for a project. Do not use to read a single config value — every skill
+  degrades gracefully without config; this is the one-time bootstrap.
 user-invocable: true
 argument-hint: "[--global] [--dry-run] [--only=<sections>] [--force]"
 ---
@@ -224,7 +239,8 @@ description: >
   .py/.ts/.tsx files. Covers renaming, moving, finding references, signature
   changes, and dead-code detection. Requires the bonsai MCP servers
   (bonsai-py, bonsai-ts); if they are not configured, say so and fall back to
-  text tools.
+  text tools. Do not use for reading files or one-off text edits that do not
+  change code structure.
 ---
 
 EOF

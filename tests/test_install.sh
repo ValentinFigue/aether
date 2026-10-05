@@ -338,6 +338,30 @@ else
   fail "no hook or template names a pre-rename command" "$stale"
 fi
 
+# ── the agent-global prose names every shipped command ────────────────────
+# "referenced commands exist" guards one direction: the prose must not name
+# what is not shipped. This suite guards the other: everything shipped must
+# be named in both agent-global surfaces — AGENTS.md, spliced into every
+# Vibe/Codex install, and templates/CLAUDE.md, spliced into CLAUDE.md. A
+# command missing from them is invisible to the agent that reads its
+# instructions, which is how the stage map drifted before this test existed.
+suite "agent-global prose names every shipped command"
+SHIPPED_ALL=$(cd "$REPO" && {
+  grep -h '^commands:' plugins/*/aether.plugin | sed 's/^commands://; s/\.md//g'
+  grep -h '^skills:' plugins/*/aether.plugin | sed 's/^skills://'
+} | tr ' ' '\n' | grep -v '^$' | sort -u)
+missing_agents=""
+missing_claude=""
+missing_readme=""
+for name in $SHIPPED_ALL; do
+  grep -q "$name" "$REPO/AGENTS.md" || missing_agents="$missing_agents $name"
+  grep -q "$name" "$REPO/templates/CLAUDE.md" || missing_claude="$missing_claude $name"
+  grep -q "$name" "$REPO/README.md" || missing_readme="$missing_readme $name"
+done
+assert_eq "" "$missing_agents" "AGENTS.md names every shipped command and skill"
+assert_eq "" "$missing_claude" "templates/CLAUDE.md names every shipped command and skill"
+assert_eq "" "$missing_readme" "README.md names every shipped command and skill"
+
 # ── per-plugin update must not resurrect old command names ───────────────────
 # cairn/temper/whetstone used to re-download command files by name from the
 # pre-monorepo repos. Those are archived but still serve content, so this would
@@ -620,6 +644,31 @@ for forbidden in watch serve deploy; do
     && pass "draft-config forbids '$forbidden' commands" \
     || fail "draft-config forbids '$forbidden' commands"
 done
+
+# ── the changelog model is config-declared ──────────────────────────────────
+# cairn's config declares whether a project assembles releases from a commit
+# range, from fragment files, or from an [Unreleased] section. The command
+# that does not resolve those keys gives fragment-based projects range output
+# — actively wrong, not merely incomplete.
+suite "draft-changelog knows the fragment models"
+DCH="$REPO/plugins/cairn/.claude/commands/draft-changelog.md"
+dch_body=$(cat "$DCH")
+assert_contains "$dch_body" "changelog.fragments" "it resolves the model key from config"
+assert_contains "$dch_body" "changelog.fragments_dir" "it resolves the fragments directory from config"
+assert_contains "$dch_body" "unreleased" "it names the unreleased model"
+assert_contains "$dch_body" "saved to \`CHANGELOG.md\`" "fragments are deleted only after the entry is saved"
+
+suite "draft-config detects the changelog model"
+assert_contains "$(cat "$DC")" "cairn.changelog.fragments" "it writes the model key"
+assert_contains "$(cat "$DC")" "tool.towncrier" "it detects towncrier projects"
+assert_contains "$(cat "$DC")" "[Unreleased]" "it detects the unreleased convention"
+
+# sync-docs triggers on the artifacts a change can desynchronise; docstrings
+# were missing from that list, so a behavior change could leave its docstring
+# lying with nothing firing.
+suite "sync-docs covers docstrings"
+assert_contains "$(cat "$REPO/plugins/temper/skills/sync-docs/SKILL.md")" \
+  "docstring" "docstrings are in the trigger list"
 
 # ── --dry-run ────────────────────────────────────────────────────────────────
 # A documented flag that has now regressed twice: once when the installers

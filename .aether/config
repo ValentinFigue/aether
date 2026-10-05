@@ -74,7 +74,10 @@ critical_paths: *auth*|*permission*|*token*|migrations/|*alembic*|\.sql|*schema*
 [docs]
 # Which markdown `aether docs` checks. The plugin READMEs are the ones that
 # drifted three releases behind in the 1.5.0 audit, so they are explicitly in.
-paths: README.md BYPASS.md plugins/*/README.md
+# The other prose surfaces that make checkable claims are in too: AGENTS.md
+# (the block every Vibe/Codex install reads), templates/CLAUDE.md (the Claude
+# block), and the two rule skills.
+paths: README.md BYPASS.md AGENTS.md templates/CLAUDE.md plugins/*/README.md plugins/*/skills/*/SKILL.md
 # CHANGELOG is a historical record: it is *supposed* to describe old behaviour,
 # and every retired path and removed flag legitimately appears in it.
 ignore: CHANGELOG.md

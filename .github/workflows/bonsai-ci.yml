@@ -24,7 +24,12 @@ jobs:
         working-directory: plugins/bonsai/py
     steps:
       - uses: actions/checkout@v4
+      # Cached, so the PyPI packages behind uv sync/uvx are downloaded once per
+      # dependency state and restored from the Actions cache on later runs.
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: plugins/bonsai/py/uv.lock
       - run: uvx ruff check src/
       - run: uvx ruff format --check src/
 
@@ -43,6 +48,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: plugins/bonsai/py/uv.lock
+          cache-suffix: py${{ matrix.python-version }}
       - run: uv sync
       - run: uv run pytest tests/ -v
 
@@ -61,6 +69,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: plugins/bonsai/py/uv.lock
+          cache-suffix: py${{ matrix.python-version }}
       - run: uv sync --no-dev
       - name: Help checks
         run: |

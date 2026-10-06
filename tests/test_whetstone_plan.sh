@@ -262,16 +262,26 @@ done
 suite "discovery: .aether/plans/ is the default"
 H=$(mk); P=$(newproj)
 mkdir -p "$P/.aether/plans"
+# Explicit mtimes, not write order: on CI filesystems the two writes land in the
+# same mtime tick and `ls -t` breaks the tie by name — one.md before two.md — so
+# the "newest" assertion flipped. The suite avoids sleeps, so order is pinned
+# with touch instead. one < two < CRITIQUE proves the generated file is skipped
+# despite being the newest thing in the directory.
 printf '# Default\nbody\n' > "$P/.aether/plans/one.md"
+touch -t 202601010001 "$P/.aether/plans/one.md"
 printf '# Default, newer\nbody\n' > "$P/.aether/plans/two.md"
+touch -t 202601010002 "$P/.aether/plans/two.md"
 printf '# Generated\n' > "$P/.aether/plans/CRITIQUE.md"
-printf '# Generated, newer\n' > "$P/.aether/plans/CRITIQUE.md"
+touch -t 202601010003 "$P/.aether/plans/CRITIQUE.md"
 assert_eq ".aether/plans/two.md" "$( cd "$P" && env HOME="$H" bash "$CLI" plan path )" \
   "the newest plan in .aether/plans/ is found, generated files skipped"
 
-# It outranks the legacy directory when both exist.
+# It outranks the legacy directory when both exist — by directory, not mtime:
+# newer.md carries the newest timestamp of all and still loses.
 mkdir -p "$P/.claude/plans"; printf '# Legacy\nbody\n' > "$P/.claude/plans/old.md"
+touch -t 202601010004 "$P/.claude/plans/old.md"
 printf '# Legacy, newest of all\nbody\n' > "$P/.claude/plans/newer.md"
+touch -t 202601010005 "$P/.claude/plans/newer.md"
 assert_eq ".aether/plans/two.md" "$( cd "$P" && env HOME="$H" bash "$CLI" plan path )" \
   ".aether/plans/ outranks a populated .claude/plans/"
 

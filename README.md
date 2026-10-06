@@ -423,7 +423,7 @@ section does not.
 
 ```
 $ aether plan status
-  plan:   ~/.claude/plans/rate-limiting.md
+  plan:   .aether/plans/rate-limiting.md
   ! the plan changed after its last critique   fix: /critique-plan
 ```
 
@@ -653,13 +653,13 @@ git add .aether/config .aether/rules.md && git commit -m "chore: add aether conf
 ```
 
 Committing `.aether/config` is the point — it is a description of the project, so
-your colleagues get the same thresholds and the same test command. `out/` and
-`manifest` are per-developer and should stay ignored.
+your colleagues get the same thresholds and the same test command. `out/`,
+`plans/` and `manifest` are per-developer and should stay ignored.
 
 ### 2. Plan, before writing anything
 
 Describe the change; the agent proposes a plan (Claude Code writes it to
-`.claude/plans/`, the other agents wherever the plan is written). Then:
+`.claude/plans/`, the other agents to `.aether/plans/`, the default). Then:
 
 ```bash
 /critique-plan
@@ -779,7 +779,7 @@ way to stop the noise becomes `# aether:skip` on everything.
 
 ```
 Whetstone: a plan exists but has not been critiqued yet.
-  .claude/plans/p.md
+  .aether/plans/p.md
   Run /critique-plan before committing to surface blockers now.
   Append  # whetstone:skip  to your git command to bypass.
   + temper and cairn also had notes — `aether status --notes` to see them.
@@ -1098,12 +1098,18 @@ executed directly — which is what the dual-mode equivalence tests assert.
 Two layers. The unit suite asserts behaviour; the acceptance script exercises the
 things that only appear in a real install.
 
+The unit files run in parallel — each builds its own throwaway HOME, so they
+share nothing — and each file's output is captured and replayed in order once
+the run ends, with a progress line per file as it finishes. `AETHER_TEST_JOBS=1`
+restores the old serial run, one file at a time with output streamed as it goes.
+
 ```bash
-bash tests/run.sh                  # 710 assertions across 10 files, ~3 min
+bash tests/run.sh                  # 934 assertions across 17 files, ~2 min
 bash tests/run.sh doctor           # one file
 bash tests/run.sh config           # the config, trust and migration tests
 bash tests/run.sh hookcost         # interpreter count, bypass precision, the budget
 bash tests/run.sh rules            # what each gate's rule decides, case by case
+AETHER_TEST_JOBS=1 bash tests/run.sh   # serial: one file at a time, output streamed
 
 bash tests/acceptance.sh           # end to end against a throwaway HOME, ~4 min
 bash tests/acceptance.sh --full     # also build bonsai and handshake its MCP servers

@@ -10,8 +10,10 @@
 # /critique-diff appends TEMPER.md, and enforce-whetstone.sh drops a .nudged
 # sentinel. Per-developer, per-session scratch that means nothing in someone
 # else's checkout. .aether/config and .aether/rules.md are NOT ignored — those
-# are project settings worth committing.
+# are project settings worth committing. Plans are drafts, not settings:
+# .aether/plans/ is where aether looks for them by default.
 /.aether/out/
+/.aether/plans/
 /.aether/manifest
 /.aether/hooks/
 

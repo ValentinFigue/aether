@@ -1098,12 +1098,18 @@ executed directly — which is what the dual-mode equivalence tests assert.
 Two layers. The unit suite asserts behaviour; the acceptance script exercises the
 things that only appear in a real install.
 
+The unit files run in parallel — each builds its own throwaway HOME, so they
+share nothing — and each file's output is captured and replayed in order once
+the run ends, with a progress line per file as it finishes. `AETHER_TEST_JOBS=1`
+restores the old serial run, one file at a time with output streamed as it goes.
+
 ```bash
-bash tests/run.sh                  # 710 assertions across 10 files, ~3 min
+bash tests/run.sh                  # 934 assertions across 17 files, ~2 min
 bash tests/run.sh doctor           # one file
 bash tests/run.sh config           # the config, trust and migration tests
 bash tests/run.sh hookcost         # interpreter count, bypass precision, the budget
 bash tests/run.sh rules            # what each gate's rule decides, case by case
+AETHER_TEST_JOBS=1 bash tests/run.sh   # serial: one file at a time, output streamed
 
 bash tests/acceptance.sh           # end to end against a throwaway HOME, ~4 min
 bash tests/acceptance.sh --full     # also build bonsai and handshake its MCP servers

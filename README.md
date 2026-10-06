@@ -423,7 +423,7 @@ section does not.
 
 ```
 $ aether plan status
-  plan:   ~/.claude/plans/rate-limiting.md
+  plan:   .aether/plans/rate-limiting.md
   ! the plan changed after its last critique   fix: /critique-plan
 ```
 
@@ -653,13 +653,13 @@ git add .aether/config .aether/rules.md && git commit -m "chore: add aether conf
 ```
 
 Committing `.aether/config` is the point — it is a description of the project, so
-your colleagues get the same thresholds and the same test command. `out/` and
-`manifest` are per-developer and should stay ignored.
+your colleagues get the same thresholds and the same test command. `out/`,
+`plans/` and `manifest` are per-developer and should stay ignored.
 
 ### 2. Plan, before writing anything
 
 Describe the change; the agent proposes a plan (Claude Code writes it to
-`.claude/plans/`, the other agents wherever the plan is written). Then:
+`.claude/plans/`, the other agents to `.aether/plans/`, the default). Then:
 
 ```bash
 /critique-plan
@@ -779,7 +779,7 @@ way to stop the noise becomes `# aether:skip` on everything.
 
 ```
 Whetstone: a plan exists but has not been critiqued yet.
-  .claude/plans/p.md
+  .aether/plans/p.md
   Run /critique-plan before committing to surface blockers now.
   Append  # whetstone:skip  to your git command to bypass.
   + temper and cairn also had notes — `aether status --notes` to see them.

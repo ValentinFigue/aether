@@ -81,9 +81,11 @@ If it reports no plan, fall back in this order:
 
 1. `aether plan path` — the recorded plan, if the pointer exists but `status` is unsure
 2. `PLAN.md` or `PLAN_MODE_HANDOFF.md` in the project root
-3. the newest `.md` in `.claude/plans/` or `~/.claude/plans/`, ignoring `CRITIQUE.md`
+3. the newest `.md` in `.aether/plans/` — the default location — ignoring `CRITIQUE.md`
    and `TEMPER.md`
-4. ask the user to paste the plan
+4. the newest `.md` in `.claude/plans/` or `~/.claude/plans/` (Claude Code's plan mode),
+   ignoring `CRITIQUE.md` and `TEMPER.md`
+5. ask the user to paste the plan
 
 ---
 

@@ -357,10 +357,27 @@ AETHER_PLAN_MARKER_END='<!-- /aether:critique -->'
 # sentinel had before v1.1.0.
 aether_plan_pointer() { printf '.aether/out/.plan'; }
 
-# The plan this project is working on: whatever was last written to a plans directory
-# while in it, recorded by post-whetstone.sh. Falling back to the pre-1.4 rule — newest
-# .md in ./.claude/plans/ — so a project that has not written a plan through the hook
-# yet behaves as it always did rather than suddenly going quiet or loud.
+# Where plans live by default: `.aether/plans/`, project-relative for the same
+# reason the pointer is — a global fallback would let one project's plan speak
+# for every other. Claude Code's plan mode cannot be redirected from
+# `.claude/plans/` or `~/.claude/plans/`, so those stay watched too, but this is
+# the location aether names to agents that have no plan mode of their own.
+aether_plans_dir() { printf '.aether/plans'; }
+
+# Newest non-generated .md in one plans directory, empty if it holds none.
+# CRITIQUE.md and TEMPER.md are generated output that happens to live nearby.
+_newest_plan() {
+  ls -t "$1"/*.md 2>/dev/null | while IFS= read -r f; do
+    case "$(basename "$f")" in CRITIQUE.md|TEMPER.md|.*) continue ;; esac
+    printf '%s' "$f"; break
+  done
+}
+
+# The plan this project is working on: whatever was last written to a plans
+# directory while in it, recorded by post-whetstone.sh. Without a pointer, the
+# newest .md in .aether/plans/ — the default — then the pre-1.4 rule, newest
+# .md in ./.claude/plans/, so a project from before the default exists behaves
+# as it always did rather than suddenly going quiet or loud.
 aether_plan_file() {
   local ptr f
   ptr=$(aether_plan_pointer)
@@ -368,10 +385,9 @@ aether_plan_file() {
     f=$(head -1 "$ptr" 2>/dev/null)
     [ -n "$f" ] && [ -f "$f" ] && { printf '%s' "$f"; return 0; }
   fi
-  ls -t .claude/plans/*.md 2>/dev/null | while IFS= read -r f; do
-    case "$(basename "$f")" in CRITIQUE.md|TEMPER.md|.*) continue ;; esac
-    printf '%s' "$f"; break
-  done
+  f=$(_newest_plan "$(aether_plans_dir)")
+  [ -n "$f" ] && { printf '%s' "$f"; return 0; }
+  _newest_plan .claude/plans
 }
 
 # Hash of the plan with its critique block excised — the whole file, not just the part

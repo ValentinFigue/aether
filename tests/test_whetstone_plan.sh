@@ -243,5 +243,62 @@ done
 # It is project-relative, never global — the .nudged bug of v1.1.0.
 [ -f "$H/.aether/out/.plan" ] && fail "the pointer never lands in HOME" \
                              || pass "the pointer never lands in HOME"
+# The default directory is recorded too, and only plans.
+for path in ".aether/plans/d.md" ".aether/plans/CRITIQUE.md" ".aether/plans/.hidden.md"; do
+  rm -f "$P/.aether/out/.plan"; record "$H" "$P" "$path"
+  case "$path" in
+    .aether/plans/d.md) [ -f "$P/.aether/out/.plan" ] \
+      && pass "$path is recorded" || fail "$path is recorded" ;;
+    *) [ -f "$P/.aether/out/.plan" ] && fail "$path is not recorded as a plan" \
+      || pass "$path is not recorded as a plan" ;;
+  esac
+done
+
+# ── 12. .aether/plans/ is the default discovery location ───────────────────
+# Agents without a plan mode (Vibe Code, Codex) have no .claude/plans/ to write,
+# so discovery read "no plan recorded" everywhere aether was used without Claude
+# Code. The default must also outrank a stale legacy directory when both exist,
+# and never outrank the pointer.
+suite "discovery: .aether/plans/ is the default"
+H=$(mk); P=$(newproj)
+mkdir -p "$P/.aether/plans"
+printf '# Default\nbody\n' > "$P/.aether/plans/one.md"
+printf '# Default, newer\nbody\n' > "$P/.aether/plans/two.md"
+printf '# Generated\n' > "$P/.aether/plans/CRITIQUE.md"
+printf '# Generated, newer\n' > "$P/.aether/plans/CRITIQUE.md"
+assert_eq ".aether/plans/two.md" "$( cd "$P" && env HOME="$H" bash "$CLI" plan path )" \
+  "the newest plan in .aether/plans/ is found, generated files skipped"
+
+# It outranks the legacy directory when both exist.
+mkdir -p "$P/.claude/plans"; printf '# Legacy\nbody\n' > "$P/.claude/plans/old.md"
+printf '# Legacy, newest of all\nbody\n' > "$P/.claude/plans/newer.md"
+assert_eq ".aether/plans/two.md" "$( cd "$P" && env HOME="$H" bash "$CLI" plan path )" \
+  ".aether/plans/ outranks a populated .claude/plans/"
+
+# A project with only the legacy directory behaves as before.
+H=$(mk); P=$(newproj); mkdir -p "$P/.claude/plans"
+printf '# Legacy only\nbody\n' > "$P/.claude/plans/solo.md"
+assert_eq ".claude/plans/solo.md" "$( cd "$P" && env HOME="$H" bash "$CLI" plan path )" \
+  "the legacy directory is still read when it is all there is"
+
+# The pointer outranks both directories, and a dangling pointer falls through.
+H=$(mk); P=$(newproj); mkdir -p "$P/.aether/plans" "$P/.claude/plans"
+printf '# Dir plan\nbody\n' > "$P/.aether/plans/dir.md"
+printf '# Legacy\nbody\n' > "$P/.claude/plans/leg.md"
+mkdir -p "$P/.aether/out"; printf '%s\n' "$P/.claude/plans/leg.md" > "$P/.aether/out/.plan"
+assert_eq "$P/.claude/plans/leg.md" "$( cd "$P" && env HOME="$H" bash "$CLI" plan path )" \
+  "the pointer outranks both directories"
+printf '%s\n' "$P/gone.md" > "$P/.aether/out/.plan"
+assert_eq ".aether/plans/dir.md" "$( cd "$P" && env HOME="$H" bash "$CLI" plan path )" \
+  "a dangling pointer falls through to .aether/plans/"
+
+# And the gate judges what discovery finds, end to end.
+H=$(mk); P=$(newproj); mkdir -p "$P/.aether/plans"
+printf '# A plan\n\nDo the thing.\n' > "$P/.aether/plans/feature.md"
+r=$(fire "$H" "$P" "$PUSH")
+assert_eq "1" "${r%%	*}" "an uncritiqued plan in .aether/plans/ nudges at commit"
+critique "$P/.aether/plans/feature.md"
+r=$(fire "$H" "$P" "$PUSH")
+assert_eq "0" "${r%%	*}" "…and a critique inside it satisfies the gate"
 
 summary

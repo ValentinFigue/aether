@@ -53,8 +53,8 @@ plan file as known risks to revisit during temper review.
 
 ### Plan file conventions
 
-Plans live wherever they are written — `.claude/plans/` in a project, or
-`~/.claude/plans/`, which is where Claude Code's plan mode puts them. The critique
+Plans live wherever they are written — `.aether/plans/` in a project is the
+default; Claude Code's plan mode puts them in `.claude/plans/` or `~/.claude/plans/`. The critique
 lives **inside the plan it critiques**:
 
 ```markdown

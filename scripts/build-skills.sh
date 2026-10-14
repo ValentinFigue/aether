@@ -230,6 +230,24 @@ argument-hint: "[--global] [--dry-run] [--only=<sections>] [--force]"
 EOF
 }
 
+fm_sync_main() { cat <<'EOF'
+---
+name: sync-main
+description: >
+  Merge the base branch into the current branch and resolve the conflicts
+  (splice). Use when the user asks to merge main, update or sync the branch
+  with main, or resolve merge conflicts. Reads both sides' intent from the
+  three conflict stages and each side's commits, joins them, verifies through
+  aether check, and commits the merge — never pushes. Do not use for reviewing
+  a diff (critique-diff, critique-pr) or narrating an existing merge
+  (draft-commit).
+user-invocable: true
+argument-hint: "[--base=<branch>] [--rebase] [--dry-run] [--abort] [--off]"
+---
+
+EOF
+}
+
 fm_bonsai_first() { cat <<'EOF'
 ---
 name: bonsai-first
@@ -259,6 +277,7 @@ command_skill critique-pr    plugins/temper/.claude/commands/critique-pr.md "$PA
 command_skill interview-pr   plugins/temper/.claude/commands/interview-pr.md
 command_skill critique-plan  plugins/whetstone/.claude/commands/critique-plan.md "$PATCH_PLAN"
 command_skill draft-config   plugins/trellis/.claude/commands/draft-config.md
+command_skill sync-main       plugins/splice/.claude/commands/sync-main.md
 
 # sync-docs already ships as a portable skill — body and frontmatter are one
 # file, so the generated copy is a plain copy.

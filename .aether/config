@@ -50,7 +50,7 @@ build: npm run build
 # from the 17 commits since the monorepo consolidation, all of which are conventional.
 # Measured from that point rather than over all history: the four imported plugin
 # histories drag the whole-repo figure to 40%, which describes those repos, not this one.
-scopes: cli, config, engine, hooks, install, manifests, readme, trellis, trust
+scopes: cli, config, engine, hooks, install, manifests, readme, splice, trellis, trust
 # Commit types in use → /draft-commit /critique-pr
 types: docs, feat, fix, perf, refactor, test
 # Trailers every commit carries → /draft-commit

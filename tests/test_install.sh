@@ -645,6 +645,22 @@ for forbidden in watch serve deploy; do
     || fail "draft-config forbids '$forbidden' commands"
 done
 
+# splice repeats the proof for a plugin that drives git rather than config:
+# same shape — manifest and command file, nothing else — same install path.
+HP=$(new_home)
+env HOME="$HP" bash "$REPO/bin/aether" install splice global >/dev/null 2>&1
+[ -f "$HP/.claude/commands/sync-main.md" ] \
+  && pass "aether install splice installs its command" \
+  || fail "aether install splice installs its command"
+assert_contains "$(env HOME="$HP" bash "$REPO/bin/aether" status 2>&1)" "splice" \
+  "splice appears in status because it exists"
+assert_contains "$(env HOME="$HP" bash "$REPO/bin/aether" config show splice 2>&1)" "enabled" \
+  "…and its schema is read from the same manifest"
+env HOME="$HP" bash "$REPO/bin/aether" uninstall splice global >/dev/null 2>&1
+[ -f "$HP/.claude/commands/sync-main.md" ] \
+  && fail "aether uninstall splice removes its command" \
+  || pass "aether uninstall splice removes its command"
+
 # ── the changelog model is config-declared ──────────────────────────────────
 # cairn's config declares whether a project assembles releases from a commit
 # range, from fragment files, or from an [Unreleased] section. The command

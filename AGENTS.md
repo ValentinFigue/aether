@@ -6,12 +6,13 @@ intercepts a tool call, so this file plus the installed aether skills are the
 whole discipline. Invoke them deliberately at each checkpoint — nothing will
 nudge you if you forget.
 
-The lifecycle: **plan → build → review → ship**
+The lifecycle: **plan → build → integrate → review → ship**
 
 | Stage | Command | Plugin |
 |---|---|---|
 | plan | `critique-plan` | whetstone |
 | build | `bonsai-first` | bonsai |
+| integrate | `sync-main` | splice |
 | review | `critique-diff` · `critique-pr` · `interview-pr` | temper |
 | ship | `draft-commit` · `draft-pr` · `draft-changelog` · `draft-summary` | cairn |
 | outside the lifecycle | `draft-config` | trellis |
@@ -71,6 +72,20 @@ Reach for it proactively:
   orphaned symbols before committing
 
 Always dry-run a mutating bonsai tool and review the diff before applying.
+
+---
+
+## Integrating — `sync-main`
+
+When the working branch falls behind the base, run `sync-main` rather than
+merging by hand: it merges base into the current branch, resolves the conflicts
+by reading both sides' intent, verifies through `aether check`, and commits —
+never pushing.
+
+Its contract is the part worth knowing by heart: a dirty tree stops the run, a
+conflict it cannot explain keeps its markers and stays unstaged, and `--rebase`
+refuses on a branch with a pushed upstream unless `--force` makes the rewrite
+explicit. `--dry-run` reports the conflicts it would raise, touching nothing.
 
 ---
 

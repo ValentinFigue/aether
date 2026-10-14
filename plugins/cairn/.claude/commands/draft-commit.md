@@ -90,16 +90,32 @@ Rules:
 
 **Step 4 — Output**
 
-Print the commit message(s) in a code block so the user can copy-paste directly into their terminal. Do not run `git commit`. Do not modify any files.
+A commit message is two parts, and git keeps them separate: the **subject** —
+the first line, the only thing `--oneline` and PR commit lists show — and the
+**body**, everything after the first blank line. Preserve that separation in
+everything you print: subject as one line, then the body. Never present the
+message as one quoted string with subject and body separated by embedded
+newlines — shell quoting mangles those, and the subject and body arrive as a
+single merged paragraph.
+
+Print the message so it can be applied with the separation intact:
+
+```
+git commit -m "<subject>" -m "<body>"
+```
+
+Two `-m` flags — git joins them with the blank line. For a message whose body
+is already formatted, write it to a file and use `git commit -F <file>`. Do not
+run `git commit` yourself. Do not modify any files.
 
 If multiple logical groups were found, print each message in its own block with a label:
 
 ```
 Commit 1 — <area>:
-```git commit -m "..."```
+git commit -m "<subject>" -m "<body>"
 
 Commit 2 — <area>:
-```git commit -m "..."```
+git commit -m "<subject>" -m "<body>"
 
 Consider splitting this into separate commits.
 ```

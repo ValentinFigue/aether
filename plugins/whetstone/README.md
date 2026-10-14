@@ -84,7 +84,7 @@ Add [templates/CLAUDE.md](templates/CLAUDE.md) to your project's `CLAUDE.md` to 
 critic run automatically after every plan — no manual invocation needed. Pass
 `--claude-md` during install, or, if you are running the full suite, use the unified
 aether block instead (`bash install.sh --global --claude-md` from the repo root), which
-covers all four plugins at once.
+covers every plugin at once.
 
 With this in place, Claude Code runs `/critique-plan` after presenting any plan and is
 instructed to stop before implementing if 🔴 blockers are found. That is an instruction

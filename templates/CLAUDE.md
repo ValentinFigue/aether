@@ -1,19 +1,20 @@
 <!-- aether:start -->
 # aether suite — Claude Code discipline rules
 
-aether coordinates four plugins across the full development lifecycle:
-**plan → build → review → ship**
+aether coordinates five plugins across the full development lifecycle:
+**plan → build → integrate → review → ship**
 
 ```
-whetstone  →  bonsai  →  temper  →  cairn
- (plan)       (build)    (review)   (ship)
+whetstone  →  bonsai  →  splice  →  temper  →  cairn
+ (plan)       (build)  (integrate) (review)    (ship)
 ```
 
-Each plugin covers one stage. The hooks fire in this order on `git commit`.
-A single bypass (`# aether:skip`) silences all four.
+Each plugin covers one stage. The four hooked plugins fire in this order on
+`git commit`; splice has no hook and runs when invoked. A single bypass
+(`# aether:skip`) silences all four hooks.
 
-A fifth plugin, **trellis**, sits outside the lifecycle: it has no hook and no
-gate, and `/draft-config` writes the config the other four read.
+A sixth plugin, **trellis**, sits outside the lifecycle: it has no hook and no
+gate, and `/draft-config` writes the config the other five read.
 
 ---
 
@@ -200,6 +201,25 @@ Reach for bonsai — without waiting for the hook to nudge — in these situatio
 - Comment-only or docstring-only changes — no symbol impact, text edit is fine
 - Exploratory `grep` to understand a codebase — use raw grep, no structural
   change is being made
+
+---
+
+## Branch integration (splice)
+
+Run `/sync-main` when the working branch falls behind the base and the user
+asks to merge main, update the branch, or resolve conflicts. It merges base
+into the current branch, resolves conflicts by reading what both sides
+intended, verifies through `aether check`, and commits the merge — never
+pushing.
+
+- **Refuses to guess**: a conflict whose sides it cannot explain keeps its
+  markers, stays unstaged, and is reported for the human.
+- **Never pushes, never forces, never auto-stashes.** A dirty tree stops the
+  run; `--abort` rolls back an in-progress merge or rebase.
+- **`--rebase` is gated**: on a branch with a pushed upstream it refuses unless
+  `--force` makes the history rewrite explicit, because the push that follows
+  is a force-push waiting to happen.
+- **`--dry-run`** names the files that would conflict, touching nothing.
 
 ---
 

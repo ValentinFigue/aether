@@ -1,0 +1,19 @@
+# splice — plugin manifest.  See plugins/trellis/aether.plugin for the format.
+
+name: splice
+description: Merges the base branch into the current branch and resolves the conflicts — reads both sides' intent, joins them, verifies, never pushes
+stage: integrate
+scopes: local global
+config_section: splice
+
+commands: sync-main.md
+
+permissions: Bash Read Write
+
+# splice has no gate and no hook — it runs when invoked, like trellis. `enabled`
+# is declared so `aether disable`, which writes this key for every plugin, does
+# not produce something `aether config doctor` calls unknown.
+config.enabled.default: true
+config.enabled.type: bool
+config.enabled.doc: Whether /sync-main will run; splice has no gate, so nothing else is affected
+config.enabled.used_by: /sync-main

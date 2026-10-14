@@ -26,12 +26,13 @@ Two MCP servers, one repo:
 
 ## Works well with
 
-Bonsai is part of a four-tool Claude Code suite:
+Bonsai is part of a five-tool Claude Code suite:
 
 | Plugin | What it does | 
 |---|---|
 | **bonsai** *(this repo)* | AST-safe rename/move/find for Python & TypeScript | 
 | [temper](../temper/) | Pre-commit diff reviewer | 
+| [splice](../splice/) | Merges main into the working branch, resolves the conflicts | 
 | [cairn](../cairn/) | Commit narrator / CHANGELOG writer | 
 | [whetstone](../whetstone/) | Pre-push quality gate | bash 
 

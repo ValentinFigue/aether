@@ -72,11 +72,12 @@ radius unrelated to its size — which is the argument the tool makes, applied t
 |---|---|---|
 | [whetstone](plugins/whetstone/) | Plan | Gates commits when a plan exists but hasn't been critiqued with `/critique-plan` |
 | [bonsai](plugins/bonsai/) | Build | Nudges toward AST tools (pyrename, tsmove, pyfindrefs) instead of sed/grep/mv on source files |
+| [splice](plugins/splice/) | Integrate | `/sync-main` merges the base branch into the working branch, resolves the conflicts by reading both sides' intent, verifies, and never pushes. No hook, no gate — it runs when you ask |
 | [temper](plugins/temper/) | Review | Calls out large or critical-path commits and unreviewed pushes, unbudgeted and on their own; `/critique-pr` reviews a whole PR before merge |
 | [cairn](plugins/cairn/) | Ship | Nudges toward `/draft-commit`, `/draft-pr`, and `/draft-changelog` at every git boundary; `/draft-pr --apply` pushes the description to the PR |
-| [trellis](plugins/trellis/) | Setup | `/draft-config` surveys the repo and writes the config the other four read. No hook, no gate — it runs when you ask |
+| [trellis](plugins/trellis/) | Setup | `/draft-config` surveys the repo and writes the config the other five read. No hook, no gate — it runs when you ask |
 
-And underneath all five, the part that is useful with no gates installed at all:
+And underneath all six, the part that is useful with no gates installed at all:
 **[one declarative place where a repo says how to test, lint, typecheck and build
 itself](#configuration)** — per toolchain in a monorepo, with per-key provenance, behind
 a direnv-style content-hash [trust boundary](#trust). `aether check` is the single point
@@ -1072,7 +1073,7 @@ git commit -m "docs: explain the # aether:skip marker"    # ran every gate; used
 
 ## Installing plugins individually
 
-You can install one plugin instead of all five. Each plugin's installer lives beside it:
+You can install one plugin instead of all six. Each plugin's installer lives beside it:
 
 ```bash
 aether install cairn global --claude-md
@@ -1209,7 +1210,7 @@ bash uninstall.sh --vibe --codex
 
 Or via the CLI: `aether uninstall global --claude-md`
 
-The four plugins stay installed and usable on their own; their slash commands and `PostToolUse` hooks are left in place. Remove them with `plugins/<name>/uninstall.sh`.
+The plugins stay installed and usable on their own; their slash commands and `PostToolUse` hooks are left in place. Remove them with `aether uninstall <name>`.
 
 ---
 

@@ -366,12 +366,13 @@ Run `aether help` for the full reference.
 
 ## Works well with
 
-Cairn is part of a four-tool suite. Each tool covers a different moment in the development loop:
+Cairn is part of a five-tool suite. Each tool covers a different moment in the development loop:
 
 | Tool | When | What it does |
 |---|---|---|
 | [**whetstone**](../whetstone/) | Before you build | Critiques plans — sharpens the approach before any code is written |
 | [**bonsai**](../bonsai/) | While you build | AST-safe rename, move, and dead-code detection for Python and TypeScript |
+| [**splice**](../splice/) | When you fall behind | Merges main into the working branch and resolves the conflicts — reads both sides' intent, never pushes |
 | [**temper**](../temper/) | After you build | Critiques diffs before commit — catches issues while context is live |
 | **cairn** | When you ship | Narrates commits, PRs, and changelogs from the actual diff |
 

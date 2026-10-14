@@ -46,7 +46,7 @@ in its config instead — `~/.aether/config` for every project, or `.aether/conf
 in one repository, which overrides the global value for that key alone:
 
 ```bash
-aether disable global                        # all four, everywhere
+aether disable global                        # every plugin, everywhere
 aether config set cairn.enabled false        # just cairn, just here
 ```
 

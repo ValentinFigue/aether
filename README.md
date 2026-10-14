@@ -145,16 +145,17 @@ be automatic.
 | Strict mode | yes | — | — |
 | Bypass markers | enforced | inert | inert |
 
-The eleven portable skills:
+The twelve portable skills:
 
 - **critics** — `critique-plan` (whetstone), `critique-diff`, `critique-pr`, `interview-pr` (temper)
 - **drafts** — `draft-commit`, `draft-pr`, `draft-changelog`, `draft-summary` (cairn)
+- **integrations** — `sync-main` (splice)
 - **setup** — `draft-config` (trellis)
 - **rules** — `sync-docs` (temper), `bonsai-first` (bonsai)
 
-The nine critics and drafts are `user-invocable`, so they surface as slash
-commands in every agent's picker; the two rules are picked by the model when
-the situation matches. They are the open
+The ten critics, drafts and integrations are `user-invocable`, so they surface
+as slash commands in every agent's picker; the two rules are picked by the
+model when the situation matches. They are the open
 [Agent Skills](https://agentskills.io) format, built by
 [`scripts/build-skills.sh`](scripts/build-skills.sh) from the command files
 under `plugins/` — the same one-source-of-truth model as every other install

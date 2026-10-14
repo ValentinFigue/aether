@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
 usage() {
   cat <<'USAGE'
-aether — install the whetstone → bonsai → temper → cairn suite
+aether — install the whetstone → bonsai → splice → temper → cairn suite
 
   bash install.sh <agent...> [scope] [options]
 

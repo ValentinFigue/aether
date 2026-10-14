@@ -197,14 +197,14 @@ not parse is a wrong resolution: redo it, or leave the markers.
 On the resolved files, through the project's own commands:
 
 ```bash
-aether check <resolved files> --raw
+aether check <resolved files> --raw 2>/dev/null || true
 ```
 
 `aether check` resolves each file to its monorepo area and runs that area's
 test and build commands in its own directory — the only thing that executes
-`[project]` commands. If the CLI is absent or the project is not trusted, say
-that plainly: "verified: nothing — aether absent" — a reading of the diff is
-not a test run.
+`[project]` commands. If the check printed nothing — the CLI is absent or the
+project is not trusted — say that plainly: "verified: nothing — aether
+absent" — a reading of the diff is not a test run.
 
 During a rebase, verify once at the end, not once per replayed commit.
 

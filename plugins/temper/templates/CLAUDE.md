@@ -64,4 +64,15 @@ and drafts every change you agree to request as a PR comment with context, shown
 you as it is written. Nothing reaches the PR during the interview; at the end you are
 asked which drafts to post — all, some, or none. One area per turn; it never advances
 before you answer.
+
+### When to run /address-pr
+
+`/critique-pr` reviews what someone is about to merge; `/address-pr` resolves what
+reviewers already asked. Run it when a PR carries review comments to handle: it gathers
+every comment (resolved and outdated threads identified, not re-addressed), presents
+the resolution plan and waits for approval before any change, and drafts one-to-two-line
+replies in the PR author's own voice — fetched from their past comments, no filler, no
+praise openers — beside the comments they answer. Nothing is posted without `--post`;
+ambiguity becomes a question instead of a guess; each logical change lands as its own
+commit, never one "PR feedback" blob.
 <!-- temper:end -->

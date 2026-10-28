@@ -7,6 +7,32 @@ From 1.0.0 the four plugins live in this repository and share its version
 number. Their individual histories are preserved under
 [Pre-consolidation history](#pre-consolidation-history).
 
+## [Unreleased]
+
+### Added
+
+- **`/address-pr` (temper)** — resolve every reviewer comment on an open PR. Gathers the
+  threads with their resolution state (GraphQL, so resolved and outdated ones are skipped
+  and named, not re-addressed), presents a resolution plan — one conventional commit per
+  logical change, never a "PR feedback" blob, ambiguities as questions — and waits for
+  approval before touching anything. Drafts one-to-two-line replies in the PR author's
+  own voice, matched from their past comments, posted only with `--post`. Persisted to
+  `.aether/out/TEMPER.md` under an `aether:addressed` marker; deliberately does not run
+  `aether review record`, because resolving feedback is not reviewing the new commits.
+
+- **`/watch-pr` (cairn)** — watch an open PR's CI to its end. Bounded polls of
+  `gh pr checks` (never the blocking `--watch` form, never a busy loop; poll count ×
+  interval stated up front, outcomes appended to `.aether/out/CAIRN.md` as they happen),
+  triage that reads the failed logs and looks for the root cause, fixes pushed through
+  the normal gates when in reach. Ends in an alert by default; merging requires an
+  APPROVED reviewDecision, a review record covering the *current* head (a mid-watch fix
+  invalidates the earlier record), and an explicit `--merge` for that PR. A timeout is
+  an alert, not a verdict.
+
+- Both ship as portable skills (thirteenth and fourteenth), with AGENTS.md block
+  sections: `When to run /address-pr` under temper, and the CI-watch contract under
+  cairn.
+
 ## [1.8.0] — 2026-07-31
 
 ### Added

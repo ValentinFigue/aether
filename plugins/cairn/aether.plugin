@@ -14,7 +14,7 @@ scopes: local global
 config_section: cairn
 
 # ── Slash commands ───────────────────────────────────────────────────────────
-commands: draft-commit.md draft-pr.md draft-changelog.md draft-summary.md
+commands: draft-commit.md draft-pr.md draft-changelog.md draft-summary.md watch-pr.md
 legacy_commands: cairn-commit.md cairn-pr.md cairn-changelog.md cairn-summary.md
 
 # ── Hooks ────────────────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ template.legacy_sentinels: docs
 config.enabled.default: true
 config.enabled.type: bool
 config.enabled.doc: Whether cairn's gate and commands run at all
-config.enabled.used_by: /draft-commit /draft-pr /draft-changelog /draft-summary
+config.enabled.used_by: /draft-commit /draft-pr /draft-changelog /draft-summary /watch-pr
 
 config.style.default: conventional
 config.style.type: enum:conventional,plain
@@ -76,6 +76,16 @@ config.pr.walkthrough.default: auto
 config.pr.walkthrough.type: enum:auto,on,off
 config.pr.walkthrough.doc: Whether complex PRs (>300 lines or >10 files) get a Walkthrough section — a guided tour in reading order, core stops tagged
 config.pr.walkthrough.used_by: /draft-pr
+
+config.pr.watch_interval.default: 120
+config.pr.watch_interval.type: int
+config.pr.watch_interval.doc: Seconds between /watch-pr polls of gh pr checks
+config.pr.watch_interval.used_by: /watch-pr
+
+config.pr.watch_timeout.default: 45
+config.pr.watch_timeout.type: int
+config.pr.watch_timeout.doc: Minutes before /watch-pr gives up and alerts with the last known state
+config.pr.watch_timeout.used_by: /watch-pr
 
 config.changelog.style.default: conventional
 config.changelog.style.type: enum:conventional,plain

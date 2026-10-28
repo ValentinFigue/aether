@@ -275,6 +275,23 @@ PR comment — nothing reaches the PR until the reviewer approves posting at the
 Run it when asked to be walked through a PR; it is interactive and never advances
 before the reviewer answers.
 
+### When to run /address-pr
+
+`/critique-pr` reviews what someone is about to merge; `/address-pr` resolves
+what reviewers already asked. Run it when a PR has review comments to handle:
+
+- Reviewers left comments and the user asks to address, handle or resolve them
+- The user wants replies drafted in their own words rather than written by hand
+- A re-review is coming and the threads should be resolved, not just read
+
+Its contract is draft-first: every comment is gathered (resolved and outdated
+threads identified, not re-addressed), the resolution plan is presented and
+waits for approval before any change, and the replies — one or two lines in
+the PR author's voice, no filler, no praise openers — are drafted beside the
+comments they answer and posted only with `--post`. Ambiguity becomes a
+question instead of a guess, and each logical change lands as its own commit:
+never one "PR feedback" blob.
+
 ### Documentation stays true (sync-docs)
 
 When a change alters anything a document is likely to state — a flag, a config key, a
@@ -305,6 +322,7 @@ pushing, and after shipping.
 | About to `git commit` | `/draft-commit` — generate message from staged diff |
 | About to `git push` | `/draft-pr` — generate PR title and description |
 | PR description is stale | `/draft-pr --apply` — regenerate it and push it to the PR |
+| PR is open and under CI | `/watch-pr` — poll the checks, triage failures, alert or merge |
 | After temper finds no blockers | `/draft-commit` immediately — prime moment |
 | After a version bump in any manifest | `/draft-changelog` |
 | A user-visible change lands, in a fragment-based project | `/draft-changelog` — it prints the fragment or `[Unreleased]` bullet to write now |
@@ -317,6 +335,22 @@ pushing, and after shipping.
 - **After any bonsai rename or move**: the diff will be large and noisy. `/draft-commit` reads the intent, not the line count.
 - **Before pushing a branch that diverged more than 3 commits from base**: run `/draft-pr` while context is live.
 - **After any session that touched more than 5 files**: run `/draft-summary` before closing.
+
+### CI watch (watch-pr)
+
+The moment between "PR open + reviewed" and "merge" belongs to `/watch-pr`:
+sleep/poll `gh pr checks` with bounded patience — never the blocking
+`--watch` form, never a busy loop — and when checks fail, review the issues
+and try to find their root cause, not just their names. A fix in reach goes
+through the normal verify/commit/push gates and resumes the watch; anything
+else alerts and stops.
+
+It ends one of two ways: **an alert** — the default, always stating exactly
+what is missing — or **a merge**, and merging requires every one of: an
+APPROVED reviewDecision, a recorded review covering the *current* head (a
+fix pushed during the watch invalidates the earlier record), and an explicit
+`--merge` for this PR. A timeout is an alert, not a verdict; an empty check
+list is not a passing one.
 
 ### Changelog and versioning rules
 

@@ -10,10 +10,23 @@ pushing, and after shipping.
 |---|---|
 | About to `git commit` | `/draft-commit` — generate message from staged diff |
 | About to `git push` | `/draft-pr` — generate PR title and description |
+| PR is open and under CI | `/watch-pr` — poll the checks, triage failures, alert or merge |
 | After temper finds no blockers | `/draft-commit` immediately — prime moment |
 | After a version bump in any manifest | `/draft-changelog` |
 | After a sprint, milestone, or release | `/draft-summary --format=slack` or `--format=paragraph` |
 | Multi-area staged diff | `/draft-commit` — cairn will suggest splitting if needed |
+
+### CI watch (watch-pr)
+
+Between "PR open + reviewed" and "merge", `/watch-pr` owns the wait: sleep/poll
+`gh pr checks` with bounded patience — never the blocking `--watch` form, never a
+busy loop — and when checks fail, review the issues and try to find their root cause,
+not just their names. A fix in reach goes through the normal verify/commit/push gates
+and resumes the watch; anything else alerts and stops. The ending is an alert by
+default, or a merge that requires all of: APPROVED reviewDecision, a recorded review
+covering the *current* head (a mid-watch fix invalidates the earlier record), and an
+explicit `--merge` for this PR. A timeout is an alert, not a verdict; an empty check
+list is not a passing one.
 
 ### Proactive triggers — reach for cairn without waiting for a nudge
 

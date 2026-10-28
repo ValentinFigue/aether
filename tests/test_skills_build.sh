@@ -5,7 +5,7 @@
 # The committed truth is plugins/; .agents/skills/ is gitignored output, the
 # same as .claude/commands/. So there is no drift to check against — what needs
 # guarding is the generator's contract: given the plugin sources, it must
-# produce twelve skills with portable frontmatter, descriptions that route
+# produce fourteen skills with portable frontmatter, descriptions that route
 # (a positive trigger plus a Do-not-use line, since third-party skills
 # installed alongside aether overlap several of these), no Claude-specific
 # placeholders, and the three targeted patches that keep the skills honest on
@@ -26,7 +26,7 @@ AETHER_SKILLS_OUT="$OUT/skills" bash "$REPO/scripts/build-skills.sh" >/dev/null
 # ── Inventory ────────────────────────────────────────────────────────────────
 
 count=$(find "$OUT/skills" -name SKILL.md | wc -l | tr -d ' ')
-assert_eq "12" "$count" "all twelve skills are generated"
+assert_eq "14" "$count" "all fourteen skills are generated"
 
 missing=""
 for f in "$OUT"/skills/*/SKILL.md; do
@@ -79,12 +79,12 @@ assert_eq "" "$residue" "no \$ARGUMENTS placeholders survive the port"
 # model-selected only.
 invocable=""
 for s in draft-commit draft-pr draft-changelog draft-summary \
-         critique-diff critique-pr critique-plan interview-pr draft-config \
-         sync-main; do
+         critique-diff critique-pr critique-plan interview-pr address-pr \
+         watch-pr draft-config sync-main; do
   grep -q '^user-invocable: true' "$OUT/skills/$s/SKILL.md" \
     || invocable="$invocable $s"
 done
-assert_eq "" "$invocable" "all ten commands stay user-invocable"
+assert_eq "" "$invocable" "all twelve commands stay user-invocable"
 
 # On Claude Code the hooks make these calls safe to assume; elsewhere the CLI
 # may be absent, so the generated text must degrade instead of failing.
@@ -114,6 +114,32 @@ assert_contains "$pr_skill" \
 assert_contains "$(cat "$OUT/skills/draft-changelog/SKILL.md")" \
   "changelog.fragments" \
   "the fragment model prose survives the port"
+
+# address-pr's two load-bearing behaviours: thread state comes from GraphQL
+# (REST cannot see resolved threads), and nothing is posted without --post.
+address_skill=$(cat "$OUT/skills/address-pr/SKILL.md")
+assert_contains "$address_skill" \
+  "reviewThreads" \
+  "address-pr reads thread state through GraphQL"
+assert_contains "$address_skill" \
+  "without it nothing leaves the session" \
+  "address-pr keeps its draft gate through the port"
+assert_contains "$address_skill" \
+  "Never one \"PR feedback\" blob" \
+  "address-pr keeps the slice-per-change commit rule"
+
+# watch-pr's merge gate is the safety contract; a port that dropped it would
+# turn --merge into an unconditional green-light.
+watch_skill=$(cat "$OUT/skills/watch-pr/SKILL.md")
+assert_contains "$watch_skill" \
+  "APPROVED" \
+  "watch-pr requires an approved reviewDecision"
+assert_contains "$watch_skill" \
+  "current" \
+  "watch-pr requires the review record to cover the current head"
+assert_contains "$watch_skill" \
+  "not used" \
+  "watch-pr refuses the blocking --watch form"
 
 # The two rules are not user-invocable: the model picks them when the
 # situation matches, which is the whole difference between a command and a rule.

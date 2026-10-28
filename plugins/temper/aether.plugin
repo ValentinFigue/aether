@@ -9,7 +9,7 @@ config_section: temper
 # ── Skills ───────────────────────────────────────────────────────────────────
 skills: sync-docs
 
-commands: critique-diff.md critique-pr.md interview-pr.md
+commands: critique-diff.md critique-pr.md interview-pr.md address-pr.md
 legacy_commands: temper.md
 
 # temper has no PostToolUse hook. Its gate is inserted at the front of the
@@ -31,7 +31,7 @@ template.has_own_sentinels: true
 config.enabled.default: true
 config.enabled.type: bool
 config.enabled.doc: Whether temper's gate and commands run at all
-config.enabled.used_by: /critique-diff /critique-pr
+config.enabled.used_by: /critique-diff /critique-pr /address-pr
 
 config.critics.default: correctness, design, risk, coverage, docs
 config.critics.doc: Which critics run by default — correctness, design, risk, coverage, docs

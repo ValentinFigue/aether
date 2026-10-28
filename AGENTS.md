@@ -13,8 +13,8 @@ The lifecycle: **plan → build → integrate → review → ship**
 | plan | `critique-plan` | whetstone |
 | build | `bonsai-first` | bonsai |
 | integrate | `sync-main` | splice |
-| review | `critique-diff` · `critique-pr` · `interview-pr` | temper |
-| ship | `draft-commit` · `draft-pr` · `draft-changelog` · `draft-summary` | cairn |
+| review | `critique-diff` · `critique-pr` · `interview-pr` · `address-pr` | temper |
+| ship | `draft-commit` · `draft-pr` · `draft-changelog` · `draft-summary` · `watch-pr` | cairn |
 | outside the lifecycle | `draft-config` | trellis |
 
 `draft-config` (trellis) sits outside the lifecycle: it writes the
@@ -113,6 +113,14 @@ interview; at the end the reviewer is asked which drafts to post. Run it
 deliberately when asked to be walked through a PR; it is interactive and never
 advances before the reviewer answers.
 
+`address-pr` resolves what reviewers already asked: every comment on the PR,
+gathered with its thread state so resolved and outdated ones are skipped and
+named, mapped to a resolution plan — one conventional commit per logical
+change, ambiguities as questions — that waits for approval before anything
+changes. The replies it drafts are one or two lines in the PR author's own
+voice, matched from their past comments, and nothing is posted without
+`--post`.
+
 Severity contract:
 
 - 🔴 Blocker — do not push; fix first
@@ -129,6 +137,7 @@ Never bypass a 🔴 finding without a written reason in the commit message.
 |---|---|
 | About to `git commit` | `draft-commit` |
 | About to open or update a PR | `draft-pr` (`--apply` to publish it) |
+| PR is open and under CI | `watch-pr` — poll the checks, triage failures, alert or merge |
 | After a version bump in any manifest | `draft-changelog` |
 | A user-visible change lands, in a project whose config declares a fragment model | `draft-changelog` — it prints the fragment file or `[Unreleased]` bullet to write now |
 | After a sprint, milestone, or release | `draft-summary` |
@@ -136,6 +145,12 @@ Never bypass a 🔴 finding without a written reason in the commit message.
 Prime moments: run `draft-commit` right after a review comes back clean, and
 `draft-pr` while the branch's context is still live. Neither command commits,
 pushes, or writes anything unless `--apply` was passed.
+
+`watch-pr` owns the wait between review and merge: bounded polls of
+`gh pr checks`, triage that reads the failed logs and looks for the root
+cause, an alert by default. Merging requires an APPROVED reviewDecision, a
+review record covering the *current* head, and an explicit `--merge` for that
+PR — a timeout is an alert, not a verdict.
 
 ---
 

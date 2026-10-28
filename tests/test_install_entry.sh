@@ -55,7 +55,7 @@ assert_exit 1 "$rc" "--dry-run with --claude --vibe refuses to run"
 
 entry --vibe >/dev/null
 n=$(find "$H/.vibe/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
-assert_eq "12" "$n" "--vibe installs the twelve skills"
+assert_eq "14" "$n" "--vibe installs the fourteen skills"
 if [ -e "$H/.claude" ]; then
   fail "--vibe alone touches nothing Claude-related"
 else
@@ -85,8 +85,8 @@ fi
 entry --claude --vibe --codex --global --no-bonsai >/dev/null 2>&1
 vibe_n=$(find "$H/.vibe/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
 codex_n=$(find "$H/.codex/skills" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')
-assert_eq "12" "$vibe_n" "all three agents compose: vibe installs"
-assert_eq "12" "$codex_n" "all three agents compose: codex installs"
+assert_eq "14" "$vibe_n" "all three agents compose: vibe installs"
+assert_eq "14" "$codex_n" "all three agents compose: codex installs"
 
 unentry --vibe --codex >/dev/null
 if [ -d "$H/.vibe/skills" ] || [ -d "$H/.codex/skills" ]; then

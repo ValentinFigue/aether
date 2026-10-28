@@ -145,15 +145,15 @@ be automatic.
 | Strict mode | yes | — | — |
 | Bypass markers | enforced | inert | inert |
 
-The twelve portable skills:
+The fourteen portable skills:
 
-- **critics** — `critique-plan` (whetstone), `critique-diff`, `critique-pr`, `interview-pr` (temper)
-- **drafts** — `draft-commit`, `draft-pr`, `draft-changelog`, `draft-summary` (cairn)
+- **critics** — `critique-plan` (whetstone), `critique-diff`, `critique-pr`, `interview-pr`, `address-pr` (temper)
+- **drafts** — `draft-commit`, `draft-pr`, `draft-changelog`, `draft-summary`, `watch-pr` (cairn)
 - **integrations** — `sync-main` (splice)
 - **setup** — `draft-config` (trellis)
 - **rules** — `sync-docs` (temper), `bonsai-first` (bonsai)
 
-The ten critics, drafts and integrations are `user-invocable`, so they surface
+The twelve critics, drafts and integrations are `user-invocable`, so they surface
 as slash commands in every agent's picker; the two rules are picked by the
 model when the situation matches. They are the open
 [Agent Skills](https://agentskills.io) format, built by
@@ -580,6 +580,14 @@ imports that a text replace silently misses. Always dry-run a mutating tool firs
 /interview-pr --post                # …posting each agreed change as it is agreed
 /interview-pr --comment             # agreed changes as plain comments, not verdicts
 /interview-pr --no-post             # drafts only; no posting, no asking at the end
+
+/address-pr                         # resolve every reviewer comment, plan first
+/address-pr --post                  # …posting the approved replies in-thread
+/address-pr --no-fix                # gather, plan and draft; implement nothing
+
+/watch-pr                           # poll CI to its end, then alert
+/watch-pr --merge                   # …or merge once green, approved, and covered
+/watch-pr --interval=60 --timeout=20
 ```
 
 The five critics are Correctness, Design, Risk, Coverage and Documentation — the last
@@ -595,6 +603,20 @@ important decision, and asks their opinion one question at a time. Every agreed
 change request is drafted as a PR comment with context, shown to the reviewer as it
 is written, and nothing reaches the PR until the end of the interview, when the
 reviewer is asked which drafts to post — all, some, or none.
+
+`/address-pr` is the loop after those reviews: it gathers every comment on the PR —
+threads with their resolution state, so resolved and outdated ones are skipped and
+named, not re-addressed — maps each actionable one to a change, groups them into
+conventional commits (never a "PR feedback" blob), and presents that plan for approval
+before touching anything. The replies it drafts are one or two lines in the PR author's
+own voice, matched from their past comments, and nothing is posted without `--post`.
+
+`/watch-pr` owns the wait between review and merge: bounded polls of `gh pr checks`
+(never the blocking `--watch` form), triage that reads the failed logs and looks for
+the root cause, fixes pushed through the normal gates when in reach — and an alert by
+default. Merging needs an APPROVED reviewDecision, a review record that covers the
+*current* head, and an explicit `--merge` for that PR; a timeout is an alert, not a
+verdict.
 
 With `[project]` set and the repo trusted, Correctness and Coverage run your real
 tooling and quote real failures. Without it they read the diff and say so.

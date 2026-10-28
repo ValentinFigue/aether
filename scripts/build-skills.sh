@@ -195,6 +195,41 @@ argument-hint: "[--pr=<n>] [--post] [--comment] [--no-post]"
 EOF
 }
 
+fm_address_pr() { cat <<'EOF'
+---
+name: address-pr
+description: >
+  Resolve every reviewer comment on an open PR — gather the threads, plan
+  the fixes, and draft short replies in the PR author's own words (temper).
+  Use when the user asks to address, handle, or resolve PR feedback or review
+  comments, or wants the replies drafted in their voice. The plan waits for
+  approval before anything changes, and drafts are posted only with --post.
+  Do not use to review a PR before merging (critique-pr), to walk a reviewer
+  through one (interview-pr), or to watch its CI (watch-pr).
+user-invocable: true
+argument-hint: "[--pr=<n>] [--post] [--no-fix]"
+---
+
+EOF
+}
+
+fm_watch_pr() { cat <<'EOF'
+---
+name: watch-pr
+description: >
+  Watch an open PR's CI to its end — poll gh pr checks with bounded patience,
+  triage failures and find their root cause, then alert, or merge when
+  everything is approved (cairn). Use when the user asks to watch, wait for,
+  or babysit CI on a pull request, or to merge once green with --merge
+  given for that PR. Do not use to draft a PR description (draft-pr), to
+  resolve reviewer comments (address-pr), or to review a PR (critique-pr).
+user-invocable: true
+argument-hint: "[--pr=<n>] [--interval=<sec>] [--timeout=<min>] [--merge] [--no-fix]"
+---
+
+EOF
+}
+
 fm_critique_plan() { cat <<'EOF'
 ---
 name: critique-plan
@@ -275,6 +310,8 @@ command_skill draft-summary  plugins/cairn/.claude/commands/draft-summary.md
 command_skill critique-diff  plugins/temper/.claude/commands/critique-diff.md "$PATCH_DIFF_RECORD"
 command_skill critique-pr    plugins/temper/.claude/commands/critique-pr.md "$PATCH_PR"
 command_skill interview-pr   plugins/temper/.claude/commands/interview-pr.md
+command_skill address-pr     plugins/temper/.claude/commands/address-pr.md
+command_skill watch-pr       plugins/cairn/.claude/commands/watch-pr.md
 command_skill critique-plan  plugins/whetstone/.claude/commands/critique-plan.md "$PATCH_PLAN"
 command_skill draft-config   plugins/trellis/.claude/commands/draft-config.md
 command_skill sync-main       plugins/splice/.claude/commands/sync-main.md
